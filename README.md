@@ -1,36 +1,47 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Routely
 
-## Getting Started
+Routely is an open source, self-hosted app orchestrator for solo developers. It combines a 9Router-style single command with a Dokploy-style path toward VPS app management.
 
-First, run the development server:
+Current skeleton behavior:
+
+- `routely` starts the daemon and dashboard.
+- Dashboard runs at `http://localhost:3030`.
+- Daemon runs at `http://127.0.0.1:9977`.
+- SQLite state is created at `.routely/routely.db`.
+- `routely init`, `routely add`, and `routely ps` manage the local app registry.
+- Command-driver apps can be registered and started locally.
+
+## Development
+
+Use npm from the repository root:
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Useful checks:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```bash
+npm run build --workspace apps/cli
+npm run lint
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+After changing the CLI, rebuild and reinstall the local global command:
 
-## Learn More
+```bash
+cd apps/cli
+npm run build
+npm i -g .
+```
 
-To learn more about Next.js, take a look at the following resources:
+## CLI
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+routely init
+routely add /path/to/app --name web --command "npm run dev" --port 3000
+routely ps
+routely
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Do not use port `20128`; that port is reserved for 9Router in the local development environment.

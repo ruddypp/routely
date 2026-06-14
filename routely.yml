@@ -1,0 +1,13 @@
+version: 1
+name: routely-local
+
+dashboard:
+  port: 3030
+
+apps:
+  - name: hello-command
+    preset: node
+    driver: command
+    path: ./examples/hello-command
+    dev: npm run dev
+    port: 4173
