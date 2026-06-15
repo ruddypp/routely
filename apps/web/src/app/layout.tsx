@@ -17,6 +17,11 @@ export const metadata: Metadata = {
   description: "Local Routely app orchestrator dashboard",
 };
 
+export const viewport = {
+  colorScheme: "dark" as const,
+  themeColor: "#121212",
+};
+
 export default function RootLayout({
   children,
 }: Readonly<{

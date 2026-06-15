@@ -1,26 +1,47 @@
 @import "tailwindcss";
 
+/*
+ * Routely dashboard theme — Spotify-inspired "content-first darkness".
+ * See DESIGN.md. Near-black surfaces, single green functional accent.
+ */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --background: #121212;
+  --surface: #181818;
+  --surface-raised: #1f1f1f;
+  --surface-card: #252525;
+  --foreground: #ffffff;
+  --muted: #b3b3b3;
+  --border: #4d4d4d;
+  --accent: #1ed760;
+  --accent-border: #1db954;
+  --negative: #f3727f;
+  --warning: #ffa42b;
+  --info: #539df5;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-card: var(--surface-card);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-muted: var(--muted);
+  --color-border: var(--border);
+  --color-accent: var(--accent);
+  --color-accent-border: var(--accent-border);
+  --color-negative: var(--negative);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --font-sans: var(--font-geist-sans), "Helvetica Neue", Helvetica, Arial, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
+html,
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+  font-family: var(--font-sans);
 }
