@@ -42,6 +42,7 @@ Semua app, service, proxy, log, metric, dan deployment bisa dikelola dari satu t
 - [Risks and Tradeoffs](./11-risks-and-tradeoffs.md)
 - [Development Setup](./12-development-setup.md)
 - [Current Setup Status](./13-current-setup-status.md)
+- [End-to-End Implementation Plan](./14-implementation-plan.md)
 
 ## Feature Specs
 
