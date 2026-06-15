@@ -70,3 +70,9 @@ export function appToPublicDto(app) {
     updatedAt: app.updated_at
   };
 }
+
+export {
+  WORKSPACE_CONFIG_FILENAMES,
+  resolveWorkspaceConfigPath,
+  loadWorkspaceConfig
+} from "./config.js";

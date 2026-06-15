@@ -96,3 +96,11 @@ export const APP_STATUSES: RoutelyAppStatus[];
 export function normalizeWorkspaceConfig(input?: RoutelyWorkspaceConfigInput): RoutelyWorkspaceConfig;
 export function normalizeAppInput(input: RoutelyAppInput): NormalizedRoutelyAppInput;
 export function appToPublicDto(app: RoutelyAppRecord): RoutelyAppDto;
+
+export const WORKSPACE_CONFIG_FILENAMES: string[];
+export function resolveWorkspaceConfigPath(root: string): string | null;
+export interface LoadedWorkspaceConfig {
+  config: RoutelyWorkspaceConfig;
+  configPath: string;
+}
+export function loadWorkspaceConfig(root: string): LoadedWorkspaceConfig | null;

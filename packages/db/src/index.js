@@ -1,6 +1,6 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, isAbsolute, resolve } from "node:path";
 import { normalizeAppInput } from "@routely/core";
 
 export const routelyDbVersion = "0.1.0";
@@ -148,6 +148,56 @@ export function upsertApp(db, input) {
   }
 
   return getAppByName(db, app.name);
+}
+
+/**
+ * Synchronize a loaded workspace config (routely.yml) into the apps table.
+ *
+ * - Apps and services defined in the config are upserted.
+ * - Relative `path` values are resolved against the config file's directory so
+ *   the registry always stores absolute paths.
+ * - Runtime `status` of an already-known app is preserved; config only changes
+ *   declarative fields (driver, command, port, etc.), never live state.
+ *
+ * Returns the list of synced app names.
+ */
+export function syncWorkspaceConfig(db, loaded) {
+  if (!loaded || !loaded.config) {
+    return [];
+  }
+
+  const baseDir = loaded.configPath ? dirname(loaded.configPath) : process.cwd();
+  const entries = [...(loaded.config.apps || []), ...(loaded.config.services || [])];
+  const synced = [];
+
+  const apply = db.transaction((items) => {
+    for (const item of items) {
+      const existing = getAppByName(db, item.name);
+      const resolvedPath =
+        item.path && !isAbsolute(item.path) ? resolve(baseDir, item.path) : item.path || null;
+
+      upsertApp(db, {
+        ...item,
+        path: resolvedPath,
+        // Keep the live runtime status; fall back to the config default otherwise.
+        status: existing ? existing.status : item.status
+      });
+
+      synced.push(item.name);
+    }
+  });
+
+  apply(entries);
+  return synced;
+}
+
+export function getAppById(db, appId) {
+  return db.prepare("SELECT * FROM apps WHERE id = ?").get(appId) || null;
+}
+
+export function deleteApp(db, appId) {
+  const result = db.prepare("DELETE FROM apps WHERE id = ?").run(appId);
+  return result.changes > 0;
 }
 
 export function updateAppStatus(db, appId, status) {

@@ -2,7 +2,7 @@
 
 Version: 0.1  
 Status: Active setup note  
-Last updated: 2026-06-15  
+Last updated: 2026-06-16
 Environment: Fedora Linux, npm, Node.js via NVM
 
 ## English
@@ -54,6 +54,8 @@ Lokasi dokumentasi:
 - Docker is installed and available from the user's normal terminal session.
 - CLI is buildable with TypeScript.
 - CLI global command is installed locally through npm global install.
+- CLI workspace resolution now separates the Routely install root from the active user workspace root.
+- `ROUTELY_WORKSPACE_ROOT` can override the active workspace for tests and scripted runs.
 
 ## Current Structure
 
@@ -114,7 +116,21 @@ Current dev root:
 /home/ruddypp/Documents/work/routely
 ```
 
-This means `routely` can be run from any directory and still start the local Routely monorepo.
+This means `routely` can be run from any directory while still knowing where the local Routely monorepo is installed.
+
+The active app workspace is now resolved separately:
+
+```text
+default workspace: current working directory
+override:          ROUTELY_WORKSPACE_ROOT
+```
+
+Workspace files are created and read from the active workspace:
+
+```text
+<workspace>/routely.yml
+<workspace>/.routely/routely.db
+```
 
 ## Daily Development Commands
 
@@ -170,11 +186,35 @@ run command
 ## Verification Already Done
 
 - `npm run build --workspace apps/cli` completed successfully.
+- `npm run test --workspace apps/cli` completed successfully for CLI path resolution tests.
+- `npm run lint` completed successfully.
 - `npm i -g .` from `apps/cli` completed successfully.
 - `which routely` resolves to the NVM global binary path.
 - `readlink -f $(which routely)` resolves to `apps/cli/dist/index.js`.
 - `apps/cli/dist/dev-root.json` points to `/home/ruddypp/Documents/work/routely`.
 - Earlier dashboard and daemon checks returned HTTP 200 when run outside the restricted tool session.
+- A temp workspace smoke test created `routely.yml` and `.routely/routely.db` outside the Routely repo.
+- A daemon smoke test with `ROUTELY_WORKSPACE_ROOT` returned the temp workspace and database path from `/health`.
+
+## Environment Check
+
+Current verified local tool versions:
+
+```text
+Node.js:        v24.12.0
+npm:            11.6.2
+Git:            2.54.0
+Docker:         29.5.3
+Docker Compose: v5.1.4
+```
+
+Ports checked as free during the latest setup audit:
+
+```text
+3030  dashboard
+9977  daemon
+4173  hello-command example
+```
 
 ## Known Notes
 

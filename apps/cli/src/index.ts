@@ -1,59 +1,40 @@
 #!/usr/bin/env node
 
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
-import { DEFAULT_DAEMON_PORT, DEFAULT_DASHBOARD_PORT, appToPublicDto, type RoutelyAppRecord } from "@routely/core";
+import {
+  DEFAULT_DAEMON_PORT,
+  DEFAULT_DASHBOARD_PORT,
+  appToPublicDto,
+  loadWorkspaceConfig,
+  type RoutelyAppRecord
+} from "@routely/core";
 import {
   initializeRoutely,
   listApps,
   recordRuntimeStart,
   recordRuntimeStop,
+  syncWorkspaceConfig,
   updateAppStatus,
   upsertApp
 } from "@routely/db";
 import { startCommandApp } from "@routely/drivers";
+import { resolveInstallRoot, resolveWorkspaceRoot } from "./paths.js";
 
 type ChildProcess = ReturnType<typeof spawn>;
 type RunningApp = { app: RoutelyAppRecord; child: ChildProcess };
+type RoutelyDb = ReturnType<typeof initializeRoutely>["db"];
 
 const cliFile = fileURLToPath(import.meta.url);
 const cliDir = dirname(cliFile);
 const argv = process.argv.slice(2);
 const command = argv[0] || "up";
 const invocationCwd = process.cwd();
-
-function readDevRoot(): string | null {
-  const rootFile = resolve(cliDir, "dev-root.json");
-
-  if (!existsSync(rootFile)) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(readFileSync(rootFile, "utf8")) as { root?: string };
-    return parsed.root || null;
-  } catch {
-    return null;
-  }
-}
-
-function resolveRoot(): string {
-  if (process.env.ROUTELY_REPO_ROOT) {
-    return process.env.ROUTELY_REPO_ROOT;
-  }
-
-  const devRoot = readDevRoot();
-  if (devRoot) {
-    return devRoot;
-  }
-
-  return resolve(cliDir, "../../..");
-}
-
-const root = resolveRoot();
+const installRoot = resolveInstallRoot(cliDir);
+const workspaceRoot = resolveWorkspaceRoot(invocationCwd);
 
 function parseFlags(args: string[]): { positionals: string[]; flags: Record<string, string | boolean> } {
   const positionals: string[] = [];
@@ -84,10 +65,15 @@ function parseFlags(args: string[]): { positionals: string[]; flags: Record<stri
 
 function run(name: string, commandName: string, args: string[], env: Record<string, string> = {}): ChildProcess {
   const child = spawn(commandName, args, {
-    cwd: root,
+    cwd: installRoot,
     stdio: "inherit",
     shell: false,
-    env: { ...process.env, ROUTELY_REPO_ROOT: root, ...env }
+    env: {
+      ...process.env,
+      ROUTELY_REPO_ROOT: installRoot,
+      ROUTELY_WORKSPACE_ROOT: workspaceRoot,
+      ...env
+    }
   });
 
   child.on("exit", (code) => {
@@ -103,8 +89,9 @@ function printHelp(): void {
   console.log(`Routely
 
 Usage:
-  routely                  Start daemon, dashboard, and registered command apps
+  routely                  Sync routely.yml, then start daemon, dashboard, and command apps
   routely init             Create .routely/routely.db and a starter routely.yml
+  routely sync             Load routely.yml into the app registry
   routely ps               List registered apps
   routely add [path] --name <name> --command <command> [--port <port>] [--preset <preset>]
 
@@ -113,8 +100,29 @@ Defaults:
   Daemon:    http://127.0.0.1:9977`);
 }
 
+/**
+ * Load routely.yml (if present) and sync its apps/services into the registry.
+ * Returns the number of synced entries, or null when no config file exists.
+ * Parse/validation errors are reported but never abort the caller.
+ */
+function syncConfig(db: RoutelyDb): number | null {
+  try {
+    const loaded = loadWorkspaceConfig(workspaceRoot);
+
+    if (!loaded) {
+      return null;
+    }
+
+    const synced = syncWorkspaceConfig(db, loaded);
+    return synced.length;
+  } catch (error) {
+    console.error(`Could not load routely.yml: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
 function ensureStarterConfig(): string {
-  const configPath = resolve(root, "routely.yml");
+  const configPath = resolve(workspaceRoot, "routely.yml");
 
   if (!existsSync(configPath)) {
     writeFileSync(
@@ -128,17 +136,39 @@ function ensureStarterConfig(): string {
 }
 
 function initCommand(): void {
-  const { databasePath } = initializeRoutely(root);
+  const { db, databasePath } = initializeRoutely(workspaceRoot);
   const configPath = ensureStarterConfig();
+  const synced = syncConfig(db);
 
   console.log("Routely initialized.");
-  console.log(`Root:      ${root}`);
+  console.log(`Workspace: ${workspaceRoot}`);
   console.log(`Database:  ${databasePath}`);
   console.log(`Config:    ${configPath}`);
+  if (synced !== null) {
+    console.log(`Synced:    ${synced} app(s) from routely.yml`);
+  }
+  db.close();
+}
+
+function syncCommand(): void {
+  const { db } = initializeRoutely(workspaceRoot);
+  const synced = syncConfig(db);
+
+  if (synced === null) {
+    console.log("No routely.yml found. Run `routely init` to create one.");
+  } else {
+    console.log(`Synced ${synced} app(s) from routely.yml.`);
+    for (const app of listApps(db).map(appToPublicDto)) {
+      const port = app.port ? `:${app.port}` : "-";
+      console.log(`  ${app.name}\t${app.driver}\t${port}\t${app.path || "-"}`);
+    }
+  }
+
+  db.close();
 }
 
 function psCommand(): void {
-  const { db, databasePath } = initializeRoutely(root);
+  const { db, databasePath } = initializeRoutely(workspaceRoot);
   const apps = listApps(db).map(appToPublicDto);
 
   console.log(`Database: ${databasePath}`);
@@ -169,7 +199,7 @@ function addCommand(args: string[]): void {
     process.exit(1);
   }
 
-  const { db } = initializeRoutely(root);
+  const { db } = initializeRoutely(workspaceRoot);
   const saved = upsertApp(db, {
     name,
     type: "app",
@@ -208,7 +238,8 @@ function stopProcess(child: ChildProcess): void {
 }
 
 function upCommand(): void {
-  const { db } = initializeRoutely(root);
+  const { db } = initializeRoutely(workspaceRoot);
+  syncConfig(db);
   const dashboardPort = process.env.ROUTELY_DASHBOARD_PORT || String(DEFAULT_DASHBOARD_PORT);
   const daemonPort = process.env.ROUTELY_DAEMON_PORT || String(DEFAULT_DAEMON_PORT);
   const apps = listApps(db).filter((app) => app.enabled && app.driver === "command");
@@ -216,7 +247,7 @@ function upCommand(): void {
   let shuttingDown = false;
 
   console.log("Routely starting...");
-  console.log(`Root:      ${root}`);
+  console.log(`Workspace: ${workspaceRoot}`);
   console.log(`Dashboard: http://localhost:${dashboardPort}`);
   console.log(`Daemon:    http://127.0.0.1:${daemonPort}`);
   console.log(`Apps:      ${apps.length === 0 ? "none registered yet" : `${apps.length} command app(s)`}`);
@@ -227,8 +258,7 @@ function upCommand(): void {
   });
   const web = run("dashboard", "npm", ["run", "dev", "--workspace", "apps/web"], {
     PORT: dashboardPort,
-    NEXT_PUBLIC_ROUTELY_DAEMON_URL:
-      process.env.NEXT_PUBLIC_ROUTELY_DAEMON_URL || `http://127.0.0.1:${daemonPort}`
+    ROUTELY_DAEMON_URL: process.env.ROUTELY_DAEMON_URL || `http://127.0.0.1:${daemonPort}`
   });
 
   for (const app of apps) {
@@ -282,6 +312,9 @@ function upCommand(): void {
 switch (command) {
   case "init":
     initCommand();
+    break;
+  case "sync":
+    syncCommand();
     break;
   case "ps":
     psCommand();
