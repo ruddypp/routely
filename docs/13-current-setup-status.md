@@ -56,6 +56,7 @@ Lokasi dokumentasi:
 - CLI global command is installed locally through npm global install.
 - CLI workspace resolution now separates the Routely install root from the active user workspace root.
 - `ROUTELY_WORKSPACE_ROOT` can override the active workspace for tests and scripted runs.
+- Local runner v1 has started: logs, down, restart, doctor, and port preflight checks are implemented for command apps.
 
 ## Current Structure
 
@@ -160,6 +161,10 @@ Initial skeleton commands:
 routely init
 routely add /path/to/app --name web --command "npm run dev" --port 3000
 routely ps
+routely logs web --follow
+routely restart web
+routely down
+routely doctor
 routely
 ```
 
@@ -187,6 +192,7 @@ run command
 
 - `npm run build --workspace apps/cli` completed successfully.
 - `npm run test --workspace apps/cli` completed successfully for CLI path resolution tests.
+- CLI tests now cover path resolution and port conflict helpers.
 - `npm run lint` completed successfully.
 - `npm i -g .` from `apps/cli` completed successfully.
 - `which routely` resolves to the NVM global binary path.
@@ -195,6 +201,7 @@ run command
 - Earlier dashboard and daemon checks returned HTTP 200 when run outside the restricted tool session.
 - A temp workspace smoke test created `routely.yml` and `.routely/routely.db` outside the Routely repo.
 - A daemon smoke test with `ROUTELY_WORKSPACE_ROOT` returned the temp workspace and database path from `/health`.
+- A timed `routely up` smoke test started daemon, dashboard, and `hello-command`, then shut them down without leaving listening ports behind.
 
 ## Environment Check
 

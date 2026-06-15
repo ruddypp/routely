@@ -1,9 +1,9 @@
-import type { ChildProcess } from "node:child_process";
+import type { ChildProcess, StdioOptions } from "node:child_process";
 import type { RoutelyAppRecord } from "@routely/core";
 
 export interface StartCommandAppOptions {
   env?: Record<string, string>;
-  stdio?: "inherit" | "pipe" | "ignore";
+  stdio?: StdioOptions;
 }
 
 export const routelyDriversVersion: string;

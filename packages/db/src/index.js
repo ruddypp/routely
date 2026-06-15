@@ -108,6 +108,19 @@ export function getAppByName(db, name) {
   return db.prepare("SELECT * FROM apps WHERE name = ?").get(name) || null;
 }
 
+export function listRunningRuntimeInstances(db) {
+  return db
+    .prepare(
+      `SELECT runtime_instances.*, apps.name AS app_name
+       FROM runtime_instances
+       JOIN apps ON apps.id = runtime_instances.app_id
+       WHERE runtime_instances.stopped_at IS NULL
+         AND runtime_instances.status = 'running'
+       ORDER BY runtime_instances.started_at ASC`
+    )
+    .all();
+}
+
 export function upsertApp(db, input) {
   const app = normalizeAppInput(input);
   const existing = getAppByName(db, app.name);

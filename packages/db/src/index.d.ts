@@ -20,6 +20,18 @@ export function migrate(db: Database.Database): void;
 export function listApps(db: Database.Database): RoutelyAppRecord[];
 export function getAppByName(db: Database.Database, name: string): RoutelyAppRecord | null;
 export function getAppById(db: Database.Database, appId: number): RoutelyAppRecord | null;
+export interface RunningRuntimeInstanceRecord {
+  id: number;
+  app_id: number;
+  app_name: string;
+  pid: number | null;
+  status: string;
+  started_at: string | null;
+  stopped_at: string | null;
+  exit_code: number | null;
+  updated_at: string;
+}
+export function listRunningRuntimeInstances(db: Database.Database): RunningRuntimeInstanceRecord[];
 export function upsertApp(db: Database.Database, input: RoutelyAppInput): RoutelyAppRecord;
 export function deleteApp(db: Database.Database, appId: number): boolean;
 export function syncWorkspaceConfig(db: Database.Database, loaded: LoadedWorkspaceConfig | null): string[];

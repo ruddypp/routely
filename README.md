@@ -11,6 +11,8 @@ Current skeleton behavior:
 - `routely init`, `routely sync`, `routely add`, and `routely ps` manage the local app registry.
 - `routely.yml` apps/services are loaded into the registry on `init`, `sync`, `up`, and daemon boot.
 - Command-driver apps can be registered and started locally.
+- Command app logs are persisted under `.routely/logs/<app>.log`.
+- `routely down`, `routely logs`, `routely restart`, and `routely doctor` provide local lifecycle controls.
 - The global CLI uses the current working directory as the workspace by default. `ROUTELY_WORKSPACE_ROOT` can override it for tests or scripted runs.
 
 ## Architecture
@@ -62,6 +64,10 @@ routely init
 routely add /path/to/app --name web --command "npm run dev" --port 3000
 routely sync   # load routely.yml into the registry
 routely ps
+routely logs web --follow
+routely restart web
+routely down
+routely doctor
 routely
 ```
 

@@ -1,7 +1,19 @@
 #!/usr/bin/env node
 
-import { existsSync, writeFileSync } from "node:fs";
-import { spawn } from "node:child_process";
+import {
+  appendFileSync,
+  closeSync,
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  statSync,
+  unwatchFile,
+  watchFile,
+  writeFileSync
+} from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import process from "node:process";
@@ -13,7 +25,9 @@ import {
   type RoutelyAppRecord
 } from "@routely/core";
 import {
+  getAppByName,
   initializeRoutely,
+  listRunningRuntimeInstances,
   listApps,
   recordRuntimeStart,
   recordRuntimeStop,
@@ -23,6 +37,7 @@ import {
 } from "@routely/db";
 import { startCommandApp } from "@routely/drivers";
 import { resolveInstallRoot, resolveWorkspaceRoot } from "./paths.js";
+import { findUnavailablePorts } from "./ports.js";
 
 type ChildProcess = ReturnType<typeof spawn>;
 type RunningApp = { app: RoutelyAppRecord; child: ChildProcess };
@@ -92,12 +107,88 @@ Usage:
   routely                  Sync routely.yml, then start daemon, dashboard, and command apps
   routely init             Create .routely/routely.db and a starter routely.yml
   routely sync             Load routely.yml into the app registry
+  routely down             Stop running managed app processes
   routely ps               List registered apps
+  routely logs [app]       Print app logs, optionally with --follow
+  routely restart [app]    Restart one command app
+  routely doctor           Check local Routely prerequisites and port availability
   routely add [path] --name <name> --command <command> [--port <port>] [--preset <preset>]
 
 Defaults:
   Dashboard: http://localhost:3030
   Daemon:    http://127.0.0.1:9977`);
+}
+
+function logDir(): string {
+  return resolve(workspaceRoot, ".routely", "logs");
+}
+
+function safeLogName(name: string): string {
+  return name.replace(/[^a-zA-Z0-9_.-]/g, "_");
+}
+
+function logPathForApp(name: string): string {
+  return resolve(logDir(), `${safeLogName(name)}.log`);
+}
+
+function ensureLogPath(appName: string): string {
+  mkdirSync(logDir(), { recursive: true });
+  return logPathForApp(appName);
+}
+
+function writeLogHeader(appName: string, event: string): void {
+  const logPath = ensureLogPath(appName);
+  appendFileSync(logPath, `\n[${new Date().toISOString()}] ${event}\n`, "utf8");
+}
+
+function attachForegroundLogs(child: ChildProcess, appName: string): void {
+  const logPath = ensureLogPath(appName);
+  const logStream = createWriteStream(logPath, { flags: "a" });
+
+  child.stdout?.on("data", (chunk: Buffer) => {
+    process.stdout.write(chunk);
+    logStream.write(chunk);
+  });
+
+  child.stderr?.on("data", (chunk: Buffer) => {
+    process.stderr.write(chunk);
+    logStream.write(chunk);
+  });
+
+  child.on("close", () => logStream.end());
+}
+
+function startLoggedCommandApp(app: RoutelyAppRecord, mode: "foreground" | "detached" = "foreground"): ChildProcess {
+  writeLogHeader(app.name, `starting ${app.command || "command"}`);
+
+  if (mode === "foreground") {
+    const child = startCommandApp(app, { stdio: ["ignore", "pipe", "pipe"] });
+    attachForegroundLogs(child, app.name);
+    return child;
+  }
+
+  const logPath = ensureLogPath(app.name);
+  const fd = openSync(logPath, "a");
+  const child = startCommandApp(app, { stdio: ["ignore", fd, fd] });
+  child.unref();
+  closeSync(fd);
+  return child;
+}
+
+function stopPid(pid: number): void {
+  try {
+    if (process.platform !== "win32") {
+      process.kill(-pid, "SIGTERM");
+    } else {
+      process.kill(pid, "SIGTERM");
+    }
+  } catch {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      // Treat missing processes as already stopped; DB reconciliation will follow.
+    }
+  }
 }
 
 /**
@@ -226,18 +317,32 @@ function stopProcess(child: ChildProcess): void {
     return;
   }
 
-  try {
-    if (process.platform !== "win32") {
-      process.kill(-child.pid, "SIGTERM");
-    } else {
-      child.kill("SIGTERM");
-    }
-  } catch {
-    child.kill("SIGTERM");
-  }
+  stopPid(child.pid);
 }
 
-function upCommand(): void {
+async function preflightPorts(apps: RoutelyAppRecord[], includeSystemPorts = true): Promise<boolean> {
+  const dashboardPort = Number(process.env.ROUTELY_DASHBOARD_PORT || DEFAULT_DASHBOARD_PORT);
+  const daemonPort = Number(process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT);
+  const systemPorts = includeSystemPorts
+    ? [
+        { name: "dashboard", port: dashboardPort },
+        { name: "daemon", port: daemonPort }
+      ]
+    : [];
+  const unavailable = await findUnavailablePorts([...systemPorts, ...apps.map((app) => ({ name: app.name, port: app.port }))]);
+
+  if (unavailable.length === 0) {
+    return true;
+  }
+
+  console.error("Port conflict detected. Stop the existing process or change the configured port:");
+  for (const item of unavailable) {
+    console.error(`  ${item.name}: ${item.port}`);
+  }
+  return false;
+}
+
+async function upCommand(): Promise<void> {
   const { db } = initializeRoutely(workspaceRoot);
   syncConfig(db);
   const dashboardPort = process.env.ROUTELY_DASHBOARD_PORT || String(DEFAULT_DASHBOARD_PORT);
@@ -245,6 +350,11 @@ function upCommand(): void {
   const apps = listApps(db).filter((app) => app.enabled && app.driver === "command");
   const runningApps: RunningApp[] = [];
   let shuttingDown = false;
+
+  if (!(await preflightPorts(apps))) {
+    db.close();
+    process.exit(1);
+  }
 
   console.log("Routely starting...");
   console.log(`Workspace: ${workspaceRoot}`);
@@ -264,7 +374,7 @@ function upCommand(): void {
   for (const app of apps) {
     try {
       updateAppStatus(db, app.id, "starting");
-      const child = startCommandApp(app);
+      const child = startLoggedCommandApp(app);
       runningApps.push({ app, child });
 
       if (child.pid) {
@@ -309,6 +419,146 @@ function upCommand(): void {
   process.on("SIGTERM", shutdown);
 }
 
+function downCommand(): void {
+  const { db } = initializeRoutely(workspaceRoot);
+  const instances = listRunningRuntimeInstances(db);
+
+  if (instances.length === 0) {
+    console.log("No running managed app processes found.");
+    db.close();
+    return;
+  }
+
+  for (const instance of instances) {
+    if (instance.pid) {
+      stopPid(instance.pid);
+      recordRuntimeStop(db, instance.app_id, instance.pid, null, "stopped");
+      writeLogHeader(instance.app_name, `stopped pid ${instance.pid}`);
+      console.log(`Stopped ${instance.app_name} (${instance.pid}).`);
+    }
+  }
+
+  db.close();
+}
+
+function logsCommand(args: string[]): void {
+  const { positionals, flags } = parseFlags(args);
+  const appName = String(positionals[0] || "").trim();
+
+  if (!appName) {
+    console.error("Usage: routely logs [app] [--follow]");
+    process.exit(1);
+  }
+
+  const logPath = ensureLogPath(appName);
+
+  if (existsSync(logPath)) {
+    process.stdout.write(readFileSync(logPath));
+  }
+
+  if (!flags.follow && !flags.f) {
+    return;
+  }
+
+  let offset = existsSync(logPath) ? statSync(logPath).size : 0;
+  console.log(`\nFollowing ${logPath}. Press Ctrl+C to stop.`);
+
+  watchFile(logPath, { interval: 500 }, () => {
+    const data = readFileSync(logPath);
+    if (data.length > offset) {
+      process.stdout.write(data.subarray(offset));
+      offset = data.length;
+    }
+  });
+
+  process.on("SIGINT", () => {
+    unwatchFile(logPath);
+    process.exit(0);
+  });
+}
+
+async function restartCommand(args: string[]): Promise<void> {
+  const appName = String(args[0] || "").trim();
+
+  if (!appName) {
+    console.error("Usage: routely restart [app]");
+    process.exit(1);
+  }
+
+  const { db } = initializeRoutely(workspaceRoot);
+  const app = getAppByName(db, appName);
+
+  if (!app) {
+    console.error(`App not found: ${appName}`);
+    db.close();
+    process.exit(1);
+  }
+
+  if (app.driver !== "command") {
+    console.error(`Restart currently supports command apps only. ${app.name} uses ${app.driver}.`);
+    db.close();
+    process.exit(1);
+  }
+
+  const instances = listRunningRuntimeInstances(db).filter((instance) => instance.app_id === app.id);
+  for (const instance of instances) {
+    if (instance.pid) {
+      stopPid(instance.pid);
+      recordRuntimeStop(db, instance.app_id, instance.pid, null, "stopped");
+      writeLogHeader(instance.app_name, `stopped pid ${instance.pid} for restart`);
+    }
+  }
+
+  if (!(await preflightPorts([app], false))) {
+    db.close();
+    process.exit(1);
+  }
+
+  updateAppStatus(db, app.id, "starting");
+  const child = startLoggedCommandApp(app, "detached");
+  if (child.pid) {
+    recordRuntimeStart(db, app.id, child.pid);
+  }
+
+  console.log(`Restarted ${app.name}${child.pid ? ` (${child.pid})` : ""}.`);
+  db.close();
+}
+
+async function doctorCommand(): Promise<void> {
+  const { db } = initializeRoutely(workspaceRoot);
+  syncConfig(db);
+  const apps = listApps(db).filter((app) => app.enabled && app.driver === "command");
+  const unavailable = await findUnavailablePorts([
+    { name: "dashboard", port: Number(process.env.ROUTELY_DASHBOARD_PORT || DEFAULT_DASHBOARD_PORT) },
+    { name: "daemon", port: Number(process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT) },
+    ...apps.map((app) => ({ name: app.name, port: app.port }))
+  ]);
+
+  const checks = [
+    ["node", spawnSync("node", ["-v"], { encoding: "utf8" })],
+    ["npm", spawnSync("npm", ["-v"], { encoding: "utf8" })],
+    ["docker", spawnSync("docker", ["--version"], { encoding: "utf8" })]
+  ] as const;
+
+  console.log(`Workspace: ${workspaceRoot}`);
+  for (const [name, result] of checks) {
+    const ok = result.status === 0;
+    const value = ok ? (result.stdout || result.stderr).trim() : "not available";
+    console.log(`${ok ? "OK" : "WARN"} ${name}: ${value}`);
+  }
+
+  if (unavailable.length === 0) {
+    console.log("OK ports: no conflicts detected");
+  } else {
+    console.log("WARN ports: conflicts detected");
+    for (const item of unavailable) {
+      console.log(`  ${item.name}: ${item.port}`);
+    }
+  }
+
+  db.close();
+}
+
 switch (command) {
   case "init":
     initCommand();
@@ -316,14 +566,26 @@ switch (command) {
   case "sync":
     syncCommand();
     break;
+  case "down":
+    downCommand();
+    break;
   case "ps":
     psCommand();
+    break;
+  case "logs":
+    logsCommand(argv.slice(1));
+    break;
+  case "restart":
+    await restartCommand(argv.slice(1));
+    break;
+  case "doctor":
+    await doctorCommand();
     break;
   case "add":
     addCommand(argv.slice(1));
     break;
   case "up":
-    upCommand();
+    await upCommand();
     break;
   case "help":
   case "--help":
