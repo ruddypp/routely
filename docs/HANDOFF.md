@@ -35,11 +35,11 @@ For Next.js changes, follow `AGENTS.md`: read the relevant guide in `node_module
 Recent history at handoff time:
 
 ```text
+8b296fb feat: finish local runner checkpoint
 51005c1 feat: implement Routely dashboard with Spotify-inspired theme and API integration
 8c48766 feat: add local runner lifecycle commands
 bde6da9 feat: stabilize workspace root resolution
 0d3dfd8 docs: add implementation checkpoint plan
-725c532 feat: add initial documentation and feature specifications for Routely
 ```
 
 Treat `docs/14-implementation-plan.md` as the canonical execution backlog unless a newer document explicitly replaces it.
@@ -93,24 +93,45 @@ Completed in `8c48766`:
 
 Verification was performed with CLI tests, CLI build, lint, local runner smoke tests, and port conflict tests on port `4173`.
 
+### Checkpoint 1: Local Runner v1, Completion
+
+Completed in `8b296fb`:
+
+- Added `depends_on` support to config normalization, DTO/type declarations, and SQLite storage.
+- Added `apps/cli/src/dependencies.ts` for dependency ordering with cycle detection.
+- `routely up` starts enabled command apps in dependency order and rejects dependency cycles before starting anything.
+- Added shared `reconcileStaleRuntimeInstances` DB helper.
+- CLI commands reconcile stale runtime PIDs before status/lifecycle operations.
+- Daemon boot reconciles stale runtime PIDs before serving app state to dashboard/API consumers.
+- Hardened `routely down` and `routely restart` for detached managed processes: SIGTERM process group, wait briefly, then SIGKILL if still alive.
+- Added tests for dependency ordering/cycles and stale PID reconciliation.
+- Updated README and `docs/13-current-setup-status.md`.
+
+Verification performed:
+
+- `npm run lint` passed.
+- `npm run build --workspace apps/cli` passed.
+- `npm run test --workspace apps/cli` passed: 4 files, 12 tests.
+- Temp workspace smoke test passed for `init`, `add`, `sync`, `ps`, `up`, Ctrl+C shutdown, `restart hello`, `logs hello`, `down`, and final `ps`.
+- Final process check found no leftover Routely daemon/web/example processes.
+
+Verification caveat:
+
+- `npm run build --workspaces --if-present` and `npm run build --workspace apps/web` were attempted, but this tool only returned the Next.js progress line (`Finished TypeScript...`) and no final exit marker even though no build process remained afterward. Do not treat the broad/web build as a confirmed pass from this handoff.
+
 ## Current Checkpoint Status
 
 Checkpoint 0 is complete.
 
-Checkpoint 1 is partially complete. Remaining items:
-
-- Implement `depends_on` dependency ordering for local apps/services.
-- Add stronger stale PID reconciliation on daemon/CLI startup.
-- Harden `down`/`restart` behavior for detached and long-running managed app processes.
-- Consider improving `routely down` to coordinate with the running supervisor/daemon when available.
+Checkpoint 1 is complete for the documented remaining scope.
 
 Recommended next step:
 
 ```text
-Finish Checkpoint 1 before moving to Checkpoint 2.
+Start Checkpoint 2: Dashboard Local Controls.
 ```
 
-After Checkpoint 1 is fully complete, continue to Checkpoint 2: dashboard local controls.
+Do not start production/VPS work yet. Continue with dashboard local controls and daemon lifecycle endpoints.
 
 ## Current Known Environment
 
@@ -153,6 +174,8 @@ npm run build --workspace apps/cli
 npm run lint
 ```
 
+For Checkpoint 2, also verify the web/dashboard path after changes. Because Next.js APIs may differ from training data, read the relevant guide in `node_modules/next/dist/docs/` before editing `apps/web`.
+
 Suggested smoke test shape:
 
 ```bash
@@ -179,35 +202,42 @@ Project intent: Routely is a 9Router-inspired local app runner plus Dokploy-insp
 
 Current progress:
 - Checkpoint 0 is complete.
-- Checkpoint 1 local runner first slice is committed.
+- Checkpoint 1 local runner is complete and committed.
 - Recent commits include:
+  - 8b296fb feat: finish local runner checkpoint
   - 51005c1 feat: implement Routely dashboard with Spotify-inspired theme and API integration
   - 8c48766 feat: add local runner lifecycle commands
   - bde6da9 feat: stabilize workspace root resolution
-  - 0d3dfd8 docs: add implementation checkpoint plan
 
 Your next task:
-Finish the remaining Checkpoint 1 work from docs/14-implementation-plan.md:
-1. Implement depends_on dependency ordering for local apps/services.
-2. Add stale PID reconciliation so old runtime_instances do not leave apps incorrectly marked running.
-3. Harden down/restart behavior for managed app processes.
-4. Add/adjust tests for the risky logic.
-5. Update docs/13-current-setup-status.md and README.md if behavior changes.
-6. Run relevant verification commands.
-7. Commit only the files changed for this checkpoint with a concise commit message.
+Start Checkpoint 2 from docs/14-implementation-plan.md: Dashboard Local Controls.
+1. Read the relevant Next.js docs in node_modules/next/dist/docs/ before editing apps/web.
+2. Add daemon endpoints for app lifecycle/log access:
+   - POST /apps/:id/start
+   - POST /apps/:id/stop
+   - POST /apps/:id/restart
+   - GET /apps/:id/logs
+3. Add matching Next.js API route handlers that keep browser calls same-origin under /api/*.
+4. Add dashboard controls for start, stop, restart, open URL, and view logs.
+5. Add useful loading, disabled, error, and refresh states.
+6. Add or adjust tests for route handlers and daemon-unreachable behavior where practical.
+7. Update docs if behavior changes.
+8. Run relevant verification commands. At minimum prefer npm run lint, npm run build --workspace apps/cli if CLI is touched, and web build/checks for dashboard changes.
+9. Commit only the files changed for this checkpoint with a concise commit message.
 
-Do not start Checkpoint 2 until Checkpoint 1 exit criteria are met or any remaining gap is documented.
-Preserve unrelated user changes in the worktree. Do not use destructive git commands.
+Do not start production/VPS work. Preserve unrelated user changes in the worktree. Do not use destructive git commands.
 ```
 
 ## Immediate Next Checklist
 
 - [ ] Check `git status --short`.
-- [ ] Read the latest `apps/cli/src/index.ts`, `packages/core/src/index.js`, `packages/db/src/index.js`, and `packages/drivers/src/index.js`.
-- [ ] Implement dependency sort utility with cycle detection.
-- [ ] Add tests for dependency ordering and cycle errors.
-- [ ] Add stale PID reconciliation helper.
-- [ ] Run CLI tests/build/lint.
-- [ ] Smoke test local runner.
-- [ ] Update docs.
-- [ ] Commit checkpoint changes.
+- [ ] Read `AGENTS.md`, this handoff, and `docs/14-implementation-plan.md`.
+- [ ] Read relevant Next.js docs from `node_modules/next/dist/docs/` before editing `apps/web`.
+- [ ] Inspect `apps/daemon/src/server.js`, `apps/web/src/app/api`, and dashboard components.
+- [ ] Implement daemon lifecycle/log endpoints for local command apps.
+- [ ] Implement matching Next.js API route handlers.
+- [ ] Add dashboard controls and log viewing UX.
+- [ ] Add/adjust tests where practical.
+- [ ] Run lint/build/tests/smoke checks.
+- [ ] Update docs if behavior changes.
+- [ ] Commit Checkpoint 2 changes only.
