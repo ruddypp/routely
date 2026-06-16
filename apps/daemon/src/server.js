@@ -8,6 +8,7 @@ import {
   getAppById,
   initializeRoutely,
   listApps,
+  reconcileStaleRuntimeInstances,
   syncWorkspaceConfig,
   upsertApp
 } from "@routely/db";
@@ -28,6 +29,8 @@ try {
 } catch (error) {
   console.error(`Could not load routely.yml: ${error instanceof Error ? error.message : String(error)}`);
 }
+
+reconcileStaleRuntimeInstances(db);
 
 const app = Fastify({ logger: true });
 

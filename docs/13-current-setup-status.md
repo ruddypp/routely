@@ -56,7 +56,7 @@ Lokasi dokumentasi:
 - CLI global command is installed locally through npm global install.
 - CLI workspace resolution now separates the Routely install root from the active user workspace root.
 - `ROUTELY_WORKSPACE_ROOT` can override the active workspace for tests and scripted runs.
-- Local runner v1 has started: logs, down, restart, doctor, and port preflight checks are implemented for command apps.
+- Local runner v1 has started: logs, down, restart, doctor, port preflight checks, dependency ordering, and stale PID reconciliation are implemented for command apps.
 
 ## Current Structure
 
@@ -168,6 +168,8 @@ routely doctor
 routely
 ```
 
+Command apps declared in `routely.yml` can use `depends_on` to control local startup order. Routely rejects dependency cycles before starting apps. CLI commands and daemon boot reconcile stale runtime PIDs so apps are not left marked `running` after an old managed process exits outside Routely.
+
 ## CLI Build And Global Reinstall Flow
 
 After changing CLI code:
@@ -192,7 +194,7 @@ run command
 
 - `npm run build --workspace apps/cli` completed successfully.
 - `npm run test --workspace apps/cli` completed successfully for CLI path resolution tests.
-- CLI tests now cover path resolution and port conflict helpers.
+- CLI tests now cover path resolution, port conflict helpers, dependency ordering, and stale PID reconciliation.
 - `npm run lint` completed successfully.
 - `npm i -g .` from `apps/cli` completed successfully.
 - `which routely` resolves to the NVM global binary path.
@@ -234,10 +236,8 @@ Ports checked as free during the latest setup audit:
 Recommended next implementation step after skeleton v1:
 
 ```text
-Routely local runner v1
-  - Add explicit routely down/stop behavior.
-  - Add logs command and log persistence/streaming.
-  - Add port conflict detection before command apps start.
+Routely dashboard local controls
   - Add dashboard start/stop controls for local command apps.
-  - Add config import/export between routely.yml and SQLite.
+  - Add daemon lifecycle endpoints for start/stop/restart/logs.
+  - Keep browser calls routed through same-origin /api/* handlers.
 ```

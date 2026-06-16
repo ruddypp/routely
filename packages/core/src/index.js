@@ -48,9 +48,22 @@ export function normalizeAppInput(input) {
     path: input.path || null,
     command: input.command || input.dev || null,
     port: input.port == null || input.port === "" ? null : Number(input.port),
+    depends_on: normalizeDependsOn(input.depends_on),
     enabled: input.enabled == null ? true : Boolean(input.enabled),
     status: input.status || "stopped"
   };
+}
+
+function normalizeDependsOn(value) {
+  if (value == null || value === "") {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  return [String(value).trim()].filter(Boolean);
 }
 
 export function appToPublicDto(app) {
@@ -64,6 +77,7 @@ export function appToPublicDto(app) {
     path: app.path,
     command: app.command,
     port: app.port,
+    dependsOn: Array.isArray(app.depends_on) ? app.depends_on : [],
     enabled: Boolean(app.enabled),
     status: app.status,
     createdAt: app.created_at,

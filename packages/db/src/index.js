@@ -52,6 +52,7 @@ export function migrate(db) {
       path TEXT,
       command TEXT,
       port INTEGER,
+      depends_on TEXT NOT NULL DEFAULT '[]',
       enabled INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'stopped',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -77,6 +78,7 @@ export function migrate(db) {
   `);
 
   addColumnIfMissing(db, "apps", "server_id", "INTEGER");
+  addColumnIfMissing(db, "apps", "depends_on", "TEXT NOT NULL DEFAULT '[]'");
 
   db.prepare(`
     INSERT OR IGNORE INTO servers (id, name, kind, status)
@@ -101,11 +103,12 @@ function addColumnIfMissing(db, tableName, columnName, definition) {
 }
 
 export function listApps(db) {
-  return db.prepare("SELECT * FROM apps ORDER BY name ASC").all();
+  return db.prepare("SELECT * FROM apps ORDER BY name ASC").all().map(parseAppRecord);
 }
 
 export function getAppByName(db, name) {
-  return db.prepare("SELECT * FROM apps WHERE name = ?").get(name) || null;
+  const row = db.prepare("SELECT * FROM apps WHERE name = ?").get(name) || null;
+  return row ? parseAppRecord(row) : null;
 }
 
 export function listRunningRuntimeInstances(db) {
@@ -121,6 +124,76 @@ export function listRunningRuntimeInstances(db) {
     .all();
 }
 
+export function reconcileStaleRuntimeInstances(db, isPidAlive = defaultIsPidAlive) {
+  const instances = listRunningRuntimeInstances(db);
+  const stale = instances.filter((instance) => !instance.pid || !isPidAlive(instance.pid));
+
+  if (stale.length === 0) {
+    return [];
+  }
+
+  const stopInstance = db.prepare(`
+    UPDATE runtime_instances
+    SET status = 'stopped', stopped_at = CURRENT_TIMESTAMP, exit_code = NULL, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `);
+  const runningForApp = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM runtime_instances
+    WHERE app_id = ? AND stopped_at IS NULL AND status = 'running'
+  `);
+
+  const reconcile = db.transaction((items) => {
+    for (const instance of items) {
+      stopInstance.run(instance.id);
+      const remaining = runningForApp.get(instance.app_id);
+      if (!remaining || Number(remaining.count) === 0) {
+        updateAppStatus(db, instance.app_id, "stopped");
+      }
+    }
+  });
+
+  reconcile(stale);
+  return stale;
+}
+
+function defaultIsPidAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+
+function parseAppRecord(row) {
+  return {
+    ...row,
+    depends_on: parseDependsOn(row.depends_on)
+  };
+}
+
+function parseDependsOn(value) {
+  if (Array.isArray(value)) {
+    return value;
+  }
+
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map((item) => String(item).trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function serializeDependsOn(value) {
+  return JSON.stringify(Array.isArray(value) ? value : []);
+}
+
 export function upsertApp(db, input) {
   const app = normalizeAppInput(input);
   const existing = getAppByName(db, app.name);
@@ -128,7 +201,7 @@ export function upsertApp(db, input) {
   if (existing) {
     db.prepare(`
       UPDATE apps
-      SET server_id = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, port = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+      SET server_id = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, port = ?, depends_on = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE name = ?
     `).run(
       app.server_id,
@@ -138,14 +211,15 @@ export function upsertApp(db, input) {
       app.path,
       app.command,
       app.port,
+      serializeDependsOn(app.depends_on),
       app.enabled ? 1 : 0,
       app.status,
       app.name
     );
   } else {
     db.prepare(`
-      INSERT INTO apps (server_id, name, type, preset, driver, path, command, port, enabled, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO apps (server_id, name, type, preset, driver, path, command, port, depends_on, enabled, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       app.server_id,
       app.name,
@@ -155,6 +229,7 @@ export function upsertApp(db, input) {
       app.path,
       app.command,
       app.port,
+      serializeDependsOn(app.depends_on),
       app.enabled ? 1 : 0,
       app.status
     );
@@ -205,7 +280,8 @@ export function syncWorkspaceConfig(db, loaded) {
 }
 
 export function getAppById(db, appId) {
-  return db.prepare("SELECT * FROM apps WHERE id = ?").get(appId) || null;
+  const row = db.prepare("SELECT * FROM apps WHERE id = ?").get(appId) || null;
+  return row ? parseAppRecord(row) : null;
 }
 
 export function deleteApp(db, appId) {

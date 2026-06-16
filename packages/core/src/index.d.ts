@@ -20,6 +20,7 @@ export interface RoutelyAppInput {
   command?: string | null;
   dev?: string | null;
   port?: number | string | null;
+  depends_on?: string[] | string | null;
   enabled?: boolean;
   status?: RoutelyAppStatus;
 }
@@ -51,6 +52,7 @@ export interface NormalizedRoutelyAppInput {
   path: string | null;
   command: string | null;
   port: number | null;
+  depends_on: string[];
   enabled: boolean;
   status: RoutelyAppStatus;
 }
@@ -65,6 +67,7 @@ export interface RoutelyAppRecord {
   path: string | null;
   command: string | null;
   port: number | null;
+  depends_on: string[];
   enabled: 0 | 1 | boolean;
   status: RoutelyAppStatus;
   created_at: string;
@@ -81,6 +84,7 @@ export interface RoutelyAppDto {
   path: string | null;
   command: string | null;
   port: number | null;
+  dependsOn: string[];
   enabled: boolean;
   status: RoutelyAppStatus;
   createdAt: string;

@@ -29,6 +29,7 @@ import {
   initializeRoutely,
   listRunningRuntimeInstances,
   listApps,
+  reconcileStaleRuntimeInstances,
   recordRuntimeStart,
   recordRuntimeStop,
   syncWorkspaceConfig,
@@ -36,6 +37,7 @@ import {
   upsertApp
 } from "@routely/db";
 import { startCommandApp } from "@routely/drivers";
+import { DependencyCycleError, sortByDependencies } from "./dependencies.js";
 import { resolveInstallRoot, resolveWorkspaceRoot } from "./paths.js";
 import { findUnavailablePorts } from "./ports.js";
 
@@ -191,6 +193,65 @@ function stopPid(pid: number): void {
   }
 }
 
+function killPid(pid: number): void {
+  try {
+    if (process.platform !== "win32") {
+      process.kill(-pid, "SIGKILL");
+    } else {
+      process.kill(pid, "SIGKILL");
+    }
+  } catch {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      // Missing processes are already stopped.
+    }
+  }
+}
+
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolveSleep) => {
+    setTimeout(resolveSleep, ms);
+  });
+}
+
+async function stopManagedPid(pid: number, timeoutMs = 1500): Promise<"stopped" | "missing" | "killed"> {
+  if (!isPidAlive(pid)) {
+    return "missing";
+  }
+
+  stopPid(pid);
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    if (!isPidAlive(pid)) {
+      return "stopped";
+    }
+    await sleep(100);
+  }
+
+  killPid(pid);
+  return "killed";
+}
+
+function reconcileRuntimeState(db: RoutelyDb): void {
+  const stale = reconcileStaleRuntimeInstances(db, isPidAlive);
+  for (const instance of stale) {
+    if (instance.pid) {
+      writeLogHeader(instance.app_name, `reconciled stale pid ${instance.pid}`);
+    }
+  }
+}
+
 /**
  * Load routely.yml (if present) and sync its apps/services into the registry.
  * Returns the number of synced entries, or null when no config file exists.
@@ -244,6 +305,7 @@ function initCommand(): void {
 function syncCommand(): void {
   const { db } = initializeRoutely(workspaceRoot);
   const synced = syncConfig(db);
+  reconcileRuntimeState(db);
 
   if (synced === null) {
     console.log("No routely.yml found. Run `routely init` to create one.");
@@ -260,6 +322,7 @@ function syncCommand(): void {
 
 function psCommand(): void {
   const { db, databasePath } = initializeRoutely(workspaceRoot);
+  reconcileRuntimeState(db);
   const apps = listApps(db).map(appToPublicDto);
 
   console.log(`Database: ${databasePath}`);
@@ -345,11 +408,24 @@ async function preflightPorts(apps: RoutelyAppRecord[], includeSystemPorts = tru
 async function upCommand(): Promise<void> {
   const { db } = initializeRoutely(workspaceRoot);
   syncConfig(db);
+  reconcileRuntimeState(db);
   const dashboardPort = process.env.ROUTELY_DASHBOARD_PORT || String(DEFAULT_DASHBOARD_PORT);
   const daemonPort = process.env.ROUTELY_DAEMON_PORT || String(DEFAULT_DAEMON_PORT);
-  const apps = listApps(db).filter((app) => app.enabled && app.driver === "command");
+  let apps: RoutelyAppRecord[];
   const runningApps: RunningApp[] = [];
   let shuttingDown = false;
+
+  try {
+    apps = sortByDependencies(listApps(db).filter((app) => app.enabled && app.driver === "command"));
+  } catch (error) {
+    if (error instanceof DependencyCycleError) {
+      console.error(error.message);
+    } else {
+      console.error(`Could not resolve app dependencies: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    db.close();
+    process.exit(1);
+  }
 
   if (!(await preflightPorts(apps))) {
     db.close();
@@ -402,8 +478,11 @@ async function upCommand(): Promise<void> {
     shuttingDown = true;
     console.log("\nRoutely stopping...");
 
-    for (const { child } of runningApps) {
+    for (const { app, child } of runningApps) {
       stopProcess(child);
+      if (child.pid) {
+        recordRuntimeStop(db, app.id, child.pid, null, "stopped");
+      }
     }
 
     daemon.kill("SIGTERM");
@@ -419,8 +498,9 @@ async function upCommand(): Promise<void> {
   process.on("SIGTERM", shutdown);
 }
 
-function downCommand(): void {
+async function downCommand(): Promise<void> {
   const { db } = initializeRoutely(workspaceRoot);
+  reconcileRuntimeState(db);
   const instances = listRunningRuntimeInstances(db);
 
   if (instances.length === 0) {
@@ -431,10 +511,10 @@ function downCommand(): void {
 
   for (const instance of instances) {
     if (instance.pid) {
-      stopPid(instance.pid);
+      const result = await stopManagedPid(instance.pid);
       recordRuntimeStop(db, instance.app_id, instance.pid, null, "stopped");
-      writeLogHeader(instance.app_name, `stopped pid ${instance.pid}`);
-      console.log(`Stopped ${instance.app_name} (${instance.pid}).`);
+      writeLogHeader(instance.app_name, `${result} pid ${instance.pid}`);
+      console.log(`${result === "killed" ? "Killed" : "Stopped"} ${instance.app_name} (${instance.pid}).`);
     }
   }
 
@@ -486,6 +566,7 @@ async function restartCommand(args: string[]): Promise<void> {
   }
 
   const { db } = initializeRoutely(workspaceRoot);
+  reconcileRuntimeState(db);
   const app = getAppByName(db, appName);
 
   if (!app) {
@@ -503,9 +584,9 @@ async function restartCommand(args: string[]): Promise<void> {
   const instances = listRunningRuntimeInstances(db).filter((instance) => instance.app_id === app.id);
   for (const instance of instances) {
     if (instance.pid) {
-      stopPid(instance.pid);
+      const result = await stopManagedPid(instance.pid);
       recordRuntimeStop(db, instance.app_id, instance.pid, null, "stopped");
-      writeLogHeader(instance.app_name, `stopped pid ${instance.pid} for restart`);
+      writeLogHeader(instance.app_name, `${result} pid ${instance.pid} for restart`);
     }
   }
 
@@ -527,6 +608,7 @@ async function restartCommand(args: string[]): Promise<void> {
 async function doctorCommand(): Promise<void> {
   const { db } = initializeRoutely(workspaceRoot);
   syncConfig(db);
+  reconcileRuntimeState(db);
   const apps = listApps(db).filter((app) => app.enabled && app.driver === "command");
   const unavailable = await findUnavailablePorts([
     { name: "dashboard", port: Number(process.env.ROUTELY_DASHBOARD_PORT || DEFAULT_DASHBOARD_PORT) },
@@ -567,7 +649,7 @@ switch (command) {
     syncCommand();
     break;
   case "down":
-    downCommand();
+    await downCommand();
     break;
   case "ps":
     psCommand();
