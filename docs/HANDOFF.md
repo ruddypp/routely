@@ -35,6 +35,7 @@ For Next.js changes, follow `AGENTS.md`: read the relevant guide in `node_module
 Recent history at handoff time:
 
 ```text
+0daf3e3 feat: add dashboard local controls
 b5f62f0 docs: update checkpoint handoff
 8b296fb feat: finish local runner checkpoint
 51005c1 feat: implement Routely dashboard with Spotify-inspired theme and API integration
@@ -126,7 +127,7 @@ Checkpoint 0 is complete.
 
 Checkpoint 1 is complete for the documented remaining scope.
 
-Checkpoint 2 has started. Implemented in the current working branch before the next handoff update:
+Checkpoint 2 has started. Implemented and committed in `0daf3e3`:
 
 - Daemon local lifecycle endpoints:
   - `POST /apps/:id/start`
@@ -149,7 +150,7 @@ Recommended next step:
 Continue Checkpoint 2: Dashboard Local Controls.
 ```
 
-Do not start production/VPS work yet. Continue with dashboard local controls and daemon lifecycle endpoints.
+Do not start production/VPS work yet. Continue with the remaining dashboard local controls scope.
 
 ## Current Known Environment
 
@@ -223,27 +224,34 @@ Project intent: Routely is a 9Router-inspired local app runner plus Dokploy-insp
 Current progress:
 - Checkpoint 0 is complete.
 - Checkpoint 1 local runner is complete and committed.
+- Checkpoint 2 Dashboard Local Controls has started.
+- Commit 0daf3e3 `feat: add dashboard local controls` is complete. It added daemon lifecycle/log endpoints, same-origin Next.js API proxying, dashboard start/stop/restart/open/log controls, loading/error/refresh states, focused route-handler tests, and docs updates.
 - Recent commits include:
+  - 0daf3e3 feat: add dashboard local controls
+  - b5f62f0 docs: update checkpoint handoff
   - 8b296fb feat: finish local runner checkpoint
   - 51005c1 feat: implement Routely dashboard with Spotify-inspired theme and API integration
   - 8c48766 feat: add local runner lifecycle commands
   - bde6da9 feat: stabilize workspace root resolution
 
 Your next task:
-Start Checkpoint 2 from docs/14-implementation-plan.md: Dashboard Local Controls.
+Continue Checkpoint 2 from docs/14-implementation-plan.md: Dashboard Local Controls.
 1. Read the relevant Next.js docs in node_modules/next/dist/docs/ before editing apps/web.
-2. Add daemon endpoints for app lifecycle/log access:
-   - POST /apps/:id/start
-   - POST /apps/:id/stop
-   - POST /apps/:id/restart
-   - GET /apps/:id/logs
-3. Add matching Next.js API route handlers that keep browser calls same-origin under /api/*.
-4. Add dashboard controls for start, stop, restart, open URL, and view logs.
-5. Add useful loading, disabled, error, and refresh states.
-6. Add or adjust tests for route handlers and daemon-unreachable behavior where practical.
+2. Do not redo the already-completed lifecycle/log controls unless you are fixing a bug in them.
+3. Finish the remaining Checkpoint 2 scope where practical:
+   - Add an app detail page or side panel beyond the current log panel if it improves the workflow.
+   - Add an add/edit app form using the app registry schema.
+   - Add broader browser smoke and responsive checks.
+   - Investigate or document the existing `npm run build --workspace apps/web` failure if you touch web build behavior.
+4. Keep browser calls same-origin under `/api/*`; browser code must not call the daemon directly.
+5. Add useful loading, disabled, error, and refresh states for any new UI.
+6. Add or adjust tests where practical.
 7. Update docs if behavior changes.
-8. Run relevant verification commands. At minimum prefer npm run lint, npm run build --workspace apps/cli if CLI is touched, and web build/checks for dashboard changes.
+8. Run relevant verification commands. At minimum prefer `npm run lint`, `npm run test --workspace apps/web`, web TypeScript/build checks, and `npm run build --workspace apps/cli` if CLI is touched.
 9. Commit only the files changed for this checkpoint with a concise commit message.
+
+Known verification caveat:
+- `npm run build --workspace apps/web` fails on the clean pre-change baseline and after 0daf3e3 with the same hidden `Turbopack build failed with 2 errors` summary. Treat it as an existing web build issue unless your changes specifically address it. Previously passing checks for 0daf3e3: `npm run test --workspace apps/web`, web `tsc --noEmit`, `node --check apps/daemon/src/server.js`, `npm run lint`, and `npm run build --workspace apps/cli`.
 
 Do not start production/VPS work. Preserve unrelated user changes in the worktree. Do not use destructive git commands.
 ```
@@ -258,9 +266,10 @@ Do not start production/VPS work. Preserve unrelated user changes in the worktre
 - [x] Implement matching Next.js API route handlers.
 - [x] Add dashboard controls and log viewing UX.
 - [x] Add/adjust tests where practical.
-- [ ] Run lint/build/tests/smoke checks.
-- [ ] Update docs if behavior changes.
-- [ ] Commit Checkpoint 2 changes only.
+- [x] Run lint/build/tests checks for the committed dashboard controls slice.
+- [x] Update docs for the committed dashboard controls slice.
+- [x] Commit Checkpoint 2 dashboard controls slice only.
+- [ ] Continue remaining Checkpoint 2 scope: app detail/add-edit form/browser smoke-responsive checks.
 
 Verification note for the dashboard controls slice:
 
