@@ -329,115 +329,31 @@ node /home/ruddypp/Documents/work/routely/apps/cli/dist/index.js down
 
 ## Prompt For Next Agent
 
-Copy `docs/NEXT_AGENT_PROMPT.md` into the next agent. That file is the canonical next prompt and targets Checkpoint 4 with a comprehensive backend/CLI/API/storage/dashboard slice plus a Dokploy-inspired panel enhancement.
+Copy `docs/NEXT_AGENT_PROMPT.md` into the next agent. That file is now the canonical next prompt and targets Checkpoint 6: Proxy, Domains, and HTTPS.
 
-The older Checkpoint 3 prompt below is kept only as historical reference. Do not use it for the next run unless intentionally auditing or repairing Checkpoint 3.
+The prompt explicitly requires a comprehensive product/backend/frontend slice:
 
-```text
-You are working in /home/ruddypp/Documents/work/routely.
+- backend/storage/proxy helpers first
+- daemon/API and same-origin Next.js route handlers
+- CLI domain commands
+- focused tests
+- docs and verification
+- then a more Dokploy-inspired, readable production operations panel backed by real data
 
-Read AGENTS.md, docs/HANDOFF.md, docs/14-implementation-plan.md, docs/13-current-setup-status.md, DESIGN.md, and the relevant feature/spec docs before editing. Follow AGENTS.md strictly, including the Next.js docs rule and auto-commit rule.
-
-Project intent:
-Routely is a 9Router-inspired local app runner plus Dokploy-inspired VPS deployment platform. The differentiator is a local-to-production workflow for solo developers: local apps/services first, then one-server production operations later.
-
-Current progress:
-- Checkpoint 0 is complete and committed.
-- Checkpoint 1 local runner is complete and committed.
-- Checkpoint 2 dashboard local lifecycle controls are implemented and committed.
-- Checkpoint 2.5 frontend product shell is implemented and polished.
-- Latest completed commit: 14b5c0f `feat: polish frontend product shell`.
-- The browser UI currently has desktop sidebar navigation, mobile bottom navigation, workspace/status header, dense local app rows, app inspector, recent logs, and add/edit app registry forms.
-- Browser code must keep using same-origin `/api/*`; do not call the daemon directly from browser code.
-- Daemon lifecycle/log endpoints are already present. Do not redo them unless fixing a bug.
-- Future production sections are inert navigation placeholders only. Do not start production/VPS deployment work yet.
-
-Your next task:
-Implement Checkpoint 3 from docs/14-implementation-plan.md comprehensively: Config, Presets, and Compose Services. This should be a real product/backend/frontend slice, not only UI polish.
-
-Execution expectations:
-1. Read AGENTS.md and obey it.
-2. Read the relevant docs before coding:
-   - docs/14-implementation-plan.md, especially Checkpoint 3
-   - docs/05-cli-spec.md
-   - docs/06-api-spec.md
-   - docs/07-config-spec.md
-   - docs/08-data-model.md
-   - docs/feature-specs/local-runner.md
-   - docs/feature-specs/dashboard.md
-   - DESIGN.md
-3. Before editing `apps/web`, read relevant Next.js docs in `node_modules/next/dist/docs/`. This repo uses Next.js 16.2.9 and AGENTS.md says this is not the Next.js you know.
-4. Inspect the current implementation before changing it:
-   - apps/cli/src/*
-   - apps/daemon/src/server.js
-   - packages/core/src/config.js and related types/DTOs
-   - packages/db/*
-   - packages/drivers/*
-   - packages/presets/*
-   - apps/web/src/app/dashboard-client.tsx
-   - apps/web/src/app/api/*
-
-Checkpoint 3 implementation goals:
-- Expand the config model toward docs/07-config-spec.md for realistic local apps/services:
-  - install
-  - dev
-  - build
-  - start
-  - env
-  - depends_on
-  - healthcheck
-  - domains/source fields only as stored metadata where appropriate, not production behavior
-- Expand `packages/presets` with useful local preset detection/defaults for common stacks such as Next.js, Vite/React, Laravel, Express, NestJS, Django, FastAPI, Go, static HTML/CSS, and PHP custom.
-- Add or improve `routely add <path>` preset detection so generated config remains editable and visible.
-- Implement local Compose service support for Checkpoint 3:
-  - Compose driver behavior for local services.
-  - Database service templates for PostgreSQL, MySQL/MariaDB, Redis, and MongoDB where practical.
-  - A CLI path such as `routely db add <type>` if consistent with the existing CLI architecture.
-  - Dependency ordering so Compose/database services start before dependent command apps.
-- Update SQLite persistence and sync helpers as needed so the dashboard and daemon can read the expanded registry consistently.
-- Add daemon/API and same-origin Next.js route-handler support only where needed for the new local services/config behavior.
-- Keep all browser mutations behind `/api/*` route handlers.
-
-Frontend/product expectations:
-- Do not make a landing page. The first screen must remain the actual product control surface.
-- Make the Checkpoint 3 UI feel more Dokploy-inspired operationally while preserving Routely's local-first identity and DESIGN.md:
-  - clearer app/service/resource separation
-  - service/database rows or cards with status, driver, port, dependencies, and command/compose metadata
-  - denser inspector sections for config, commands, dependencies, service type, and logs
-  - better add/edit flows for presets, compose/database services, dependencies, and config fields
-  - production/VPS nav may remain visible as disabled/inert placeholders only
-- Do not implement production deploys, domains, HTTPS, GitHub automation, auth, backups, server setup, or real VPS actions yet.
-
-Testing and verification:
-- Add or adjust tests for backend/config/preset/driver/API behavior. Pure CSS polish alone is not enough for this checkpoint.
-- Prefer focused tests first, then smoke tests.
-- Run at minimum:
-  - npm run lint
-  - npm run test --workspace apps/cli if CLI/core/db/drivers/presets are touched
-  - npm run build --workspace apps/cli if CLI/shared runtime code is touched
-  - npm run test --workspace apps/web if web/API route handlers are touched
-  - npx tsc --noEmit --project apps/web/tsconfig.json if apps/web is touched
-  - node --check apps/daemon/src/server.js if daemon code is touched
-  - relevant package tests/builds for touched workspaces
-  - browser smoke/responsive screenshots for desktop, tablet, and mobile widths if frontend UI is changed
-- Attempt `npm run build --workspace apps/web`, but note the known caveat: this tool currently returns only `Finished TypeScript...` with no final exit marker and no remaining build process. Treat this as pre-existing unless your changes produce a new explicit error.
-
-Documentation and commit:
-- Update docs if behavior, commands, config fields, verification status, or known caveats change.
-- Preserve unrelated user changes. Do not use destructive git commands.
-- After verification, commit only files changed for this Checkpoint 3 slice with a concise commit message.
-```
+Do not use older embedded checkpoint prompts from previous handoffs. Checkpoint 0 through Checkpoint 5 are complete; the next implementation should start at Checkpoint 6 unless the user asks for a repair/audit.
 
 ## Immediate Next Checklist
 
 - [ ] Check `git status --short`.
 - [ ] Read `AGENTS.md`, this handoff, `docs/14-implementation-plan.md`, `docs/13-current-setup-status.md`, `DESIGN.md`, and relevant feature/spec docs.
 - [ ] Read relevant Next.js docs from `node_modules/next/dist/docs/` before editing `apps/web`.
-- [ ] Inspect CLI, daemon, core config, DB, drivers, presets, and current dashboard/API implementation.
-- [ ] Implement Checkpoint 3 as a comprehensive backend/CLI/API/frontend slice.
-- [ ] Keep production/VPS actions deferred and inert.
-- [ ] Add/adjust focused tests for changed backend/config/preset/driver/API behavior.
+- [ ] Copy and follow `docs/NEXT_AGENT_PROMPT.md`.
+- [ ] Inspect CLI, daemon, core config, DB, drivers, proxy package, presets, and current dashboard/API implementation.
+- [ ] Implement Checkpoint 6 as a comprehensive backend/CLI/API/frontend slice, not a frontend-only redesign.
+- [ ] Reuse Checkpoint 5 deployment metadata/logging and require a successful deployment before live domain/proxy actions.
+- [ ] Keep GitHub automation, backups, notifications, production database templates, full rollback, metrics collection, and broad VPS operations deferred.
+- [ ] Add/adjust focused tests for changed backend/domain/proxy/API/CLI behavior.
 - [ ] Run lint, touched workspace tests/builds, web TypeScript when web is touched, and browser smoke/responsive checks when frontend UI is changed.
 - [ ] Attempt/document the known web build caveat.
 - [ ] Update docs for behavior and verification changes.
-- [ ] Commit only this Checkpoint 3 slice.
+- [ ] Commit only this Checkpoint 6 slice.
