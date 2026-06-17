@@ -6,6 +6,7 @@
  */
 :root {
   --background: #121212;
+  --background-soft: #151515;
   --surface: #181818;
   --surface-raised: #1f1f1f;
   --surface-card: #252525;
@@ -21,6 +22,7 @@
 
 @theme inline {
   --color-background: var(--background);
+  --color-background-soft: var(--background-soft);
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-surface-card: var(--surface-card);
@@ -61,6 +63,35 @@ select,
 textarea,
 button {
   font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+button:disabled,
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: color-mix(in srgb, var(--muted) 58%, transparent);
 }
 
 select {

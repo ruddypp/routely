@@ -59,6 +59,7 @@ Lokasi dokumentasi:
 - Local runner v1 has started: logs, down, restart, doctor, port preflight checks, dependency ordering, and stale PID reconciliation are implemented for command apps.
 - Dashboard local controls have started: browser calls same-origin `/api/*` handlers for app start, stop, restart, open URL, recent log access, and app registry create/edit.
 - The browser UI now uses a 9Router-inspired local runner shell: desktop sidebar, mobile bottom navigation, workspace/status header, dense app rows, app inspector, recent logs, and add/edit registry forms.
+- The latest frontend design pass refined the existing shell with tighter app row rhythm, safer desktop action wrapping, clearer inspector/log contrast, improved loading/empty states, and better add/edit form focus, disabled, and validation affordances.
 
 ## Current Structure
 
@@ -210,6 +211,7 @@ run command
 - A timed `routely up` smoke test started daemon, dashboard, and `hello-command`, then shut them down without leaving listening ports behind.
 - Current dashboard shell verification passed with `npm run lint`, `npm run test --workspace apps/web`, web TypeScript, `node --check apps/daemon/src/server.js`, `npm run build --workspace apps/cli`, and `npm run test --workspace apps/cli`.
 - Browser smoke was run against local daemon/web dev servers with desktop, tablet, and mobile headless Chrome screenshots. `/api/apps` and `/api/apps/3/logs` returned through the same-origin web API.
+- The latest frontend design pass passed `npm run lint`, `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, same-origin `/api/apps` smoke, and desktop/tablet/mobile headless Chrome screenshots. A desktop app-row overlap found in the first screenshot pass was fixed and rechecked.
 - `npm run build --workspace apps/web` still returns only the partial `Finished TypeScript...` progress line with no final exit marker and no remaining build process, matching the existing web build caveat.
 
 ## Environment Check
@@ -240,20 +242,10 @@ Ports checked as free during the latest setup audit:
 
 ## Next Development Target
 
-Recommended next implementation step after skeleton v1:
+Recommended next implementation step after the frontend design pass:
 
 ```text
-Routely dashboard local controls
-  - Add broader dashboard smoke/responsive coverage.
+Checkpoint 3: Config, presets, and Compose services
+  - Keep production/VPS work deferred until the production checkpoints.
   - Keep browser calls routed through same-origin /api/* handlers.
-```
-
-After the remaining dashboard local controls are in place, execute `docs/14-implementation-plan.md` Checkpoint 2.5 before starting Checkpoint 3 or any production/VPS work:
-
-```text
-9Router-inspired frontend product shell
-  - Treat the whole browser UI as the product surface, not only the dashboard table.
-  - Make local app runner workflows feel 9Router-inspired: dense, fast, control-focused, and status/log oriented.
-  - Follow DESIGN.md for visual taste: near-black surfaces, compact typography, functional green accent, pill/circular controls, heavy dark elevation, and responsive sidebar/mobile navigation.
-  - Keep Dokploy-like production concepts in the future information architecture, but do not expose production actions before their checkpoints.
 ```

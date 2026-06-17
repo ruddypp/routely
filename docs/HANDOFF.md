@@ -149,6 +149,13 @@ Additional Checkpoint 2 / 2.5 work implemented and committed in `d868b09`:
 - Future production sections are represented only as inert navigation placeholders; no production/VPS actions have been implemented.
 - Added focused route-handler tests for app create/edit proxying and daemon-unreachable edit failures.
 
+Additional Checkpoint 2.5 frontend design enhancement work completed after `d868b09`:
+
+- Refined the existing local-first product shell without adding production/VPS behavior.
+- Tightened app row rhythm across desktop, tablet, and mobile, including a safer desktop two-line metadata/action layout.
+- Improved inspector/log contrast, panel hierarchy, loading and empty states, shared action controls, focus states, disabled states, and add/edit form field affordances.
+- Kept browser calls same-origin under `/api/*`; no direct daemon calls were added.
+
 Verification for the current Checkpoint 2 / 2.5 work:
 
 - `npm run lint` passed.
@@ -158,6 +165,7 @@ Verification for the current Checkpoint 2 / 2.5 work:
 - `npm run build --workspace apps/cli` passed.
 - `npm run test --workspace apps/cli` passed: 4 files, 12 tests.
 - Browser/API smoke passed with daemon and web dev server running locally: `/api/apps` returned `hello-command`, `/api/apps/3/logs` returned an empty log payload, and desktop/tablet/mobile headless Chrome screenshots showed the responsive shell without obvious overlap.
+- Current design enhancement verification passed with `npm run lint`, `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, same-origin `/api/apps` smoke through the web server, and desktop/tablet/mobile headless Chrome screenshots. An initial desktop screenshot exposed app-row action overlap; this was fixed and rechecked with an updated desktop screenshot.
 
 Web build caveat:
 
@@ -165,8 +173,7 @@ Web build caveat:
 
 Recommended next step before moving on:
 
-- Do one more frontend design enhancement pass on the existing Checkpoint 2.5 shell, focused on visual quality, responsive polish, app row/action ergonomics, inspector/log readability, and form states.
-- After that, move to Checkpoint 3 only if the frontend remains stable and production/VPS work is still explicitly deferred.
+- Move to Checkpoint 3 only if the frontend remains stable and production/VPS work is still explicitly deferred.
 
 Checkpoint 2.5 has been added to `docs/14-implementation-plan.md` as the explicit frontend polish checkpoint:
 
