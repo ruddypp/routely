@@ -18,25 +18,36 @@ import {
 import {
   appendDeploymentLog,
   createDeployment,
+  createDomain,
   deleteApp,
+  deleteDomain,
+  deleteProxyRouteForDomain,
   getDeploymentById,
+  getDomainByHostname,
   getAppById,
   getLatestSuccessfulDeploymentForApp,
   getServerFoundationState,
+  getSetting,
   initializeRoutely,
   listDeploymentLogs,
   listDeployments,
   listDeploymentsForApp,
+  listDomains,
+  listDomainsForApp,
+  listProxyRoutes,
   listRunningRuntimeInstances,
   listApps,
   recordRuntimeStart,
   recordRuntimeStop,
   reconcileStaleRuntimeInstances,
   saveServerFoundationState,
+  setSetting,
   syncWorkspaceConfig,
   updateApp,
   updateDeployment,
   updateAppStatus,
+  updateDomainVerification,
+  upsertProxyRoute,
   upsertApp
 } from "@routely/db";
 import {
@@ -51,6 +62,14 @@ import {
   startComposeService,
   stopComposeService
 } from "@routely/drivers";
+import {
+  buildTraefikDynamicConfig,
+  buildTraefikRoute,
+  normalizeHostname,
+  validateHostname,
+  verifyDnsARecord,
+  wildcardInstructions
+} from "@routely/proxy";
 
 const port = Number(process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT);
 const host = process.env.ROUTELY_DAEMON_HOST || "127.0.0.1";
@@ -115,7 +134,7 @@ function publicServerStatus() {
           checks: Array.isArray(lastDoctor.checks) ? lastDoctor.checks : []
         }
       : null,
-    disabledProductionActions: ["domains", "https", "github", "backups"]
+    disabledProductionActions: ["github", "backups", "metrics", "rollback"]
   };
 }
 
@@ -423,6 +442,81 @@ function deploymentUrl(deployment) {
   return deployment.host_port ? `http://127.0.0.1:${deployment.host_port}` : null;
 }
 
+function publicDomainDto(domain) {
+  return {
+    id: domain.id,
+    appId: domain.app_id,
+    appName: domain.app_name || null,
+    hostname: domain.hostname,
+    status: domain.status,
+    dnsStatus: domain.dns_status,
+    tlsStatus: domain.tls_status,
+    targetPort: domain.target_port == null ? null : Number(domain.target_port),
+    verificationMessage: domain.verification_message || null,
+    lastVerifiedAt: domain.last_verified_at || null,
+    appType: domain.app_type || null,
+    appInternal: Boolean(domain.app_internal),
+    createdAt: domain.created_at,
+    updatedAt: domain.updated_at
+  };
+}
+
+function publicProxyRouteDto(route) {
+  return {
+    id: route.id,
+    domainId: route.domain_id,
+    appId: route.app_id,
+    appName: route.app_name || null,
+    deploymentId: route.deployment_id || null,
+    hostname: route.hostname,
+    routerName: route.router_name,
+    serviceName: route.service_name,
+    targetUrl: route.target_url,
+    enabled: Boolean(route.enabled),
+    createdAt: route.created_at,
+    updatedAt: route.updated_at
+  };
+}
+
+function serverPublicIp() {
+  return process.env.ROUTELY_SERVER_PUBLIC_IP || getSetting(db, "server.public_ip") || null;
+}
+
+function materializeProxyRouteForDomain(domain) {
+  const appRecord = getAppById(db, domain.app_id);
+  const deployment = getLatestSuccessfulDeploymentForApp(db, domain.app_id);
+  const route = buildTraefikRoute({ domain, deployment, app: appRecord });
+
+  if (!route) {
+    deleteProxyRouteForDomain(db, domain.hostname);
+    return null;
+  }
+
+  return upsertProxyRoute(db, {
+    domainId: domain.id,
+    appId: domain.app_id,
+    deploymentId: deployment.id,
+    routerName: route.routerName,
+    serviceName: route.serviceName,
+    targetUrl: route.service.loadBalancer.servers[0].url,
+    config: route,
+    enabled: domain.status === "ready"
+  });
+}
+
+function materializeProxyRoutesForApp(appId) {
+  return listDomainsForApp(db, appId).map(materializeProxyRouteForDomain).filter(Boolean);
+}
+
+function currentTraefikConfig() {
+  const routes = listDomains(db).map((domain) => {
+    const appRecord = getAppById(db, domain.app_id);
+    const deployment = getLatestSuccessfulDeploymentForApp(db, domain.app_id);
+    return buildTraefikRoute({ domain, deployment, app: appRecord });
+  }).filter(Boolean);
+  return buildTraefikDynamicConfig(routes);
+}
+
 async function runHealthcheck(appRecord, deployment) {
   if (!deployment.container_name) {
     throw new Error("Deployment container name is missing.");
@@ -529,6 +623,10 @@ async function runDockerfileDeployment(appRecord, deploymentId) {
       finishedAt: new Date().toISOString()
     });
     updateAppStatus(db, appRecord.id, "running");
+    const routes = materializeProxyRoutesForApp(appRecord.id);
+    if (routes.length > 0) {
+      appendDeploymentLog(db, deploymentId, { phase: "succeeded", message: `refreshed ${routes.length} proxy route(s)` });
+    }
     appendDeploymentLog(db, deploymentId, { phase: "succeeded", message: `deployment succeeded at ${deploymentUrl(getDeploymentById(db, deploymentId))}` });
   } catch (error) {
     await markDeploymentFailed(deploymentId, getDeploymentById(db, deploymentId)?.phase || "failed", error, containerName);
@@ -628,6 +726,112 @@ app.get("/server/doctor", async () => {
 
   saveServerFoundationState(db, { lastDoctor: doctor });
   return { doctor, server: publicServerStatus() };
+});
+
+app.get("/domains", async () => {
+  return {
+    rootDomain: getSetting(db, "domain.root"),
+    serverPublicIp: serverPublicIp(),
+    domains: listDomains(db).map(publicDomainDto)
+  };
+});
+
+app.post("/domains/root", async (request, reply) => {
+  try {
+    const domain = validateHostname(request.body?.domain, { allowWildcard: false });
+    setSetting(db, "domain.root", domain);
+    return reply.code(200).send({ rootDomain: domain, instructions: wildcardInstructions(domain, serverPublicIp()) });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid root domain." });
+  }
+});
+
+app.post("/domains", async (request, reply) => {
+  try {
+    const appId = Number(request.body?.appId);
+    const appName = request.body?.appName ? String(request.body.appName) : null;
+    const appRecord = Number.isInteger(appId) ? getAppById(db, appId) : appName ? listApps(db).find((item) => item.name === appName) : null;
+    const hostname = validateHostname(request.body?.hostname);
+
+    if (!appRecord) {
+      return reply.code(404).send({ error: "Target app was not found." });
+    }
+    if (appRecord.internal || appRecord.type === "database") {
+      return reply.code(400).send({ error: `${appRecord.name} is internal and cannot be exposed through the public proxy.` });
+    }
+    if (getDomainByHostname(db, hostname)) {
+      return reply.code(409).send({ error: `${hostname} is already registered.` });
+    }
+
+    const latest = getLatestSuccessfulDeploymentForApp(db, appRecord.id);
+    const domain = createDomain(db, {
+      appId: appRecord.id,
+      hostname,
+      targetPort: latest?.host_port || null,
+      verificationMessage: `Create an A record for ${hostname} pointing to ${serverPublicIp() || "this server's public IP"}.`
+    });
+    materializeProxyRouteForDomain(domain);
+    return reply.code(201).send({ domain: publicDomainDto(getDomainByHostname(db, hostname)) });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid domain payload." });
+  }
+});
+
+app.get("/apps/:id/domains", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+  return { app: appToPublicDto(record), domains: listDomainsForApp(db, record.id).map(publicDomainDto) };
+});
+
+app.post("/apps/:id/domains", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+  request.body = { ...(request.body || {}), appId: record.id };
+  return app.inject({ method: "POST", url: "/domains", payload: request.body, headers: request.headers }).then((response) => {
+    reply.code(response.statusCode);
+    return JSON.parse(response.body || "{}");
+  });
+});
+
+app.post("/domains/:hostname/verify", async (request, reply) => {
+  const hostname = normalizeHostname(request.params.hostname);
+  const domain = getDomainByHostname(db, hostname);
+  if (!domain) {
+    return reply.code(404).send({ error: `Domain ${hostname} not found.` });
+  }
+
+  const result = await verifyDnsARecord(domain.hostname, serverPublicIp());
+  const latest = getLatestSuccessfulDeploymentForApp(db, domain.app_id);
+  const status = result.ok && latest?.host_port ? "ready" : result.ok ? "verified" : "pending";
+  const tlsStatus = status === "ready" ? "issuing" : "pending";
+  const updated = updateDomainVerification(db, domain.hostname, {
+    status,
+    dnsStatus: result.status,
+    tlsStatus,
+    targetPort: latest?.host_port || null,
+    verificationMessage: latest?.host_port ? result.message : `${result.message} Waiting for a successful deployment before enabling the route.`
+  });
+  materializeProxyRouteForDomain(updated);
+
+  return { domain: publicDomainDto(getDomainByHostname(db, domain.hostname)), verification: result };
+});
+
+app.delete("/domains/:hostname", async (request, reply) => {
+  const hostname = normalizeHostname(request.params.hostname);
+  if (!getDomainByHostname(db, hostname)) {
+    return reply.code(404).send({ error: `Domain ${hostname} not found.` });
+  }
+  deleteProxyRouteForDomain(db, hostname);
+  deleteDomain(db, hostname);
+  return { ok: true, hostname };
+});
+
+app.get("/proxy/routes", async () => {
+  return { routes: listProxyRoutes(db).map(publicProxyRouteDto), config: currentTraefikConfig() };
+});
+
+app.get("/proxy/config", async () => {
+  return currentTraefikConfig();
 });
 
 app.get("/apps", async () => {

@@ -228,20 +228,62 @@ Checkpoint 5 is now implemented as a Dockerfile-first production deploy vertical
 - Verification included a temporary local Dockerfile app smoke: `routely deploy web --watch` built an image, started a container on `127.0.0.1:32002`, passed HTTP healthcheck, streamed logs, and the test container/images were removed afterward.
 - Domains, HTTPS automation, GitHub automation, backups, static deploys, rollback UI/actions, and broad VPS operations remain deferred.
 
-Recommended next step after Checkpoint 5 verification and commit:
+Checkpoint 6 is now implemented as the proxy, domains, and HTTPS vertical slice:
+
+- `packages/proxy` now provides hostname validation, wildcard DNS instructions, mocked-testable DNS A-record verification, route naming, Traefik-compatible dynamic config generation, HTTPS redirect/secure header middleware config, and Docker label helpers.
+- SQLite migrations now create `domains` and `proxy_routes` tables.
+- DB helpers list/create/delete/update domain records and persist materialized proxy routes with generated target/config metadata.
+- The daemon exposes domain/proxy endpoints:
+  - `GET /domains`
+  - `POST /domains/root`
+  - `POST /domains`
+  - `GET /apps/:id/domains`
+  - `POST /apps/:id/domains`
+  - `POST /domains/:hostname/verify`
+  - `DELETE /domains/:hostname`
+  - `GET /proxy/routes`
+  - `GET /proxy/config`
+- Existing production auth enforcement protects the new private domain/proxy endpoints in production mode.
+- Domain add rejects internal/database apps and duplicate/invalid hostnames.
+- DNS verification compares A records to `ROUTELY_SERVER_PUBLIC_IP` or `server.public_ip` from settings and stores actionable status/messages.
+- Successful Dockerfile deployments now refresh materialized proxy routes for that app.
+- Routes target the latest successful deployment host port; if there is no successful deployment, the domain remains pending/verified without a misleading live route.
+- TLS state is conservative: verified routes move to `issuing` for Traefik/ACME handoff, but Routely does not claim a certificate is active without future certificate observation.
+- CLI commands added:
+  - `routely domain root <domain>`
+  - `routely domain add <app> <hostname>`
+  - `routely domain verify <hostname>`
+  - `routely domain ls`
+- Next.js same-origin API routes now proxy `/api/domains`, `/api/domains/root`, `/api/domains/:hostname/verify`, `/api/domains/:hostname`, and `/api/proxy/routes`.
+- The production dashboard panel now shows real domain/DNS/proxy/TLS state, root-domain DNS setup, app hostname add, DNS verify/remove controls, proxy target URLs, and inert placeholders for GitHub/backups/metrics/rollback.
+- Browser code still calls same-origin `/api/*` only.
+- GitHub automation, backups, static deploys, production database templates, full rollback, metrics collection, notifications, and broad VPS operations remain deferred.
+
+Checkpoint 6 verification performed:
+
+- `npm run lint` passed.
+- `npm run test` passed: CLI 8 files / 25 tests, web 6 files / 13 tests.
+- `npm run build --workspace apps/cli` passed.
+- `npm run test --workspace apps/web` passed.
+- `npx tsc -p apps/web/tsconfig.json --noEmit` passed.
+- `node --check apps/daemon/src/server.js` passed.
+- `node -e "import('@routely/proxy').then((m)=>console.log(m.routelyProxyVersion))"` passed.
+- `npm run build --workspace apps/web` and the broad workspace build were attempted; the tool again returned only `Finished TypeScript...` and no final exit marker, while `.next` artifacts existed and no build process remained. This matches the known build-capture caveat from prior checkpoints.
+
+Recommended next step after Checkpoint 6 verification and commit:
 
 ```text
-Move to Checkpoint 6: Proxy, Domains, and HTTPS.
+Move to Checkpoint 7: GitHub Integration and Auto Deploy.
 ```
 
-Do not start GitHub automation, backups, or broader VPS operations before their checkpoints. Domains/HTTPS are the next checkpoint; until then production navigation remains locked except for server readiness and Dockerfile deployment status/actions.
+Do not start backups, production database templates, full rollback, metrics collection, notifications, or broader VPS operations before their checkpoints. GitHub automation is the next checkpoint; keep it scoped to repository connection/webhook/deploy triggering and preserve existing domain/proxy/deploy behavior.
 
 ## Current Progress Snapshot For Next Agent
 
 Last completed commit:
 
 ```text
-pending commit: feat: add production deploy slice
+pending commit: feat: add domain proxy slice
 ```
 
 Current state:
@@ -253,11 +295,13 @@ Current state:
 - Checkpoint 3 config, presets, and Compose services is implemented.
 - Checkpoint 4 production server foundation is implemented.
 - Checkpoint 5 production deploy vertical slice is implemented.
+- Checkpoint 6 proxy, domains, and HTTPS is implemented.
 - Browser calls remain same-origin under `/api/*`.
 - The shell currently has desktop sidebar navigation, mobile bottom navigation, workspace/status header, local app/service separation, dense resource rows, app/service inspector, recent logs, and add/edit registry forms.
 - The latest frontend pass improved row rhythm, inspector/log hierarchy, form validation/focus/disabled states, loading/empty states, responsive action wrapping, and the server foundation readiness panel.
 - Checkpoint 3 added richer config fields, preset detection, Compose-backed database services, `routely db add`, local Compose driver behavior, SQLite persistence for expanded registry fields, daemon lifecycle support for Compose resources, and dashboard visibility/editing for local services/databases.
 - Checkpoint 5 added deployment history/log tables, Dockerfile driver helpers, daemon deployment endpoints, `routely deploy <app> [--watch]`, same-origin Next.js deployment routes, and a production deploy dashboard panel backed by real deployment state.
+- Checkpoint 6 added domain/proxy tables, Traefik-compatible proxy helpers, daemon domain/proxy endpoints, CLI domain commands, same-origin Next.js domain/proxy routes, and a dashboard domain/proxy/HTTPS panel backed by daemon/API/storage state.
 - Known web build caveat remains: `npm run build --workspace apps/web` returns only `Finished TypeScript...` with no final exit marker and no remaining build process.
 
 Next execution direction:

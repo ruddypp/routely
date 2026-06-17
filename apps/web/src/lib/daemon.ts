@@ -91,6 +91,38 @@ export type DaemonDeploymentLogsResponse = {
   logs: DaemonDeploymentLog[];
 };
 
+export type DaemonDomain = {
+  id: number;
+  appId: number;
+  appName: string | null;
+  hostname: string;
+  status: string;
+  dnsStatus: string;
+  tlsStatus: string;
+  targetPort: number | null;
+  verificationMessage: string | null;
+  lastVerifiedAt: string | null;
+  appType?: string | null;
+  appInternal?: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DaemonProxyRoute = {
+  id: number;
+  domainId: number;
+  appId: number;
+  appName: string | null;
+  deploymentId: number | null;
+  hostname: string;
+  routerName: string;
+  serviceName: string;
+  targetUrl: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type DaemonHealth = {
   ok: boolean;
   service: string;

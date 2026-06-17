@@ -47,6 +47,7 @@ import {
 } from "@routely/db";
 import { startCommandApp, startComposeService, stopComposeService } from "@routely/drivers";
 import { createDatabaseService, detectPreset, getAppPreset } from "@routely/presets";
+import { validateHostname } from "@routely/proxy";
 import { DependencyCycleError, sortByDependencies } from "./dependencies.js";
 import { resolveInstallRoot, resolveWorkspaceRoot } from "./paths.js";
 import { findUnavailablePorts } from "./ports.js";
@@ -124,6 +125,10 @@ Usage:
   routely logs [app]       Print app logs, optionally with --follow
   routely restart [app]    Restart one command app
   routely deploy <app>     Trigger a Dockerfile production deployment, optionally with --watch
+  routely domain root <domain>
+  routely domain add <app> <hostname>
+  routely domain verify <hostname>
+  routely domain ls
   routely doctor           Check local Routely prerequisites and port availability
   routely server init      Prepare production server foundation state and admin token
   routely server doctor    Check production server readiness
@@ -136,6 +141,25 @@ Defaults:
 }
 
 type DaemonResult<T> = { ok: true; data: T; status: number } | { ok: false; error: string; status: number };
+
+type RoutelyDomainDto = {
+  id: number;
+  appId: number;
+  appName: string | null;
+  hostname: string;
+  status: string;
+  dnsStatus: string;
+  tlsStatus: string;
+  targetPort: number | null;
+  verificationMessage: string | null;
+  lastVerifiedAt: string | null;
+};
+
+type RoutelyDomainListResponse = {
+  rootDomain: string | null;
+  serverPublicIp: string | null;
+  domains: RoutelyDomainDto[];
+};
 
 async function daemonRequest<T>(path: string, init: RequestInit = {}): Promise<DaemonResult<T>> {
   const daemonUrl = process.env.ROUTELY_DAEMON_URL || `http://127.0.0.1:${process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT}`;
@@ -809,6 +833,97 @@ async function watchDeployment(deploymentId: number): Promise<void> {
   }
 }
 
+async function domainCommand(args: string[]): Promise<void> {
+  const subcommand = args[0];
+
+  if (subcommand === "root") {
+    const domain = String(args[1] || "").trim();
+    if (!domain) {
+      console.error("Usage: routely domain root <domain>");
+      process.exit(1);
+    }
+    const result = await daemonRequest<{ rootDomain: string; instructions: { records: Array<{ type: string; name: string; value: string }>; examples: string[] } }>("/domains/root", {
+      method: "POST",
+      body: JSON.stringify({ domain: validateHostname(domain, { allowWildcard: false }) })
+    });
+    if (!result.ok) {
+      console.error(`Could not set root domain: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`Root domain: ${result.data.rootDomain}`);
+    console.log("DNS records:");
+    for (const record of result.data.instructions.records) {
+      console.log(`  ${record.type}\t${record.name}\t${record.value}`);
+    }
+    console.log(`Examples: ${result.data.instructions.examples.join(", ")}`);
+    return;
+  }
+
+  if (subcommand === "add") {
+    const appName = String(args[1] || "").trim();
+    const hostname = String(args[2] || "").trim();
+    if (!appName || !hostname) {
+      console.error("Usage: routely domain add <app> <hostname>");
+      process.exit(1);
+    }
+    const result = await daemonRequest<{ domain: RoutelyDomainDto }>("/domains", {
+      method: "POST",
+      body: JSON.stringify({ appName, hostname: validateHostname(hostname) })
+    });
+    if (!result.ok) {
+      console.error(`Could not add domain: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`Added ${result.data.domain.hostname} -> ${result.data.domain.appName || appName}`);
+    console.log(`Status: ${result.data.domain.status} / DNS ${result.data.domain.dnsStatus} / TLS ${result.data.domain.tlsStatus}`);
+    if (result.data.domain.verificationMessage) {
+      console.log(result.data.domain.verificationMessage);
+    }
+    return;
+  }
+
+  if (subcommand === "verify") {
+    const hostname = String(args[1] || "").trim();
+    if (!hostname) {
+      console.error("Usage: routely domain verify <hostname>");
+      process.exit(1);
+    }
+    const encoded = encodeURIComponent(validateHostname(hostname));
+    const result = await daemonRequest<{ domain: RoutelyDomainDto; verification: { ok: boolean; message: string; addresses: string[]; expected: string } }>(`/domains/${encoded}/verify`, {
+      method: "POST"
+    });
+    if (!result.ok) {
+      console.error(`Could not verify domain: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`${result.data.verification.ok ? "OK" : "CHECK"} ${result.data.domain.hostname}`);
+    console.log(result.data.verification.message);
+    console.log(`Status: ${result.data.domain.status} / DNS ${result.data.domain.dnsStatus} / TLS ${result.data.domain.tlsStatus}`);
+    return;
+  }
+
+  if (subcommand === "ls" || subcommand === "list") {
+    const result = await daemonRequest<RoutelyDomainListResponse>("/domains");
+    if (!result.ok) {
+      console.error(`Could not list domains: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`Root: ${result.data.rootDomain || "not set"}`);
+    console.log(`Server IP: ${result.data.serverPublicIp || "not set"}`);
+    if (result.data.domains.length === 0) {
+      console.log("No domains registered yet.");
+      return;
+    }
+    for (const domain of result.data.domains) {
+      console.log(`${domain.hostname}\t${domain.appName || domain.appId}\t${domain.status}\tdns:${domain.dnsStatus}\ttls:${domain.tlsStatus}\t${domain.targetPort ? `:${domain.targetPort}` : "-"}`);
+    }
+    return;
+  }
+
+  console.error("Usage: routely domain <root|add|verify|ls> ...");
+  process.exit(1);
+}
+
 async function doctorCommand(): Promise<void> {
   const { db } = initializeRoutely(workspaceRoot);
   syncConfig(db);
@@ -952,6 +1067,9 @@ switch (command) {
     break;
   case "deploy":
     await deployCommand(argv.slice(1));
+    break;
+  case "domain":
+    await domainCommand(argv.slice(1));
     break;
   case "doctor":
     await doctorCommand();

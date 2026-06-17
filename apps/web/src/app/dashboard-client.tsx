@@ -123,6 +123,38 @@ type DeploymentLogsResponse = {
   logs: DaemonDeploymentLog[];
 };
 
+type DaemonDomain = {
+  id: number;
+  appId: number;
+  appName: string | null;
+  hostname: string;
+  status: string;
+  dnsStatus: string;
+  tlsStatus: string;
+  targetPort: number | null;
+  verificationMessage: string | null;
+  lastVerifiedAt: string | null;
+  appType?: string | null;
+  appInternal?: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type DaemonProxyRoute = {
+  id: number;
+  domainId: number;
+  appId: number;
+  appName: string | null;
+  deploymentId: number | null;
+  hostname: string;
+  routerName: string;
+  serviceName: string;
+  targetUrl: string;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type HealthResponse = {
   connected: boolean;
   daemonUrl: string;
@@ -142,6 +174,19 @@ type ServerStatusResponse = {
 
 type DeploymentsResponse = {
   deployments: DaemonDeployment[];
+  error?: string | null;
+};
+
+type DomainsResponse = {
+  rootDomain: string | null;
+  serverPublicIp: string | null;
+  domains: DaemonDomain[];
+  error?: string | null;
+};
+
+type ProxyRoutesResponse = {
+  routes: DaemonProxyRoute[];
+  config: Record<string, unknown>;
   error?: string | null;
 };
 
@@ -366,6 +411,15 @@ export default function DashboardClient() {
   const [appsError, setAppsError] = useState<string | null>(null);
   const [deployments, setDeployments] = useState<DaemonDeployment[]>([]);
   const [deploymentsError, setDeploymentsError] = useState<string | null>(null);
+  const [domains, setDomains] = useState<DaemonDomain[]>([]);
+  const [domainsMeta, setDomainsMeta] = useState<{ rootDomain: string | null; serverPublicIp: string | null }>({ rootDomain: null, serverPublicIp: null });
+  const [domainsError, setDomainsError] = useState<string | null>(null);
+  const [proxyRoutes, setProxyRoutes] = useState<DaemonProxyRoute[]>([]);
+  const [proxyError, setProxyError] = useState<string | null>(null);
+  const [domainSaving, setDomainSaving] = useState(false);
+  const [domainActionByHostname, setDomainActionByHostname] = useState<Record<string, string | null>>({});
+  const [domainForm, setDomainForm] = useState({ appId: "", hostname: "" });
+  const [rootDomainInput, setRootDomainInput] = useState("");
   const [deploymentLogs, setDeploymentLogs] = useState<DeploymentLogsResponse | null>(null);
   const [deploymentLogsLoading, setDeploymentLogsLoading] = useState(false);
   const [deploymentLogsError, setDeploymentLogsError] = useState<string | null>(null);
@@ -391,17 +445,21 @@ export default function DashboardClient() {
     if (showRefresh) setRefreshing(true);
 
     try {
-      const [healthRes, appsRes, serverRes, deploymentsRes] = await Promise.all([
+      const [healthRes, appsRes, serverRes, deploymentsRes, domainsRes, proxyRes] = await Promise.all([
         fetch("/api/health", { cache: "no-store" }),
         fetch("/api/apps", { cache: "no-store" }),
         fetch("/api/server/status", { cache: "no-store" }),
-        fetch("/api/deployments", { cache: "no-store" })
+        fetch("/api/deployments", { cache: "no-store" }),
+        fetch("/api/domains", { cache: "no-store" }),
+        fetch("/api/proxy/routes", { cache: "no-store" })
       ]);
 
       const healthData = (await healthRes.json()) as HealthResponse;
       const appsData = (await appsRes.json()) as AppsResponse;
       const serverData = (await serverRes.json().catch(() => ({ server: null, error: "Server status unavailable." }))) as ServerStatusResponse;
       const deploymentsData = (await deploymentsRes.json().catch(() => ({ deployments: [], error: "Deployments unavailable." }))) as DeploymentsResponse;
+      const domainsData = (await domainsRes.json().catch(() => ({ rootDomain: null, serverPublicIp: null, domains: [], error: "Domains unavailable." }))) as DomainsResponse;
+      const proxyData = (await proxyRes.json().catch(() => ({ routes: [], config: {}, error: "Proxy routes unavailable." }))) as ProxyRoutesResponse;
 
       if (!mounted.current) return;
 
@@ -412,6 +470,12 @@ export default function DashboardClient() {
       setAppsError(appsData.error);
       setDeployments(deploymentsData.deployments || []);
       setDeploymentsError(deploymentsData.error || null);
+      setDomains(domainsData.domains || []);
+      setDomainsMeta({ rootDomain: domainsData.rootDomain || null, serverPublicIp: domainsData.serverPublicIp || null });
+      setDomainsError(domainsData.error || null);
+      setProxyRoutes(proxyData.routes || []);
+      setProxyError(proxyData.error || null);
+      setRootDomainInput((current) => current || domainsData.rootDomain || "");
       setLastUpdated(new Date().toISOString());
       setSelectedAppId((current) => current ?? appsData.apps?.[0]?.id ?? null);
     } catch {
@@ -421,6 +485,8 @@ export default function DashboardClient() {
       setServerError("Dashboard could not reach its API.");
       setAppsError("Dashboard could not reach its API.");
       setDeploymentsError("Dashboard could not reach its API.");
+      setDomainsError("Dashboard could not reach its API.");
+      setProxyError("Dashboard could not reach its API.");
     } finally {
       if (mounted.current) setLoading(false);
       if (mounted.current && showRefresh) setRefreshing(false);
@@ -450,6 +516,16 @@ export default function DashboardClient() {
     }
     return latest;
   }, [deployments]);
+
+  const domainsByAppId = useMemo(() => {
+    const grouped = new Map<number, DaemonDomain[]>();
+    for (const domain of domains) {
+      const items = grouped.get(domain.appId) || [];
+      items.push(domain);
+      grouped.set(domain.appId, items);
+    }
+    return grouped;
+  }, [domains]);
 
   const loadLogs = useCallback(async (app: DaemonApp) => {
     setSelectedAppId(app.id);
@@ -513,6 +589,92 @@ export default function DashboardClient() {
       setDeployingByAppId((current) => ({ ...current, [app.id]: false }));
     }
   }, [loadDeploymentLogs, poll]);
+
+  const saveRootDomain = useCallback(async () => {
+    if (!rootDomainInput.trim()) return;
+    setDomainsError(null);
+    setDomainSaving(true);
+    try {
+      const response = await fetch("/api/domains/root", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ domain: rootDomainInput.trim() })
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as { rootDomain: string };
+      setDomainsMeta((current) => ({ ...current, rootDomain: data.rootDomain }));
+      setRootDomainInput(data.rootDomain);
+      void poll();
+    } catch (error) {
+      setDomainsError(error instanceof Error ? error.message : "Could not save root domain.");
+    } finally {
+      setDomainSaving(false);
+    }
+  }, [poll, rootDomainInput]);
+
+  const addDomain = useCallback(async () => {
+    if (!domainForm.appId || !domainForm.hostname.trim()) {
+      setDomainsError("Choose an app and enter a hostname.");
+      return;
+    }
+    setDomainsError(null);
+    setDomainSaving(true);
+    try {
+      const response = await fetch("/api/domains", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ appId: Number(domainForm.appId), hostname: domainForm.hostname.trim() })
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as { domain: DaemonDomain };
+      setDomains((current) => [...current.filter((item) => item.id !== data.domain.id), data.domain].sort((a, b) => a.hostname.localeCompare(b.hostname)));
+      setDomainForm({ appId: domainForm.appId, hostname: "" });
+      void poll();
+    } catch (error) {
+      setDomainsError(error instanceof Error ? error.message : "Could not add domain.");
+    } finally {
+      setDomainSaving(false);
+    }
+  }, [domainForm.appId, domainForm.hostname, poll]);
+
+  const verifyDomain = useCallback(async (domain: DaemonDomain) => {
+    setDomainsError(null);
+    setDomainActionByHostname((current) => ({ ...current, [domain.hostname]: "verify" }));
+    try {
+      const response = await fetch(`/api/domains/${encodeURIComponent(domain.hostname)}/verify`, {
+        method: "POST",
+        cache: "no-store"
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as { domain: DaemonDomain };
+      setDomains((current) => current.map((item) => (item.id === data.domain.id ? data.domain : item)));
+      void poll();
+    } catch (error) {
+      setDomainsError(error instanceof Error ? error.message : `Could not verify ${domain.hostname}.`);
+    } finally {
+      setDomainActionByHostname((current) => ({ ...current, [domain.hostname]: null }));
+    }
+  }, [poll]);
+
+  const removeDomain = useCallback(async (domain: DaemonDomain) => {
+    setDomainsError(null);
+    setDomainActionByHostname((current) => ({ ...current, [domain.hostname]: "remove" }));
+    try {
+      const response = await fetch(`/api/domains/${encodeURIComponent(domain.hostname)}`, {
+        method: "DELETE",
+        cache: "no-store"
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      setDomains((current) => current.filter((item) => item.id !== domain.id));
+      void poll();
+    } catch (error) {
+      setDomainsError(error instanceof Error ? error.message : `Could not remove ${domain.hostname}.`);
+    } finally {
+      setDomainActionByHostname((current) => ({ ...current, [domain.hostname]: null }));
+    }
+  }, [poll]);
 
   const runAction = useCallback(
     async (app: DaemonApp, action: AppAction) => {
@@ -652,11 +814,26 @@ export default function DashboardClient() {
               apps={dockerfileApps}
               connected={connected}
               deployments={deployments}
+              domains={domains}
+              domainsByAppId={domainsByAppId}
+              domainsError={domainsError || proxyError}
+              domainsMeta={domainsMeta}
+              domainActionByHostname={domainActionByHostname}
+              domainForm={domainForm}
+              domainSaving={domainSaving}
               error={deployError || deploymentsError}
               latestByAppId={latestDeploymentByAppId}
+              proxyRoutes={proxyRoutes}
+              rootDomainInput={rootDomainInput}
               server={serverStatus}
+              onAddDomain={() => void addDomain()}
               deployingByAppId={deployingByAppId}
+              onDomainFormChange={setDomainForm}
               onDeploy={(app) => void deployApp(app)}
+              onRemoveDomain={(domain) => void removeDomain(domain)}
+              onRootDomainChange={setRootDomainInput}
+              onSaveRootDomain={() => void saveRootDomain()}
+              onVerifyDomain={(domain) => void verifyDomain(domain)}
               onLogs={(deployment) => void loadDeploymentLogs(deployment)}
             />
 
@@ -738,6 +915,7 @@ export default function DashboardClient() {
               app={selectedApp}
               connected={connected}
               deployments={selectedDeployments}
+              domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []}
               deploymentLogs={deploymentLogs}
               deploymentLogsError={deploymentLogsError}
               deploymentLogsLoading={deploymentLogsLoading}
@@ -773,14 +951,15 @@ function Sidebar({ connected }: { connected: boolean }) {
       </div>
       <nav className="mt-7 space-y-1">
         <NavItem active label="Local apps" dot={connected} />
+        <NavItem label="Production" />
+        <NavItem label="Domains" dot={connected} />
         <NavItem label="Logs" />
         <NavItem label="Metrics" />
       </nav>
       <div className="mt-7 border-t border-white/5 pt-4">
         <p className="px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Later</p>
         <nav className="mt-2 space-y-1">
-          <NavItem label="Deployments" disabled />
-          <NavItem label="Domains" disabled />
+          <NavItem label="GitHub" disabled />
           <NavItem label="Databases" disabled />
           <NavItem label="Backups" disabled />
           <NavItem label="Settings" disabled />
@@ -901,7 +1080,7 @@ function MobileNav({ connected }: { connected: boolean }) {
     <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 gap-1 border-t border-white/5 bg-[#121212]/95 px-2 py-2 shadow-[rgba(0,0,0,0.5)_0px_-8px_24px] backdrop-blur lg:hidden">
       <MobileNavItem active label="Apps" />
       <MobileNavItem label="Logs" />
-      <MobileNavItem label="Deploy" disabled />
+      <MobileNavItem label="Prod" />
       <MobileNavItem label={connected ? "Online" : "Offline"} status={connected} />
     </nav>
   );
@@ -1011,21 +1190,51 @@ function ProductionDeployPanel({
   apps,
   connected,
   deployments,
+  domains,
+  domainsByAppId,
+  domainsError,
+  domainsMeta,
+  domainActionByHostname,
+  domainForm,
+  domainSaving,
   deployingByAppId,
   error,
   latestByAppId,
+  proxyRoutes,
+  rootDomainInput,
+  onAddDomain,
+  onDomainFormChange,
   onDeploy,
   onLogs,
+  onRemoveDomain,
+  onRootDomainChange,
+  onSaveRootDomain,
+  onVerifyDomain,
   server
 }: {
   apps: DaemonApp[];
   connected: boolean;
   deployments: DaemonDeployment[];
+  domains: DaemonDomain[];
+  domainsByAppId: Map<number, DaemonDomain[]>;
+  domainsError: string | null;
+  domainsMeta: { rootDomain: string | null; serverPublicIp: string | null };
+  domainActionByHostname: Record<string, string | null>;
+  domainForm: { appId: string; hostname: string };
+  domainSaving: boolean;
   deployingByAppId: Record<number, boolean>;
   error: string | null;
   latestByAppId: Map<number, DaemonDeployment>;
+  proxyRoutes: DaemonProxyRoute[];
+  rootDomainInput: string;
+  onAddDomain: () => void;
+  onDomainFormChange: (form: { appId: string; hostname: string }) => void;
   onDeploy: (app: DaemonApp) => void;
   onLogs: (deployment: DaemonDeployment) => void;
+  onRemoveDomain: (domain: DaemonDomain) => void;
+  onRootDomainChange: (value: string) => void;
+  onSaveRootDomain: () => void;
+  onVerifyDomain: (domain: DaemonDomain) => void;
   server: DaemonServerStatus | null;
 }) {
   const dockerReady = Boolean(server?.readiness?.checks.some((check) => check.id === "docker" && check.status === "ok"));
@@ -1041,20 +1250,21 @@ function ProductionDeployPanel({
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Production deploy</p>
           <h2 className="text-lg font-bold leading-tight sm:text-xl">Dockerfile vertical slice</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            Deploy actions build a local Dockerfile and start a container on a temporary host port. Domains, HTTPS, GitHub automation, and backups remain locked.
+            Dockerfile deployments run on temporary host ports, then verified domains generate Traefik-compatible HTTPS routes.
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
           <ReadinessCard label="Docker" value={dockerReady ? "ready" : "check"} status={dockerReady ? "ok" : "warn"} />
           <ReadinessCard label="Auth" value={authReady ? "ready" : "missing"} status={authReady ? "ok" : "error"} />
           <ReadinessCard label="Data dir" value={dataReady ? "ready" : "pending"} status={dataReady ? "ok" : "warn"} />
-          <ReadinessCard label="Ports" value="temporary" status="warn" />
+          <ReadinessCard label="Domains" value={domains.length ? `${domains.length}` : "none"} status={domains.length ? "ok" : "warn"} />
         </div>
       </div>
 
       {error ? <Alert title="Deployment action failed" message={error} /> : null}
+      {domainsError ? <Alert title="Domain or proxy action failed" message={domainsError} /> : null}
 
-      <div className="grid gap-0 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
+      <div className="grid gap-0 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.95fr)]">
         <div className="min-w-0 border-b border-white/5 lg:border-b-0 lg:border-r">
           <ResourceSection title="Deployable Dockerfile apps" count={apps.length} />
           {apps.length === 0 ? (
@@ -1072,6 +1282,7 @@ function ProductionDeployPanel({
                   </div>
                   <p className="mt-1 truncate font-mono text-[11px] text-muted">{shortPath(app.path)} to Dockerfile</p>
                   <p className="mt-1 text-[11px] text-muted">{latest?.hostPort ? `temporary URL http://127.0.0.1:${latest.hostPort}` : "temporary URL assigned after deploy"}</p>
+                  <p className="mt-1 truncate text-[11px] text-muted">{(domainsByAppId.get(app.id) || []).map((domain) => domain.hostname).join(", ") || "no production domains"}</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 md:justify-end">
                   {latest ? <PillButton onClick={() => onLogs(latest)}>Logs</PillButton> : null}
@@ -1083,6 +1294,65 @@ function ProductionDeployPanel({
         </div>
 
         <div className="min-w-0">
+          <ResourceSection title="Domains, proxy, HTTPS" count={domains.length} />
+          <div className="border-b border-white/5 px-4 py-3">
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <Field label="Root domain" value={rootDomainInput} onChange={onRootDomainChange} placeholder="example.com" disabled={!connected || domainSaving} />
+              <div className="flex items-end">
+                <PillButton onClick={onSaveRootDomain} disabled={!connected || domainSaving || !rootDomainInput.trim()} strong>Save root</PillButton>
+              </div>
+            </div>
+            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+              <Meta label="Server IP" value={domainsMeta.serverPublicIp || "set ROUTELY_SERVER_PUBLIC_IP"} mono />
+              <Meta label="Wildcard" value={domainsMeta.rootDomain ? `*.${domainsMeta.rootDomain}` : "set root domain"} mono />
+            </div>
+          </div>
+
+          <div className="border-b border-white/5 px-4 py-3">
+            <div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]">
+              <label>
+                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">App</span>
+                <select value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>
+                  <option value="">Choose app</option>
+                  {apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}
+                </select>
+              </label>
+              <Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} />
+              <div className="flex items-end">
+                <PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton>
+              </div>
+            </div>
+          </div>
+
+          {domains.length === 0 ? (
+            <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS must resolve before the route is marked ready.</div>
+          ) : domains.map((domain) => {
+            const action = domainActionByHostname[domain.hostname];
+            const route = proxyRoutes.find((item) => item.domainId === domain.id);
+            return (
+              <div key={domain.id} className="border-b border-white/5 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-sm font-bold">{domain.hostname}</p>
+                    <p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {route?.targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p>
+                  </div>
+                  <StatusBadge status={domain.status} />
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2">
+                  <ReadinessCard label="DNS" value={domain.dnsStatus} status={domain.dnsStatus === "verified" ? "ok" : "warn"} />
+                  <ReadinessCard label="TLS" value={domain.tlsStatus} status={domain.tlsStatus === "active" || domain.tlsStatus === "issuing" ? "ok" : "warn"} />
+                  <ReadinessCard label="Proxy" value={route?.enabled ? "ready" : "pending"} status={route?.enabled ? "ok" : "warn"} />
+                </div>
+                {domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton>
+                  <ActionLink href={domain.status === "ready" ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink>
+                  <PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton>
+                </div>
+              </div>
+            );
+          })}
+
           <ResourceSection title="Recent deployment phases" count={recent.length} />
           {recent.length === 0 ? (
             <div className="px-4 py-5 text-sm text-muted">Deployment history will appear here after the first Dockerfile deploy.</div>
@@ -1091,7 +1361,7 @@ function ProductionDeployPanel({
           ))}
           <div className="border-t border-white/5 bg-black/20 px-4 py-3">
             <div className="flex flex-wrap gap-2">
-              {['Domains', 'HTTPS', 'GitHub', 'Backups'].map((item) => (
+              {['GitHub', 'Backups', 'Metrics', 'Rollback'].map((item) => (
                 <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/60">{item} locked</span>
               ))}
             </div>
@@ -1124,6 +1394,7 @@ function DetailPanel({
   deploymentLogsError,
   deploymentLogsLoading,
   deployments,
+  domains,
   deploying,
   error,
   loading,
@@ -1141,6 +1412,7 @@ function DetailPanel({
   deploymentLogsError: string | null;
   deploymentLogsLoading: boolean;
   deployments: DaemonDeployment[];
+  domains: DaemonDomain[];
   deploying: boolean;
   error: string | null;
   loading: boolean;
@@ -1203,6 +1475,7 @@ function DetailPanel({
           <Meta label="Updated" value={timeAgo(app.updatedAt)} />
           <Meta label="Latest deploy" value={latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : "never"} />
           <Meta label="Temporary URL" value={latestDeployment?.hostPort ? `http://127.0.0.1:${latestDeployment.hostPort}` : "-"} mono wide />
+          <Meta label="Production domains" value={domains.map((domain) => `${domain.hostname} (${domain.status})`).join(", ") || "none"} mono wide />
           <Meta label="Path" value={app.path || "-"} mono wide />
           <Meta label="Healthcheck" value={app.healthcheck?.path ? `${app.healthcheck.path} -> ${app.healthcheck.expected_status || 200}` : "container state"} wide />
         </dl>

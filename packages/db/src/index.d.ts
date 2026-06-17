@@ -84,6 +84,62 @@ export function listDeploymentLogs(
   deploymentId: number,
   options?: { afterSequence?: number; limit?: number }
 ): RoutelyDeploymentLogRecord[];
+export interface RoutelyDomainRecord {
+  id: number;
+  app_id: number;
+  app_name?: string | null;
+  app_type?: string | null;
+  app_internal?: 0 | 1 | boolean | null;
+  hostname: string;
+  status: string;
+  dns_status: string;
+  tls_status: string;
+  target_port: number | null;
+  verification_message: string | null;
+  last_verified_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface RoutelyProxyRouteRecord {
+  id: number;
+  domain_id: number;
+  app_id: number;
+  deployment_id: number | null;
+  hostname?: string;
+  app_name?: string;
+  router_name: string;
+  service_name: string;
+  target_url: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+export function listDomains(db: Database.Database): RoutelyDomainRecord[];
+export function listDomainsForApp(db: Database.Database, appId: number): RoutelyDomainRecord[];
+export function getDomainByHostname(db: Database.Database, hostname: string): RoutelyDomainRecord | null;
+export function createDomain(db: Database.Database, input: { appId: number; hostname: string; targetPort?: number | null; verificationMessage?: string | null }): RoutelyDomainRecord;
+export function deleteDomain(db: Database.Database, hostname: string): boolean;
+export function updateDomainVerification(
+  db: Database.Database,
+  hostname: string,
+  input: { status?: string; dnsStatus?: string; tlsStatus?: string; targetPort?: number | null; verificationMessage?: string | null }
+): RoutelyDomainRecord | null;
+export function listProxyRoutes(db: Database.Database): RoutelyProxyRouteRecord[];
+export function upsertProxyRoute(
+  db: Database.Database,
+  input: {
+    domainId: number;
+    appId: number;
+    deploymentId?: number | null;
+    routerName: string;
+    serviceName: string;
+    targetUrl: string;
+    config?: Record<string, unknown>;
+    enabled?: boolean;
+  }
+): RoutelyProxyRouteRecord | null;
+export function deleteProxyRouteForDomain(db: Database.Database, hostname: string): boolean;
 export function getSetting(db: Database.Database, key: string): string | null;
 export function setSetting(db: Database.Database, key: string, value: string): void;
 export interface RoutelyServerFoundationState {

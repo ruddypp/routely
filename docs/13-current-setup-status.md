@@ -78,7 +78,15 @@ Lokasi dokumentasi:
 - `routely deploy <app>` queues a Dockerfile deployment through the daemon, and `routely deploy <app> --watch` streams incremental deployment logs until success or failure.
 - Dockerfile deploys currently build a local source path containing `Dockerfile`, start a container on a temporary `127.0.0.1:32xxx` host port, run either the configured HTTP healthcheck or a container-running check, and store image/container/port metadata for future rollback work.
 - The dashboard now includes a Dokploy-inspired production deploy panel and an inspector with Overview, Deployments, Logs, and Config tabs backed by daemon/API/storage data.
-- Domains, HTTPS automation, GitHub automation, backups, static deploys, rollback actions, and broader VPS operations remain deferred.
+- Checkpoint 6 has added the first domain/proxy/HTTPS vertical slice for Dockerfile-deployed apps.
+- SQLite now stores `domains` and `proxy_routes` state, including DNS status, TLS status, target port, verification messages, and generated route metadata.
+- `packages/proxy` now generates Traefik-compatible dynamic config, HTTPS redirect middleware, secure headers, route/service names, Docker labels, wildcard DNS instructions, hostname validation, and DNS A-record verification helpers.
+- The daemon exposes authenticated domain/proxy endpoints at `/domains`, `/domains/root`, `/domains/:hostname/verify`, `/domains/:hostname`, `/apps/:id/domains`, `/proxy/routes`, and `/proxy/config`.
+- `routely domain root <domain>`, `routely domain add <app> <hostname>`, `routely domain verify <hostname>`, and `routely domain ls` call the daemon and pass `ROUTELY_ADMIN_TOKEN` when configured.
+- Domain routes are tied to the latest successful Dockerfile deployment host port from Checkpoint 5. Internal/database apps are rejected for public proxy exposure.
+- Verified domains with a successful deployment materialize proxy route records and generated Traefik config. TLS state is conservative: `issuing` means Routely generated the HTTPS route for Traefik/ACME; Routely does not fake certificate success.
+- The dashboard production panel now includes real domain, DNS, proxy, and HTTPS state, root-domain DNS instructions, app hostname add, DNS verify/remove actions, proxy target visibility, and future GitHub/backups/metrics/rollback placeholders kept inert.
+- GitHub automation, backups, static deploys, production database templates, full rollback, metrics collection, notifications, and broader VPS operations remain deferred.
 
 ## Current Structure
 
@@ -192,6 +200,10 @@ routely doctor
 routely server init --data-dir /var/lib/routely
 routely server doctor
 routely deploy web --watch
+routely domain root example.com
+routely domain add web web.example.com
+routely domain verify web.example.com
+routely domain ls
 routely
 ```
 
@@ -201,7 +213,7 @@ Command apps declared in `routely.yml` can use `depends_on` to control local sta
 
 Local Compose services declared in `services:` use `driver: compose`. Generated Compose files are written under `.routely/compose` unless `compose_file` is supplied. Database templates are local-development defaults and are internal by default where practical.
 
-Production server foundation now supports the first Dockerfile deployment slice. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API and CLI processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Dockerfile deployments are available through `routely deploy <app> [--watch]` and the dashboard deploy panel. Domains, HTTPS automation, GitHub automation, backups, static deploys, rollback actions, and broad VPS operations remain deferred to later checkpoints.
+Production server foundation now supports Dockerfile deployments plus the first domain/proxy/HTTPS slice. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API and CLI processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Dockerfile deployments are available through `routely deploy <app> [--watch]` and the dashboard deploy panel. Domain commands and the dashboard can add hostnames, verify DNS against `ROUTELY_SERVER_PUBLIC_IP`, and generate Traefik-compatible HTTPS routes for the latest successful deployment. GitHub automation, backups, static deploys, full rollback, metrics, notifications, and broad VPS operations remain deferred to later checkpoints.
 
 ## CLI Build And Global Reinstall Flow
 
@@ -247,6 +259,8 @@ run command
 - Checkpoint 5 verification passed `npm run lint`, `npm run test --workspace apps/cli`, `npm run build --workspace apps/cli`, `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, and `node --check apps/daemon/src/server.js`.
 - Checkpoint 5 tests cover deployment state/log persistence, Dockerfile command builders, and same-origin Next.js deployment route proxying.
 - Checkpoint 5 smoke used a temporary local workspace with a Dockerfile app. `/api/apps` and `/api/deployments` returned through same-origin Next.js routes, desktop/tablet/mobile headless Chrome screenshots rendered the deploy panel without obvious overlap or horizontal overflow, and `routely deploy web --watch` built `routely/web:2`, started `routely_web_2` on `127.0.0.1:32002`, passed the HTTP healthcheck, streamed deployment logs, and was cleaned up afterward.
+- Checkpoint 6 verification passed `npm run lint`, `npm run test`, `npm run build --workspace apps/cli`, `npm run test --workspace apps/web`, `npx tsc -p apps/web/tsconfig.json --noEmit`, and `node --check apps/daemon/src/server.js`.
+- Checkpoint 6 tests cover proxy config generation, Docker labels, wildcard instructions, mocked DNS verification, persisted domain/proxy route state, and same-origin Next.js domain/proxy route handlers.
 - `npm run build --workspace apps/web` still returns only the partial `Finished TypeScript...` progress line with no final exit marker and no remaining build process, matching the existing web build caveat.
 
 ## Environment Check

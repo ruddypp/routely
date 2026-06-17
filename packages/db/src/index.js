@@ -139,6 +139,35 @@ export function migrate(db) {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS domains (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+      hostname TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'pending',
+      dns_status TEXT NOT NULL DEFAULT 'pending',
+      tls_status TEXT NOT NULL DEFAULT 'pending',
+      target_port INTEGER,
+      verification_message TEXT,
+      last_verified_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS proxy_routes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      domain_id INTEGER NOT NULL REFERENCES domains(id) ON DELETE CASCADE,
+      app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+      deployment_id INTEGER REFERENCES deployments(id) ON DELETE SET NULL,
+      router_name TEXT NOT NULL,
+      service_name TEXT NOT NULL,
+      target_url TEXT NOT NULL,
+      config TEXT NOT NULL DEFAULT '{}',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(domain_id)
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -169,6 +198,11 @@ export function migrate(db) {
   addColumnIfMissing(db, "deployments", "previous_container_name", "TEXT");
   addColumnIfMissing(db, "deployments", "host_port", "INTEGER");
   addColumnIfMissing(db, "deployments", "container_port", "INTEGER");
+
+  addColumnIfMissing(db, "domains", "target_port", "INTEGER");
+  addColumnIfMissing(db, "domains", "verification_message", "TEXT");
+  addColumnIfMissing(db, "domains", "last_verified_at", "TEXT");
+  addColumnIfMissing(db, "proxy_routes", "deployment_id", "INTEGER REFERENCES deployments(id) ON DELETE SET NULL");
 
   db.prepare(`
     INSERT OR IGNORE INTO servers (id, name, kind, status)
@@ -639,6 +673,139 @@ function parseDeploymentRecord(row) {
     host_port: row.host_port == null ? null : Number(row.host_port),
     container_port: row.container_port == null ? null : Number(row.container_port)
   };
+}
+
+function parseDomainRecord(row) {
+  return {
+    ...row,
+    target_port: row.target_port == null ? null : Number(row.target_port)
+  };
+}
+
+function parseProxyRouteRecord(row) {
+  return {
+    ...row,
+    enabled: Boolean(row.enabled),
+    config: parseJsonObject(row.config)
+  };
+}
+
+export function listDomains(db) {
+  return db.prepare(`
+    SELECT domains.*, apps.name AS app_name, apps.type AS app_type, apps.internal AS app_internal
+    FROM domains
+    JOIN apps ON apps.id = domains.app_id
+    ORDER BY domains.hostname ASC
+  `).all().map(parseDomainRecord);
+}
+
+export function listDomainsForApp(db, appId) {
+  return db.prepare(`
+    SELECT domains.*, apps.name AS app_name, apps.type AS app_type, apps.internal AS app_internal
+    FROM domains
+    JOIN apps ON apps.id = domains.app_id
+    WHERE domains.app_id = ?
+    ORDER BY domains.hostname ASC
+  `).all(appId).map(parseDomainRecord);
+}
+
+export function getDomainByHostname(db, hostname) {
+  const row = db.prepare(`
+    SELECT domains.*, apps.name AS app_name, apps.type AS app_type, apps.internal AS app_internal
+    FROM domains
+    JOIN apps ON apps.id = domains.app_id
+    WHERE domains.hostname = ?
+  `).get(hostname) || null;
+  return row ? parseDomainRecord(row) : null;
+}
+
+export function createDomain(db, input) {
+  const hostname = String(input.hostname || "").trim().toLowerCase();
+  const result = db.prepare(`
+    INSERT INTO domains (app_id, hostname, status, dns_status, tls_status, target_port, verification_message)
+    VALUES (?, ?, 'pending', 'pending', 'pending', ?, ?)
+  `).run(input.appId, hostname, input.targetPort || null, input.verificationMessage || null);
+  return getDomainByHostname(db, hostname) || db.prepare("SELECT * FROM domains WHERE id = ?").get(Number(result.lastInsertRowid));
+}
+
+export function deleteDomain(db, hostname) {
+  const result = db.prepare("DELETE FROM domains WHERE hostname = ?").run(String(hostname || "").trim().toLowerCase());
+  return result.changes > 0;
+}
+
+export function updateDomainVerification(db, hostname, input) {
+  const existing = getDomainByHostname(db, hostname);
+  if (!existing) return null;
+
+  db.prepare(`
+    UPDATE domains
+    SET status = ?, dns_status = ?, tls_status = ?, target_port = ?, verification_message = ?, last_verified_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
+    WHERE hostname = ?
+  `).run(
+    input.status || existing.status,
+    input.dnsStatus || existing.dns_status,
+    input.tlsStatus || existing.tls_status,
+    input.targetPort === undefined ? existing.target_port : input.targetPort,
+    input.verificationMessage === undefined ? existing.verification_message : input.verificationMessage,
+    existing.hostname
+  );
+
+  return getDomainByHostname(db, existing.hostname);
+}
+
+export function listProxyRoutes(db) {
+  return db.prepare(`
+    SELECT proxy_routes.*, domains.hostname, apps.name AS app_name
+    FROM proxy_routes
+    JOIN domains ON domains.id = proxy_routes.domain_id
+    JOIN apps ON apps.id = proxy_routes.app_id
+    ORDER BY domains.hostname ASC
+  `).all().map(parseProxyRouteRecord);
+}
+
+export function upsertProxyRoute(db, input) {
+  const existing = db.prepare("SELECT id FROM proxy_routes WHERE domain_id = ?").get(input.domainId);
+  const config = serializeJsonObject(input.config) || "{}";
+
+  if (existing) {
+    db.prepare(`
+      UPDATE proxy_routes
+      SET app_id = ?, deployment_id = ?, router_name = ?, service_name = ?, target_url = ?, config = ?, enabled = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE domain_id = ?
+    `).run(
+      input.appId,
+      input.deploymentId || null,
+      input.routerName,
+      input.serviceName,
+      input.targetUrl,
+      config,
+      input.enabled === false ? 0 : 1,
+      input.domainId
+    );
+  } else {
+    db.prepare(`
+      INSERT INTO proxy_routes (domain_id, app_id, deployment_id, router_name, service_name, target_url, config, enabled)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.domainId,
+      input.appId,
+      input.deploymentId || null,
+      input.routerName,
+      input.serviceName,
+      input.targetUrl,
+      config,
+      input.enabled === false ? 0 : 1
+    );
+  }
+
+  return listProxyRoutes(db).find((route) => route.domain_id === input.domainId) || null;
+}
+
+export function deleteProxyRouteForDomain(db, hostname) {
+  const domain = getDomainByHostname(db, hostname);
+  if (!domain) return false;
+  const result = db.prepare("DELETE FROM proxy_routes WHERE domain_id = ?").run(domain.id);
+  return result.changes > 0;
 }
 
 export function getSetting(db, key) {
