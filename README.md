@@ -14,6 +14,7 @@ Current skeleton behavior:
 - Command-driver apps start in `depends_on` order from `routely.yml`; dependency cycles are rejected before startup.
 - Command app logs are persisted under `.routely/logs/<app>.log`.
 - `routely down`, `routely logs`, `routely restart`, and `routely doctor` provide local lifecycle controls.
+- The dashboard can start, stop, restart, open, and show recent logs for local command apps.
 - CLI commands and daemon boot reconcile stale runtime PIDs so old state does not leave apps marked running.
 - The global CLI uses the current working directory as the workspace by default. `ROUTELY_WORKSPACE_ROOT` can override it for tests or scripted runs.
 
@@ -81,8 +82,12 @@ GET    /apps          list registered apps
 POST   /apps          upsert an app
 GET    /apps/:id      fetch one app
 DELETE /apps/:id      remove an app
+POST   /apps/:id/start
+POST   /apps/:id/stop
+POST   /apps/:id/restart
+GET    /apps/:id/logs
 ```
 
-The dashboard mirrors these under `/api/health` and `/api/apps[/:id]`.
+The dashboard mirrors these under same-origin `/api/*` routes.
 
 Do not use port `20128`; that port is reserved for 9Router in the local development environment.

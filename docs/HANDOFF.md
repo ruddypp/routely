@@ -1,6 +1,6 @@
 # Routely Agent Handoff
 
-Last updated: 2026-06-16
+Last updated: 2026-06-17
 
 This file preserves the current implementation context so another agent can continue without relying on chat history.
 
@@ -35,6 +35,7 @@ For Next.js changes, follow `AGENTS.md`: read the relevant guide in `node_module
 Recent history at handoff time:
 
 ```text
+b5f62f0 docs: update checkpoint handoff
 8b296fb feat: finish local runner checkpoint
 51005c1 feat: implement Routely dashboard with Spotify-inspired theme and API integration
 8c48766 feat: add local runner lifecycle commands
@@ -125,10 +126,27 @@ Checkpoint 0 is complete.
 
 Checkpoint 1 is complete for the documented remaining scope.
 
+Checkpoint 2 has started. Implemented in the current working branch before the next handoff update:
+
+- Daemon local lifecycle endpoints:
+  - `POST /apps/:id/start`
+  - `POST /apps/:id/stop`
+  - `POST /apps/:id/restart`
+  - `GET /apps/:id/logs`
+- Next.js same-origin proxy route for app actions at `/api/apps/:id/:action`.
+- Dashboard app table controls for start, stop, restart, open local URL, manual refresh, and recent logs.
+- Focused route-handler tests for happy-path start proxying and daemon-unreachable log access.
+
+Remaining Checkpoint 2 scope:
+
+- Add app detail page or side panel beyond the log panel if desired.
+- Add add/edit app form using the app registry schema.
+- Add broader browser smoke and responsive checks.
+
 Recommended next step:
 
 ```text
-Start Checkpoint 2: Dashboard Local Controls.
+Continue Checkpoint 2: Dashboard Local Controls.
 ```
 
 Do not start production/VPS work yet. Continue with dashboard local controls and daemon lifecycle endpoints.
@@ -161,6 +179,7 @@ Default ports:
 - Stage only files related to the current checkpoint.
 - Do not commit `apps/cli/node_modules/` if it appears.
 - Browser code should call same-origin `/api/*` routes, not the daemon directly.
+- Dashboard lifecycle controls currently call `/api/apps/:id/start`, `/api/apps/:id/stop`, `/api/apps/:id/restart`, and `/api/apps/:id/logs`; these are handled by a single Next dynamic action route and proxied to the daemon.
 - Local daemon should bind to `127.0.0.1`.
 - Do not start production/VPS work until local runner and dashboard lifecycle primitives are reliable.
 
@@ -171,6 +190,7 @@ Use as appropriate:
 ```bash
 npm run test --workspace apps/cli
 npm run build --workspace apps/cli
+npm run test --workspace apps/web
 npm run lint
 ```
 
@@ -234,10 +254,19 @@ Do not start production/VPS work. Preserve unrelated user changes in the worktre
 - [ ] Read `AGENTS.md`, this handoff, and `docs/14-implementation-plan.md`.
 - [ ] Read relevant Next.js docs from `node_modules/next/dist/docs/` before editing `apps/web`.
 - [ ] Inspect `apps/daemon/src/server.js`, `apps/web/src/app/api`, and dashboard components.
-- [ ] Implement daemon lifecycle/log endpoints for local command apps.
-- [ ] Implement matching Next.js API route handlers.
-- [ ] Add dashboard controls and log viewing UX.
-- [ ] Add/adjust tests where practical.
+- [x] Implement daemon lifecycle/log endpoints for local command apps.
+- [x] Implement matching Next.js API route handlers.
+- [x] Add dashboard controls and log viewing UX.
+- [x] Add/adjust tests where practical.
 - [ ] Run lint/build/tests/smoke checks.
 - [ ] Update docs if behavior changes.
 - [ ] Commit Checkpoint 2 changes only.
+
+Verification note for the dashboard controls slice:
+
+- `npm run test --workspace apps/web` passed.
+- `../../node_modules/.bin/tsc --noEmit --pretty false` from `apps/web` passed.
+- `node --check apps/daemon/src/server.js` passed.
+- `npm run lint` passed.
+- `npm run build --workspace apps/cli` passed.
+- `npm run build --workspace apps/web` was attempted on the clean baseline and with this slice; both fail with the same hidden `Turbopack build failed with 2 errors` summary and no detailed diagnostics from the tool. Treat this as an existing web build issue, not introduced by the dashboard controls slice, until diagnosed separately.

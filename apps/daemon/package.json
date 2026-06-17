@@ -10,6 +10,7 @@
   "dependencies": {
     "@routely/core": "^0.1.0",
     "@routely/db": "^0.1.0",
+    "@routely/drivers": "^0.1.0",
     "dotenv": "^17.2.3",
     "fastify": "^5.6.2",
     "zod": "^4.2.1"

@@ -57,6 +57,7 @@ Lokasi dokumentasi:
 - CLI workspace resolution now separates the Routely install root from the active user workspace root.
 - `ROUTELY_WORKSPACE_ROOT` can override the active workspace for tests and scripted runs.
 - Local runner v1 has started: logs, down, restart, doctor, port preflight checks, dependency ordering, and stale PID reconciliation are implemented for command apps.
+- Dashboard local controls have started: browser calls same-origin `/api/*` handlers for app start, stop, restart, open URL, and recent log access.
 
 ## Current Structure
 
@@ -168,6 +169,8 @@ routely doctor
 routely
 ```
 
+The dashboard app table can start, stop, and restart local command-driver apps through the daemon. The log panel reads recent content from `.routely/logs/<app>.log` through `GET /api/apps/:id/logs`; browser code does not call the daemon directly.
+
 Command apps declared in `routely.yml` can use `depends_on` to control local startup order. Routely rejects dependency cycles before starting apps. CLI commands and daemon boot reconcile stale runtime PIDs so apps are not left marked `running` after an old managed process exits outside Routely.
 
 ## CLI Build And Global Reinstall Flow
@@ -237,7 +240,7 @@ Recommended next implementation step after skeleton v1:
 
 ```text
 Routely dashboard local controls
-  - Add dashboard start/stop controls for local command apps.
-  - Add daemon lifecycle endpoints for start/stop/restart/logs.
+  - Add add/edit app form using the app registry schema.
+  - Add broader dashboard smoke/responsive coverage.
   - Keep browser calls routed through same-origin /api/* handlers.
 ```

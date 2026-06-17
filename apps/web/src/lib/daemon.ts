@@ -25,6 +25,20 @@ export type DaemonApp = {
   updatedAt: string;
 };
 
+export type DaemonAppLifecycleResponse = {
+  app: DaemonApp;
+  pid?: number | null;
+  stopped?: Array<{ pid: number; result: string }>;
+};
+
+export type DaemonAppLogsResponse = {
+  app: DaemonApp;
+  logs: string;
+  path: string;
+  bytes: number;
+  truncated: boolean;
+};
+
 export type DaemonHealth = {
   ok: boolean;
   service: string;
@@ -75,4 +89,14 @@ export async function daemonFetch<T>(path: string, init?: RequestInit): Promise<
   } finally {
     clearTimeout(timeout);
   }
+}
+
+export function daemonProxyResponse<T>(result: DaemonResult<T>, fallback?: T) {
+  if (!result.ok) {
+    return Response.json(fallback ? { ...fallback, error: result.error } : { error: result.error }, {
+      status: result.status
+    });
+  }
+
+  return Response.json(result.data, { status: result.status });
 }
