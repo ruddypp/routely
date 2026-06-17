@@ -14,6 +14,17 @@ Core direction:
 - Dokploy-like VPS experience: use one VPS as a self-hosted control plane for deploys, domains, HTTPS, logs, metrics, databases, and backups.
 - Main differentiator: local-to-production workflow using the same app registry and dashboard mental model.
 
+Reference products future agents should inspect before major product/backend/frontend work:
+
+- 9Router repository: `https://github.com/decolua/9router`
+- 9Router Docker/runtime docs: `https://github.com/decolua/9router/blob/master/DOCKER.md`
+- Dokploy repository: `https://github.com/Dokploy/dokploy`
+- Dokploy product site: `https://dokploy.com/`
+- Dokploy docs: `https://docs.dokploy.com/`
+- Dokploy Going Production guide: `https://docs.dokploy.com/docs/core/applications/going-production`
+
+Use these as product references, not templates to clone. 9Router should inform the local-first one-command runner and fast dashboard control loop. Dokploy should inform the VPS production surface: dense panels, deployment history, domains, HTTPS/proxy, logs, resource status, readable inspector panels, and safe operational controls. Routely's product identity remains the bridge between local development and single-server production using one registry and one dashboard mental model.
+
 ## Read First
 
 Before implementing, read:
@@ -29,6 +40,8 @@ Before implementing, read:
 9. `docs/feature-specs/dashboard.md`
 10. `DESIGN.md`
 
+For production/dashboard work, also read the current 9Router and Dokploy repositories/docs listed above before planning implementation. The implementation should be comprehensive across backend, daemon/API, CLI where useful, persistence, tests, docs, and frontend. Frontend polish should make the panel more Dokploy-like, readable, and comfortable, but it must be backed by real daemon/API/storage data rather than mock-only UI.
+
 For Next.js changes, follow `AGENTS.md`: read the relevant guide in `node_modules/next/dist/docs/` before editing Next.js code.
 
 ## Recent Commits
@@ -36,6 +49,8 @@ For Next.js changes, follow `AGENTS.md`: read the relevant guide in `node_module
 Recent history at handoff time:
 
 ```text
+58b75b7 feat: add domain proxy slice
+010900c feat: add production deploy slice
 965695d feat: add production server foundation
 64d20ab feat: add local services config
 d868b09 feat: add frontend product shell

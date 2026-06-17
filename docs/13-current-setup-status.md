@@ -39,6 +39,13 @@ Lokasi dokumentasi:
 
 ## What Has Been Set Up
 
+Product references for future work:
+
+- Routely is inspired by 9Router's local-first runner/control-plane workflow and Dokploy's dense single-VPS deployment operations.
+- Future implementation agents should read `https://github.com/decolua/9router`, `https://github.com/Dokploy/dokploy`, and `https://docs.dokploy.com/` before major product/backend/frontend changes.
+- Frontend improvements should make the production panel more Dokploy-like: readable, operational, dense, status-rich, comfortable for daily VPS operations, and responsive.
+- Frontend work must not be frontend-only. New panels and controls should be backed by daemon/API/storage data where practical, with backend/schema/API/CLI/tests/docs progress leading each checkpoint.
+
 - Next.js dashboard/API scaffold exists in `apps/web`.
 - CLI package exists in `apps/cli`.
 - Daemon package exists in `apps/daemon`.

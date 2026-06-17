@@ -1,7 +1,7 @@
 # Next Agent Prompt
 
 Last updated: 2026-06-18  
-Latest completed commit: pending Checkpoint 6 commit `feat: add domain proxy slice`
+Latest completed commit: `58b75b7 feat: add domain proxy slice`
 
 Use this prompt for the next implementation agent. It asks for the next full product/backend/frontend slice, not a frontend-only redesign.
 
@@ -9,6 +9,19 @@ Use this prompt for the next implementation agent. It asks for the next full pro
 You are working in /home/ruddypp/Documents/work/routely.
 
 Read AGENTS.md, docs/HANDOFF.md, docs/14-implementation-plan.md, docs/13-current-setup-status.md, DESIGN.md, and the relevant feature/spec docs before editing. Follow AGENTS.md strictly, including the Next.js docs rule and the auto-commit rule.
+
+Before planning implementation, also read the current public reference products that inspired Routely:
+- 9Router repository: https://github.com/decolua/9router
+- 9Router Docker/runtime docs: https://github.com/decolua/9router/blob/master/DOCKER.md
+- Dokploy repository: https://github.com/Dokploy/dokploy
+- Dokploy product site: https://dokploy.com/
+- Dokploy docs: https://docs.dokploy.com/
+- Dokploy Going Production guide: https://docs.dokploy.com/docs/core/applications/going-production
+
+Do not clone either product mechanically. Use them to understand product feel and operational shape:
+- 9Router inspiration: local-first command/control experience, single local dashboard, fast status visibility, local data directory, practical one-command flow, and low-friction daily developer use.
+- Dokploy inspiration: dense production control panel, projects/apps/databases mental model, deployment history, domain/HTTPS/proxy operations, logs, server readiness, readable status cards, and comfortable VPS operations.
+- Routely's identity: bridge local development and single-VPS production through the same app registry and dashboard mental model.
 
 Project intent:
 Routely is a 9Router-inspired local app runner plus Dokploy-inspired single-VPS deployment platform. The differentiator is a local-to-production workflow for solo developers: local apps/services first, then one-server production operations using the same registry and dashboard mental model.
@@ -21,7 +34,7 @@ Current progress:
 - Checkpoint 3 config, presets, and Compose services is complete and committed.
 - Checkpoint 4 production server foundation is complete and committed.
 - Checkpoint 5 production deploy vertical slice is complete and committed.
-- Checkpoint 6 proxy, domains, and HTTPS is implemented and pending/currently committed as `feat: add domain proxy slice`.
+- Checkpoint 6 proxy, domains, and HTTPS is implemented and committed as `58b75b7 feat: add domain proxy slice`.
 - Browser code must keep using same-origin `/api/*`; do not call the daemon directly from browser code.
 - Local daemon should bind to `127.0.0.1` in local mode.
 - `routely.yml` remains desired portable config; SQLite stores runtime state/history.
@@ -66,9 +79,17 @@ Implement Checkpoint 7 from docs/14-implementation-plan.md comprehensively: GitH
 
 This must be a full product/backend/frontend slice. Do not only polish CSS. Build the smallest end-to-end GitHub App/repository/webhook path, docs, tests, daemon/API/storage behavior, CLI/API where needed, and dashboard controls while reusing the Checkpoint 4 auth foundation, Checkpoint 5 deployments, and Checkpoint 6 domain/proxy state.
 
+The implementation must be comprehensive and make real progress across the product:
+- Backend first: schema, persistence, daemon endpoints, auth, helpers, deployment integration, and failure states.
+- CLI/API where useful: commands or daemon-backed workflows that can be used without the browser.
+- Frontend after backend exists: improve the Dokploy-like production panel around real data, not mock UI.
+- Tests and docs: focused coverage for the new behavior and updated handoff/status docs.
+
 Important execution bar:
 - Make meaningful backend progress first: GitHub installation/repository tables, webhook delivery deduplication, signature validation helpers, daemon endpoints, auth enforcement, source metadata persistence, and tests.
 - Then enhance the frontend around real data: repository connection/config status, selected repo/branch for an app, webhook delivery status, and auto-deploy settings backed by daemon/API/storage data.
+- Improve the production dashboard so it feels closer to Dokploy: operational, dense, status-rich, readable, easy to use, and comfortable for daily VPS operations.
+- Do not make this frontend-only. Every visible production/GitHub/deploy/domain/proxy panel should be backed by daemon/API/storage data where practical, or intentionally disabled with a clear future-checkpoint label.
 - Keep unsafe or future production features inert. Do not implement backups, notifications, production database templates, full rollback, metrics collection, or broad VPS operations during Checkpoint 7.
 - Preserve browser same-origin `/api/*` only.
 - Preserve existing manual Dockerfile deploy and domain/proxy behavior.
@@ -112,6 +133,14 @@ Frontend/product goals:
 - Make GitHub controls operational, dense, and Dokploy-like while keeping future features visibly inert.
 - Keep Domains/Proxy/HTTPS and Deployments visible and stable.
 - No landing page, no generic marketing UI, no browser daemon calls.
+- Keep improving the main production panel as a full operational surface, not a collection of isolated cards:
+  - clear server/app/project hierarchy
+  - readable status rows and cards
+  - dense but scannable deployment and domain state
+  - obvious primary actions and safe disabled states
+  - right-side inspector tabs for Overview, Deployments, Domains, Proxy/HTTPS, GitHub, Logs, and Config where feasible
+  - responsive desktop/tablet/mobile layout without horizontal overflow or overlapping controls
+- Design should be Dokploy-inspired for VPS operations while still respecting Routely's `DESIGN.md`: dark functional surfaces, compact typography, strong hierarchy, restrained green accent for active/primary actions, and no SaaS landing-page treatment.
 
 Testing and verification:
 - Add unit tests for GitHub signature validation, webhook event filtering, and delivery deduplication.
@@ -141,3 +170,4 @@ Documentation and commit:
 - Keep the GitHub integration narrow: repository connection/source metadata plus signed webhook push-to-deploy.
 - Do not start backups, notifications, production database templates, metrics, full rollback, or broad VPS operations.
 - If GitHub App OAuth/setup is too large for one checkpoint, implement a conservative configured-state path with explicit environment/settings requirements, signature validation, webhook ingestion, source metadata, and tests.
+- Before making UI decisions, inspect Dokploy and 9Router for product patterns, then adapt those patterns to Routely's local-to-production workflow instead of copying screens directly.
