@@ -1,7 +1,7 @@
 # Next Agent Prompt
 
 Last updated: 2026-06-18  
-Latest completed commit: pending Checkpoint 4 commit after verification
+Latest completed commit: `965695d feat: add production server foundation`
 
 Use this prompt for the next implementation agent. It intentionally asks for a comprehensive product/backend/frontend slice, not a frontend-only redesign.
 
@@ -19,8 +19,8 @@ Current progress:
 - Checkpoint 2 dashboard local lifecycle controls are implemented and committed.
 - Checkpoint 2.5 frontend product shell is implemented and polished.
 - Checkpoint 3 config, presets, and Compose services is implemented and committed.
-- Checkpoint 4 production server foundation is implemented and should be committed as `feat: add production server foundation`.
-- Latest completed commit before Checkpoint 4: 64d20ab `feat: add local services config`.
+- Checkpoint 4 production server foundation is implemented and committed.
+- Latest completed commit: 965695d `feat: add production server foundation`.
 - Browser code must keep using same-origin `/api/*`; do not call the daemon directly from browser code.
 - Local daemon should bind to `127.0.0.1` in local mode.
 - `routely.yml` remains desired portable config; SQLite stores runtime state/history.
@@ -45,7 +45,13 @@ Current implemented surface:
 Your next task:
 Implement Checkpoint 5 from docs/14-implementation-plan.md comprehensively: Production Deploy Vertical Slice.
 
-This must be a full product/backend/frontend slice. Do not only polish CSS. Build the smallest end-to-end production deploy path, docs, and tests while reusing the Checkpoint 4 server foundation.
+This must be a full product/backend/frontend slice. Do not only polish CSS. Build the smallest end-to-end production deploy path, docs, tests, daemon/API/storage behavior, CLI commands, and a substantially improved Dokploy-inspired operational panel while reusing the Checkpoint 4 server foundation.
+
+Important execution bar:
+- Make meaningful backend progress first: deployment tables/state, Dockerfile deploy helpers, daemon endpoints, auth enforcement, CLI deploy commands, and focused tests.
+- Then enhance the frontend around that real data. The panel should feel much closer to Dokploy: operational, dense, status-rich, with deployment phases, logs, server readiness, resource status, and locked future capabilities clearly separated.
+- Do not deliver a frontend-only redesign. Every new production/deploy panel should be backed by daemon/API/storage data where practical.
+- Keep unsafe or future production features inert until their checkpoints. Do not implement domains, HTTPS automation, GitHub automation, backups, or broad VPS operations during Checkpoint 5.
 
 Required reading before coding:
 1. AGENTS.md
@@ -78,6 +84,9 @@ Inspect current implementation before changing it:
 - packages/drivers/*
 - packages/presets/*
 - packages/proxy/* if production foundation touches proxy planning
+- packages/core/src/server-foundation.js
+- docs/feature-specs/production-deploy.md
+- docs/feature-specs/runtime-and-build-system.md
 
 Checkpoint 5 backend/product goals:
 - Add the smallest complete production deployment vertical slice, centered on Dockerfile first and static only if the Dockerfile path is stable.
@@ -88,6 +97,10 @@ Checkpoint 5 backend/product goals:
 - Add only the daemon/API and same-origin Next.js route handlers needed for deployment status/log display and triggering the vertical slice.
 - Require production auth for deployment actions. Local mode must remain frictionless for local runner behavior.
 - Keep domains, HTTPS automation, GitHub automation, backups, and broader VPS operations deferred.
+- Make deployment logs inspectable from both CLI and dashboard.
+- Store enough metadata for later rollback without implementing full rollback if that would exceed Checkpoint 5.
+- Add failure states and useful error messages for missing Dockerfile, Docker unavailable, build failure, container start failure, and auth failure.
+- Do not bind production apps to public domains yet; use a temporary host port or internal container status as the checkpoint allows.
 
 Frontend/product goals:
 - Extend the current Dokploy-inspired operational surface with a deploy/status/log vertical slice backed by real deployment data.
@@ -95,9 +108,18 @@ Frontend/product goals:
 - Keep local resources and server foundation visible; add deployment status/log UI only where backend data exists.
 - Keep domains, HTTPS, GitHub, and backups disabled/inert until their checkpoints.
 - Keep the visual system aligned with DESIGN.md: near-black surfaces, compact typography, functional green accent, pill/circle controls, heavy dark elevation, no generic SaaS landing page.
+- Make the panel better than the current baseline:
+  - stronger right-side inspector with tabs/sections for Overview, Deployments, Logs, and Config where feasible
+  - deployment timeline/phase rows with clear statuses and timestamps
+  - server readiness cards for Docker/auth/data-dir/ports near deploy controls
+  - separate local resources vs production deployment surfaces without confusing local start/restart with deploy actions
+  - disabled placeholders for Domains, HTTPS, GitHub, and Backups that look intentional, not unfinished
+  - responsive desktop/tablet/mobile layouts with no overlap and no horizontal overflow
+  - action buttons disabled when auth/server readiness/deploy preconditions are missing
+- Preserve existing same-origin browser calls. Browser code must call `/api/*` only.
 
 Testing and verification:
-- Add or adjust tests for backend/server checks/config/API behavior. Pure CSS polish is not enough.
+- Add or adjust tests for backend/deployment state/config/API behavior. Pure CSS polish is not enough.
 - Run at minimum:
   - npm run lint
   - npm run test --workspace apps/cli if CLI/shared code is touched
@@ -113,12 +135,13 @@ Documentation and commit:
 - Update docs if behavior, commands, config fields, verification status, or known caveats change.
 - Update docs/HANDOFF.md and docs/13-current-setup-status.md at the end.
 - Preserve unrelated user changes. Do not use destructive git commands.
-- After verification, commit only files changed for this Checkpoint 4 slice with a concise commit message.
+- After verification, commit only files changed for this Checkpoint 5 slice with a concise commit message such as `feat: add production deploy slice`.
 ```
 
 ## Execution Notes For The Next Agent
 
 - The user explicitly wants the next slice to include a better Dokploy-inspired panel, but not as a frontend-only task.
-- Treat the UI as an operational surface backed by real server/doctor/auth/readiness data.
-- Keep production actions safe: showing readiness is acceptable; performing real deployments/domains/HTTPS/GitHub/backups is not part of Checkpoint 4.
-- If the current Checkpoint 4 scope needs a narrower first vertical slice, implement the smallest complete production foundation slice that includes CLI, daemon/API, storage/config, dashboard panel, tests, docs, and commit.
+- Treat the UI as an operational surface backed by real deployment/server/auth/readiness data.
+- Checkpoint 5 may perform the first real production deploy action, but keep it narrow: Dockerfile/static vertical slice only.
+- Keep domains, HTTPS automation, GitHub automation, backups, rollback UI beyond metadata, and broad VPS app operations out of scope until later checkpoints.
+- If the Checkpoint 5 scope needs narrowing, implement the smallest complete vertical slice that includes storage, CLI, daemon/API, same-origin Next.js API, dashboard panel, tests, docs, and commit.

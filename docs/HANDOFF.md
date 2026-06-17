@@ -36,6 +36,8 @@ For Next.js changes, follow `AGENTS.md`: read the relevant guide in `node_module
 Recent history at handoff time:
 
 ```text
+965695d feat: add production server foundation
+64d20ab feat: add local services config
 d868b09 feat: add frontend product shell
 0daf3e3 feat: add dashboard local controls
 b5f62f0 docs: update checkpoint handoff
@@ -216,7 +218,7 @@ Do not start domains, HTTPS, GitHub automation, backups, or broader VPS operatio
 Last completed commit:
 
 ```text
-64d20ab feat: add local services config
+965695d feat: add production server foundation
 ```
 
 Current state:
