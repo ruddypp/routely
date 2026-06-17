@@ -8,16 +8,25 @@ import {
   DEFAULT_DAEMON_PORT,
   appToPublicDto,
   defaultProductionDataDir,
+  deploymentLogToPublicDto,
+  deploymentToPublicDto,
   loadWorkspaceConfig,
   runServerDoctorChecks,
   upsertWorkspaceConfigEntry,
   verifyAdminToken
 } from "@routely/core";
 import {
+  appendDeploymentLog,
+  createDeployment,
   deleteApp,
+  getDeploymentById,
   getAppById,
+  getLatestSuccessfulDeploymentForApp,
   getServerFoundationState,
   initializeRoutely,
+  listDeploymentLogs,
+  listDeployments,
+  listDeploymentsForApp,
   listRunningRuntimeInstances,
   listApps,
   recordRuntimeStart,
@@ -26,10 +35,22 @@ import {
   saveServerFoundationState,
   syncWorkspaceConfig,
   updateApp,
+  updateDeployment,
   updateAppStatus,
   upsertApp
 } from "@routely/db";
-import { startCommandApp, startComposeService, stopComposeService } from "@routely/drivers";
+import {
+  buildDockerfileContainerName,
+  buildDockerfileImageTag,
+  dockerBuildArgs,
+  dockerInspectRunningArgs,
+  dockerRemoveContainerArgs,
+  dockerRunArgs,
+  spawnDocker,
+  startCommandApp,
+  startComposeService,
+  stopComposeService
+} from "@routely/drivers";
 
 const port = Number(process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT);
 const host = process.env.ROUTELY_DAEMON_HOST || "127.0.0.1";
@@ -94,7 +115,7 @@ function publicServerStatus() {
           checks: Array.isArray(lastDoctor.checks) ? lastDoctor.checks : []
         }
       : null,
-    disabledProductionActions: ["deployments", "domains", "https", "github", "backups"]
+    disabledProductionActions: ["domains", "https", "github", "backups"]
   };
 }
 
@@ -359,6 +380,161 @@ function waitForChild(child) {
   });
 }
 
+function waitForLoggedChild(child, deploymentId, phase) {
+  return new Promise((resolveWait, rejectWait) => {
+    child.stdout?.on("data", (chunk) => {
+      appendDeploymentLog(db, deploymentId, { phase, stream: "stdout", message: chunk.toString("utf8") });
+    });
+    child.stderr?.on("data", (chunk) => {
+      appendDeploymentLog(db, deploymentId, { phase, stream: "stderr", message: chunk.toString("utf8") });
+    });
+    child.on("error", rejectWait);
+    child.on("exit", (code) => {
+      if (code && code !== 0) {
+        rejectWait(new Error(`docker command exited with code ${code}`));
+      } else {
+        resolveWait();
+      }
+    });
+  });
+}
+
+async function dockerAvailable() {
+  try {
+    await waitForChild(spawnDocker(["--version"], { cwd: workspaceRoot, stdio: ["ignore", "pipe", "pipe"] }));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function allocateDeploymentPort(deploymentId) {
+  let candidate = 32000 + Number(deploymentId);
+  for (let attempt = 0; attempt < 200; attempt += 1) {
+    if (await isPortAvailable(candidate)) {
+      return candidate;
+    }
+    candidate += 1;
+  }
+  throw new Error("No temporary deployment port is available in the 32000-32199 range.");
+}
+
+function deploymentUrl(deployment) {
+  return deployment.host_port ? `http://127.0.0.1:${deployment.host_port}` : null;
+}
+
+async function runHealthcheck(appRecord, deployment) {
+  if (!deployment.container_name) {
+    throw new Error("Deployment container name is missing.");
+  }
+
+  const healthPath = appRecord.healthcheck?.path;
+  if (healthPath && deployment.host_port) {
+    const expected = Number(appRecord.healthcheck?.expected_status || 200);
+    const url = `${deploymentUrl(deployment)}${healthPath.startsWith("/") ? healthPath : `/${healthPath}`}`;
+    let lastError = null;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        const response = await fetch(url);
+        appendDeploymentLog(db, deployment.id, { phase: "healthchecking", message: `healthcheck ${url} -> ${response.status}` });
+        if (response.status === expected) {
+          return;
+        }
+        lastError = new Error(`healthcheck returned ${response.status}, expected ${expected}`);
+      } catch (error) {
+        lastError = error;
+        appendDeploymentLog(db, deployment.id, { phase: "healthchecking", stream: "stderr", message: error instanceof Error ? error.message : String(error) });
+      }
+      await sleep(750);
+    }
+    throw lastError || new Error("Healthcheck did not pass.");
+  }
+
+  const inspect = spawnDocker(dockerInspectRunningArgs(deployment.container_name), { cwd: workspaceRoot, stdio: ["ignore", "pipe", "pipe"] });
+  await waitForLoggedChild(inspect, deployment.id, "healthchecking");
+}
+
+async function removeContainerIfPresent(containerName, deploymentId, phase = "starting") {
+  if (!containerName) return;
+  try {
+    await waitForLoggedChild(spawnDocker(dockerRemoveContainerArgs(containerName), { cwd: workspaceRoot, stdio: ["ignore", "pipe", "pipe"] }), deploymentId, phase);
+  } catch {
+    // docker rm returns non-zero when the container is absent; absence is fine here.
+  }
+}
+
+async function markDeploymentFailed(deploymentId, phase, error, containerName) {
+  const message = error instanceof Error ? error.message : String(error);
+  appendDeploymentLog(db, deploymentId, { phase, stream: "stderr", message });
+  updateDeployment(db, deploymentId, {
+    status: "failed",
+    phase,
+    errorMessage: message,
+    finishedAt: new Date().toISOString()
+  });
+  await removeContainerIfPresent(containerName, deploymentId, phase);
+}
+
+async function runDockerfileDeployment(appRecord, deploymentId) {
+  let deployment = getDeploymentById(db, deploymentId);
+  const context = appRecord.path;
+  const dockerfile = context ? resolve(context, "Dockerfile") : null;
+  let containerName = null;
+
+  try {
+    updateDeployment(db, deploymentId, { status: "preparing", phase: "preparing" });
+    appendDeploymentLog(db, deploymentId, { phase: "preparing", message: `preparing Dockerfile deployment for ${appRecord.name}` });
+
+    if (appRecord.driver !== "dockerfile") {
+      throw new Error(`${appRecord.name} uses driver ${appRecord.driver}. Checkpoint 5 deploy supports dockerfile apps only.`);
+    }
+    if (!context) {
+      throw new Error(`${appRecord.name} does not have a source path configured.`);
+    }
+    if (!existsSync(dockerfile)) {
+      throw new Error(`Missing Dockerfile at ${dockerfile}.`);
+    }
+    if (!(await dockerAvailable())) {
+      throw new Error("Docker is not available to the Routely daemon.");
+    }
+
+    const hostPort = await allocateDeploymentPort(deploymentId);
+    const containerPort = appRecord.port || 3000;
+    const imageTag = buildDockerfileImageTag(appRecord.name, deploymentId);
+    containerName = buildDockerfileContainerName(appRecord.name, deploymentId);
+    deployment = updateDeployment(db, deploymentId, { imageTag, containerName, hostPort, containerPort });
+
+    updateDeployment(db, deploymentId, { status: "building", phase: "building" });
+    appendDeploymentLog(db, deploymentId, { phase: "building", message: `docker ${dockerBuildArgs({ context, dockerfile, imageTag }).join(" ")}` });
+    await waitForLoggedChild(spawnDocker(dockerBuildArgs({ context, dockerfile, imageTag }), { cwd: context }), deploymentId, "building");
+
+    updateDeployment(db, deploymentId, { status: "starting", phase: "starting" });
+    await removeContainerIfPresent(containerName, deploymentId, "starting");
+    appendDeploymentLog(db, deploymentId, { phase: "starting", message: `starting ${containerName} on temporary port ${hostPort}` });
+    await waitForLoggedChild(
+      spawnDocker(dockerRunArgs({ containerName, imageTag, hostPort, containerPort, env: appRecord.env || {} }), { cwd: context }),
+      deploymentId,
+      "starting"
+    );
+
+    deployment = getDeploymentById(db, deploymentId);
+    updateDeployment(db, deploymentId, { status: "healthchecking", phase: "healthchecking" });
+    appendDeploymentLog(db, deploymentId, { phase: "healthchecking", message: appRecord.healthcheck?.path ? "running HTTP healthcheck" : "checking container state" });
+    await runHealthcheck(appRecord, deployment);
+
+    updateDeployment(db, deploymentId, {
+      status: "succeeded",
+      phase: "succeeded",
+      errorMessage: null,
+      finishedAt: new Date().toISOString()
+    });
+    updateAppStatus(db, appRecord.id, "running");
+    appendDeploymentLog(db, deploymentId, { phase: "succeeded", message: `deployment succeeded at ${deploymentUrl(getDeploymentById(db, deploymentId))}` });
+  } catch (error) {
+    await markDeploymentFailed(deploymentId, getDeploymentById(db, deploymentId)?.phase || "failed", error, containerName);
+  }
+}
+
 async function stopLocalApp(appRecord, reason = "stop") {
   if (appRecord.driver === "compose") {
     if (appRecord.status !== "running") {
@@ -522,6 +698,69 @@ app.get("/apps/:id/logs", async (request, reply) => {
     path: logs.path,
     bytes: logs.bytes,
     truncated: logs.truncated
+  };
+});
+
+app.get("/deployments", async (request) => {
+  const appId = Number(request.query?.appId);
+  const deployments = Number.isInteger(appId)
+    ? listDeploymentsForApp(db, appId).map(deploymentToPublicDto)
+    : listDeployments(db).map(deploymentToPublicDto);
+  return { deployments };
+});
+
+app.get("/apps/:id/deployments", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+  return { app: appToPublicDto(record), deployments: listDeploymentsForApp(db, record.id).map(deploymentToPublicDto) };
+});
+
+app.post("/apps/:id/deployments", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+
+  if (!record.enabled) {
+    return reply.code(400).send({ error: `${record.name} is disabled.` });
+  }
+
+  const latest = getLatestSuccessfulDeploymentForApp(db, record.id);
+  const deployment = createDeployment(db, {
+    appId: record.id,
+    source: {
+      type: record.source?.type || "local",
+      repo: record.source?.repo || null,
+      branch: record.source?.branch || null
+    },
+    previous: latest
+      ? { imageTag: latest.image_tag, containerName: latest.container_name }
+      : {},
+    containerPort: record.port || 3000
+  });
+  appendDeploymentLog(db, deployment.id, { phase: "queued", message: `queued deployment for ${record.name}` });
+
+  void runDockerfileDeployment(record, deployment.id);
+  return reply.code(202).send({ app: appToPublicDto(record), deployment: deploymentToPublicDto(getDeploymentById(db, deployment.id)) });
+});
+
+app.get("/deployments/:id", async (request, reply) => {
+  const id = Number(request.params.id);
+  const deployment = Number.isInteger(id) ? getDeploymentById(db, id) : null;
+  if (!deployment) {
+    return reply.code(404).send({ error: `Deployment ${request.params.id} not found.` });
+  }
+  return { deployment: deploymentToPublicDto(deployment) };
+});
+
+app.get("/deployments/:id/logs", async (request, reply) => {
+  const id = Number(request.params.id);
+  const deployment = Number.isInteger(id) ? getDeploymentById(db, id) : null;
+  if (!deployment) {
+    return reply.code(404).send({ error: `Deployment ${request.params.id} not found.` });
+  }
+  const afterSequence = Number(request.query?.after || request.query?.afterSequence || 0);
+  return {
+    deployment: deploymentToPublicDto(deployment),
+    logs: listDeploymentLogs(db, deployment.id, { afterSequence }).map(deploymentLogToPublicDto)
   };
 });
 

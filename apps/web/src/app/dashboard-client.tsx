@@ -85,6 +85,44 @@ type DaemonAppLogsResponse = {
   truncated: boolean;
 };
 
+type DaemonDeployment = {
+  id: number;
+  appId: number;
+  appName: string | null;
+  status: string;
+  phase: string;
+  sourceType: string | null;
+  repo: string | null;
+  branch: string | null;
+  commitSha: string | null;
+  imageTag: string | null;
+  containerName: string | null;
+  previousImageTag: string | null;
+  previousContainerName: string | null;
+  hostPort: number | null;
+  containerPort: number | null;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type DaemonDeploymentLog = {
+  id: number;
+  deploymentId: number;
+  sequence: number;
+  phase: string;
+  stream: string;
+  message: string;
+  createdAt: string;
+};
+
+type DeploymentLogsResponse = {
+  deployment: DaemonDeployment;
+  logs: DaemonDeploymentLog[];
+};
+
 type HealthResponse = {
   connected: boolean;
   daemonUrl: string;
@@ -99,6 +137,11 @@ type AppsResponse = {
 
 type ServerStatusResponse = {
   server: DaemonServerStatus | null;
+  error?: string | null;
+};
+
+type DeploymentsResponse = {
+  deployments: DaemonDeployment[];
   error?: string | null;
 };
 
@@ -143,6 +186,12 @@ const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:
 const STATUS_STYLES: Record<string, string> = {
   running: "bg-accent/15 text-accent shadow-[0_0_0_1px_rgba(30,215,96,0.22)_inset]",
   starting: "bg-info/15 text-info shadow-[0_0_0_1px_rgba(83,157,245,0.2)_inset]",
+  queued: "bg-info/15 text-info shadow-[0_0_0_1px_rgba(83,157,245,0.2)_inset]",
+  preparing: "bg-info/15 text-info shadow-[0_0_0_1px_rgba(83,157,245,0.2)_inset]",
+  building: "bg-warning/15 text-warning shadow-[0_0_0_1px_rgba(255,164,43,0.2)_inset]",
+  healthchecking: "bg-warning/15 text-warning shadow-[0_0_0_1px_rgba(255,164,43,0.2)_inset]",
+  succeeded: "bg-accent/15 text-accent shadow-[0_0_0_1px_rgba(30,215,96,0.22)_inset]",
+  failed: "bg-negative/15 text-negative shadow-[0_0_0_1px_rgba(243,114,127,0.2)_inset]",
   stopped: "bg-white/10 text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]",
   crashed: "bg-negative/15 text-negative shadow-[0_0_0_1px_rgba(243,114,127,0.2)_inset]",
   unknown: "bg-white/10 text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]"
@@ -315,6 +364,13 @@ export default function DashboardClient() {
   const [serverError, setServerError] = useState<string | null>(null);
   const [apps, setApps] = useState<DaemonApp[]>([]);
   const [appsError, setAppsError] = useState<string | null>(null);
+  const [deployments, setDeployments] = useState<DaemonDeployment[]>([]);
+  const [deploymentsError, setDeploymentsError] = useState<string | null>(null);
+  const [deploymentLogs, setDeploymentLogs] = useState<DeploymentLogsResponse | null>(null);
+  const [deploymentLogsLoading, setDeploymentLogsLoading] = useState(false);
+  const [deploymentLogsError, setDeploymentLogsError] = useState<string | null>(null);
+  const [deployingByAppId, setDeployingByAppId] = useState<Record<number, boolean>>({});
+  const [deployError, setDeployError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -335,15 +391,17 @@ export default function DashboardClient() {
     if (showRefresh) setRefreshing(true);
 
     try {
-      const [healthRes, appsRes, serverRes] = await Promise.all([
+      const [healthRes, appsRes, serverRes, deploymentsRes] = await Promise.all([
         fetch("/api/health", { cache: "no-store" }),
         fetch("/api/apps", { cache: "no-store" }),
-        fetch("/api/server/status", { cache: "no-store" })
+        fetch("/api/server/status", { cache: "no-store" }),
+        fetch("/api/deployments", { cache: "no-store" })
       ]);
 
       const healthData = (await healthRes.json()) as HealthResponse;
       const appsData = (await appsRes.json()) as AppsResponse;
       const serverData = (await serverRes.json().catch(() => ({ server: null, error: "Server status unavailable." }))) as ServerStatusResponse;
+      const deploymentsData = (await deploymentsRes.json().catch(() => ({ deployments: [], error: "Deployments unavailable." }))) as DeploymentsResponse;
 
       if (!mounted.current) return;
 
@@ -352,6 +410,8 @@ export default function DashboardClient() {
       setServerError(serverData.error || null);
       setApps(appsData.apps || []);
       setAppsError(appsData.error);
+      setDeployments(deploymentsData.deployments || []);
+      setDeploymentsError(deploymentsData.error || null);
       setLastUpdated(new Date().toISOString());
       setSelectedAppId((current) => current ?? appsData.apps?.[0]?.id ?? null);
     } catch {
@@ -360,6 +420,7 @@ export default function DashboardClient() {
       setServerStatus(null);
       setServerError("Dashboard could not reach its API.");
       setAppsError("Dashboard could not reach its API.");
+      setDeploymentsError("Dashboard could not reach its API.");
     } finally {
       if (mounted.current) setLoading(false);
       if (mounted.current && showRefresh) setRefreshing(false);
@@ -374,6 +435,21 @@ export default function DashboardClient() {
     if (!selectedAppId) return null;
     return apps.find((app) => app.id === selectedAppId) || logs?.app || null;
   }, [apps, logs?.app, selectedAppId]);
+
+  const selectedDeployments = useMemo(() => {
+    if (!selectedAppId) return [];
+    return deployments.filter((deployment) => deployment.appId === selectedAppId);
+  }, [deployments, selectedAppId]);
+
+  const latestDeploymentByAppId = useMemo(() => {
+    const latest = new Map<number, DaemonDeployment>();
+    for (const deployment of deployments) {
+      if (!latest.has(deployment.appId)) {
+        latest.set(deployment.appId, deployment);
+      }
+    }
+    return latest;
+  }, [deployments]);
 
   const loadLogs = useCallback(async (app: DaemonApp) => {
     setSelectedAppId(app.id);
@@ -394,6 +470,49 @@ export default function DashboardClient() {
       setLogsLoading(false);
     }
   }, []);
+
+  const loadDeploymentLogs = useCallback(async (deployment: DaemonDeployment) => {
+    setDeploymentLogsLoading(true);
+    setDeploymentLogsError(null);
+
+    try {
+      const response = await fetch(`/api/deployments/${deployment.id}/logs`, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(await readError(response));
+      }
+      setDeploymentLogs((await response.json()) as DeploymentLogsResponse);
+    } catch (error) {
+      setDeploymentLogsError(error instanceof Error ? error.message : "Could not load deployment logs.");
+    } finally {
+      setDeploymentLogsLoading(false);
+    }
+  }, []);
+
+  const deployApp = useCallback(async (app: DaemonApp) => {
+    setDeployError(null);
+    setDeployingByAppId((current) => ({ ...current, [app.id]: true }));
+
+    try {
+      const response = await fetch(`/api/apps/${app.id}/deployments`, {
+        method: "POST",
+        cache: "no-store"
+      });
+
+      if (!response.ok) {
+        throw new Error(await readError(response));
+      }
+
+      const data = (await response.json()) as { deployment: DaemonDeployment };
+      setDeployments((current) => [data.deployment, ...current.filter((item) => item.id !== data.deployment.id)]);
+      setSelectedAppId(app.id);
+      await loadDeploymentLogs(data.deployment);
+      void poll();
+    } catch (error) {
+      setDeployError(error instanceof Error ? error.message : `Could not deploy ${app.name}.`);
+    } finally {
+      setDeployingByAppId((current) => ({ ...current, [app.id]: false }));
+    }
+  }, [loadDeploymentLogs, poll]);
 
   const runAction = useCallback(
     async (app: DaemonApp, action: AppAction) => {
@@ -504,6 +623,7 @@ export default function DashboardClient() {
   const serviceResources = apps.filter((app) => !(app.type === "app" || app.type === "worker" || app.type === "static"));
   const workspace = health?.health?.workspace || "local workspace";
   const stoppedCount = Math.max(0, apps.length - runningCount);
+  const dockerfileApps = appResources.filter((app) => app.driver === "dockerfile");
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -526,6 +646,18 @@ export default function DashboardClient() {
               connected={connected}
               error={serverError}
               server={serverStatus}
+            />
+
+            <ProductionDeployPanel
+              apps={dockerfileApps}
+              connected={connected}
+              deployments={deployments}
+              error={deployError || deploymentsError}
+              latestByAppId={latestDeploymentByAppId}
+              server={serverStatus}
+              deployingByAppId={deployingByAppId}
+              onDeploy={(app) => void deployApp(app)}
+              onLogs={(deployment) => void loadDeploymentLogs(deployment)}
             />
 
             <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
@@ -605,11 +737,18 @@ export default function DashboardClient() {
             <DetailPanel
               app={selectedApp}
               connected={connected}
+              deployments={selectedDeployments}
+              deploymentLogs={deploymentLogs}
+              deploymentLogsError={deploymentLogsError}
+              deploymentLogsLoading={deploymentLogsLoading}
+              deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false}
               logs={logs}
               loading={logsLoading}
               error={logsError}
               currentAction={selectedApp ? actionByAppId[selectedApp.id] : null}
+              onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined}
               onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined}
+              onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)}
               onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined}
               onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined}
             />
@@ -868,27 +1007,152 @@ function AppRow({
   );
 }
 
+function ProductionDeployPanel({
+  apps,
+  connected,
+  deployments,
+  deployingByAppId,
+  error,
+  latestByAppId,
+  onDeploy,
+  onLogs,
+  server
+}: {
+  apps: DaemonApp[];
+  connected: boolean;
+  deployments: DaemonDeployment[];
+  deployingByAppId: Record<number, boolean>;
+  error: string | null;
+  latestByAppId: Map<number, DaemonDeployment>;
+  onDeploy: (app: DaemonApp) => void;
+  onLogs: (deployment: DaemonDeployment) => void;
+  server: DaemonServerStatus | null;
+}) {
+  const dockerReady = Boolean(server?.readiness?.checks.some((check) => check.id === "docker" && check.status === "ok"));
+  const dataReady = Boolean(server?.dataDir);
+  const authReady = Boolean(!server?.auth.required || server.auth.configured);
+  const ready = connected && dockerReady && dataReady && authReady;
+  const recent = deployments.slice(0, 4);
+
+  return (
+    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
+      <div className="grid gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 xl:grid-cols-[0.85fr_1.15fr]">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Production deploy</p>
+          <h2 className="text-lg font-bold leading-tight sm:text-xl">Dockerfile vertical slice</h2>
+          <p className="mt-1 max-w-2xl text-sm text-muted">
+            Deploy actions build a local Dockerfile and start a container on a temporary host port. Domains, HTTPS, GitHub automation, and backups remain locked.
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <ReadinessCard label="Docker" value={dockerReady ? "ready" : "check"} status={dockerReady ? "ok" : "warn"} />
+          <ReadinessCard label="Auth" value={authReady ? "ready" : "missing"} status={authReady ? "ok" : "error"} />
+          <ReadinessCard label="Data dir" value={dataReady ? "ready" : "pending"} status={dataReady ? "ok" : "warn"} />
+          <ReadinessCard label="Ports" value="temporary" status="warn" />
+        </div>
+      </div>
+
+      {error ? <Alert title="Deployment action failed" message={error} /> : null}
+
+      <div className="grid gap-0 lg:grid-cols-[minmax(0,1.1fr)_minmax(280px,0.9fr)]">
+        <div className="min-w-0 border-b border-white/5 lg:border-b-0 lg:border-r">
+          <ResourceSection title="Deployable Dockerfile apps" count={apps.length} />
+          {apps.length === 0 ? (
+            <div className="px-4 py-5 text-sm text-muted">No app is configured with the Dockerfile driver yet. Edit an app and set driver to dockerfile when its Dockerfile path is stable.</div>
+          ) : apps.map((app) => {
+            const latest = latestByAppId.get(app.id);
+            const deploying = Boolean(deployingByAppId[app.id]);
+            const disabled = !ready || deploying || !app.enabled;
+            return (
+              <div key={app.id} className="grid gap-3 border-b border-white/5 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <p className="truncate text-sm font-bold">{app.name}</p>
+                    {latest ? <StatusBadge status={latest.status} /> : <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">never deployed</span>}
+                  </div>
+                  <p className="mt-1 truncate font-mono text-[11px] text-muted">{shortPath(app.path)} to Dockerfile</p>
+                  <p className="mt-1 text-[11px] text-muted">{latest?.hostPort ? `temporary URL http://127.0.0.1:${latest.hostPort}` : "temporary URL assigned after deploy"}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2 md:justify-end">
+                  {latest ? <PillButton onClick={() => onLogs(latest)}>Logs</PillButton> : null}
+                  <PillButton strong onClick={() => onDeploy(app)} disabled={disabled}>{deploying ? "Deploying" : "Deploy"}</PillButton>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="min-w-0">
+          <ResourceSection title="Recent deployment phases" count={recent.length} />
+          {recent.length === 0 ? (
+            <div className="px-4 py-5 text-sm text-muted">Deployment history will appear here after the first Dockerfile deploy.</div>
+          ) : recent.map((deployment) => (
+            <DeploymentSummaryRow key={deployment.id} deployment={deployment} onLogs={() => onLogs(deployment)} />
+          ))}
+          <div className="border-t border-white/5 bg-black/20 px-4 py-3">
+            <div className="flex flex-wrap gap-2">
+              {['Domains', 'HTTPS', 'GitHub', 'Backups'].map((item) => (
+                <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/60">{item} locked</span>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DeploymentSummaryRow({ deployment, onLogs }: { deployment: DaemonDeployment; onLogs: () => void }) {
+  return (
+    <button type="button" onClick={onLogs} className={`block w-full border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/[0.035] ${FOCUS_RING}`}>
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-bold">#{deployment.id} {deployment.appName || `app ${deployment.appId}`}</p>
+          <p className="mt-1 truncate text-[11px] text-muted">{deployment.phase} · {deployment.startedAt ? timeAgo(deployment.startedAt) : timeAgo(deployment.createdAt)}</p>
+        </div>
+        <StatusBadge status={deployment.status} />
+      </div>
+    </button>
+  );
+}
+
 function DetailPanel({
   app,
   connected,
   currentAction,
+  deploymentLogs,
+  deploymentLogsError,
+  deploymentLogsLoading,
+  deployments,
+  deploying,
   error,
   loading,
   logs,
   onAction,
+  onDeploy,
+  onDeploymentLogs,
   onEdit,
   onReload
 }: {
   app: DaemonApp | null;
   connected: boolean;
   currentAction?: AppAction | null;
+  deploymentLogs: DeploymentLogsResponse | null;
+  deploymentLogsError: string | null;
+  deploymentLogsLoading: boolean;
+  deployments: DaemonDeployment[];
+  deploying: boolean;
   error: string | null;
   loading: boolean;
   logs: DaemonAppLogsResponse | null;
   onAction?: (action: AppAction) => void;
+  onDeploy?: () => void;
+  onDeploymentLogs?: (deployment: DaemonDeployment) => void;
   onEdit?: () => void;
   onReload?: () => void;
 }) {
+  const [tab, setTab] = useState<"overview" | "deployments" | "logs" | "config">("overview");
+
   if (!app) {
     return (
       <aside className={`rounded-lg bg-surface px-4 py-10 text-center ${PANEL_SHADOW} lg:sticky lg:top-[84px]`}>
@@ -900,6 +1164,8 @@ function DetailPanel({
 
   const running = app.status === "running" || app.status === "starting";
   const localUrl = appUrl(app);
+  const latestDeployment = deployments[0] || null;
+  const canDeploy = app.driver === "dockerfile" && Boolean(app.path) && app.enabled && connected;
 
   return (
     <aside className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:sticky lg:top-[84px]`}>
@@ -918,32 +1184,56 @@ function DetailPanel({
           <RoundAction label="Restart" onClick={() => onAction?.("restart")} disabled={!onAction || !connected || !app.enabled || Boolean(currentAction)} active={currentAction === "restart"} />
           <PillButton onClick={onEdit} disabled={!onEdit || !connected}>Edit</PillButton>
           <ActionLink href={localUrl}>Open</ActionLink>
+          <PillButton onClick={onDeploy} disabled={!canDeploy || deploying} strong>{deploying ? "Deploying" : "Deploy"}</PillButton>
         </div>
       </div>
 
-      <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
-        <Meta label="Type" value={app.type} />
-        <Meta label="Driver" value={app.driver} />
-        <Meta label="Preset" value={app.preset} />
-        <Meta label="Port" value={app.port ? String(app.port) : "-"} mono />
-        <Meta label="Enabled" value={app.enabled ? "yes" : "no"} />
-        <Meta label="Internal" value={app.internal ? "yes" : "no"} />
-        <Meta label="Updated" value={timeAgo(app.updatedAt)} />
-        <Meta label="Path" value={app.path || "-"} mono wide />
-        <Meta label="Install" value={app.install || "-"} mono wide />
-        <Meta label="Dev" value={app.dev || app.command || "-"} mono wide />
-        <Meta label="Build" value={app.build || "-"} mono wide />
-        <Meta label="Start" value={app.start || "-"} mono wide />
-        <Meta label="Image" value={app.image || "-"} mono wide />
-        <Meta label="Compose" value={[app.composeFile, app.composeService].filter(Boolean).join(" / ") || "generated"} mono wide />
-        <Meta label="Depends on" value={(app.dependsOn || []).join(", ") || "-"} wide />
-        <Meta label="Healthcheck" value={app.healthcheck?.path ? `${app.healthcheck.path} -> ${app.healthcheck.expected_status || 200}` : "-"} wide />
-        <Meta label="Domains" value={(app.domains || []).join(", ") || "-"} wide />
-        <Meta label="Volumes" value={(app.volumes || []).join(", ") || "-"} mono wide />
-        <Meta label="Env" value={Object.keys(app.env || {}).length > 0 ? Object.keys(app.env || {}).join(", ") : "-"} mono wide />
-      </dl>
+      <div className="grid grid-cols-4 gap-1 border-b border-white/5 bg-black/20 px-2 py-2">
+        {(["overview", "deployments", "logs", "config"] as const).map((item) => (
+          <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-full px-2 py-1.5 text-[11px] font-bold capitalize ${FOCUS_RING} ${tab === item ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground"}`}>{item}</button>
+        ))}
+      </div>
 
-      <div className="border-t border-white/5">
+      {tab === "overview" ? (
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
+          <Meta label="Type" value={app.type} />
+          <Meta label="Driver" value={app.driver} />
+          <Meta label="Preset" value={app.preset} />
+          <Meta label="Port" value={app.port ? String(app.port) : "-"} mono />
+          <Meta label="Updated" value={timeAgo(app.updatedAt)} />
+          <Meta label="Latest deploy" value={latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : "never"} />
+          <Meta label="Temporary URL" value={latestDeployment?.hostPort ? `http://127.0.0.1:${latestDeployment.hostPort}` : "-"} mono wide />
+          <Meta label="Path" value={app.path || "-"} mono wide />
+          <Meta label="Healthcheck" value={app.healthcheck?.path ? `${app.healthcheck.path} -> ${app.healthcheck.expected_status || 200}` : "container state"} wide />
+        </dl>
+      ) : null}
+
+      {tab === "deployments" ? (
+        <div>
+          {deployments.length === 0 ? <div className="px-4 py-6 text-sm text-muted">No deployments recorded for this app.</div> : deployments.map((deployment) => (
+            <DeploymentTimeline key={deployment.id} deployment={deployment} onLogs={onDeploymentLogs ? () => onDeploymentLogs(deployment) : undefined} />
+          ))}
+        </div>
+      ) : null}
+
+      {tab === "config" ? (
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
+          <Meta label="Enabled" value={app.enabled ? "yes" : "no"} />
+          <Meta label="Internal" value={app.internal ? "yes" : "no"} />
+          <Meta label="Install" value={app.install || "-"} mono wide />
+          <Meta label="Dev" value={app.dev || app.command || "-"} mono wide />
+          <Meta label="Build" value={app.build || "-"} mono wide />
+          <Meta label="Start" value={app.start || "-"} mono wide />
+          <Meta label="Image" value={app.image || "-"} mono wide />
+          <Meta label="Compose" value={[app.composeFile, app.composeService].filter(Boolean).join(" / ") || "generated"} mono wide />
+          <Meta label="Depends on" value={(app.dependsOn || []).join(", ") || "-"} wide />
+          <Meta label="Domains" value={(app.domains || []).join(", ") || "locked"} wide />
+          <Meta label="Volumes" value={(app.volumes || []).join(", ") || "-"} mono wide />
+          <Meta label="Env" value={Object.keys(app.env || {}).length > 0 ? Object.keys(app.env || {}).join(", ") : "-"} mono wide />
+        </dl>
+      ) : null}
+
+      {tab === "logs" ? <div className="border-t border-white/5">
         <div className="flex items-center justify-between gap-3 px-4 py-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Recent logs</p>
@@ -955,8 +1245,44 @@ function DetailPanel({
         <pre className="max-h-[360px] min-h-[240px] overflow-auto whitespace-pre-wrap border-t border-white/5 bg-black/45 px-4 py-3 font-mono text-xs leading-5 text-[#d9d9d9] shadow-[rgb(0,0,0)_0px_1px_0px_inset]">
           {loading && !logs ? "Loading logs..." : logs?.app.id === app.id ? logs.logs || "No logs captured yet." : "Logs pending."}
         </pre>
-      </div>
+        <div className="border-t border-white/5 px-4 py-3">
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Deployment logs</p>
+          {deploymentLogsError ? <p className="mt-2 text-xs text-negative">{deploymentLogsError}</p> : null}
+          <pre className="mt-2 max-h-[260px] overflow-auto whitespace-pre-wrap rounded-md bg-black/45 px-3 py-3 font-mono text-xs leading-5 text-[#d9d9d9]">
+            {deploymentLogsLoading && !deploymentLogs ? "Loading deployment logs..." : deploymentLogs?.logs.map((log) => log.message).join("") || "Select a deployment log from the deploy panel or Deployments tab."}
+          </pre>
+        </div>
+      </div> : null}
     </aside>
+  );
+}
+
+function DeploymentTimeline({ deployment, onLogs }: { deployment: DaemonDeployment; onLogs?: () => void }) {
+  const phases = ["queued", "preparing", "building", "starting", "healthchecking", deployment.status === "failed" ? "failed" : "succeeded"];
+  const currentIndex = phases.indexOf(deployment.phase);
+  return (
+    <div className="border-b border-white/5 px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-bold">Deployment #{deployment.id}</p>
+          <p className="truncate text-[11px] text-muted">{deployment.containerName || "container pending"}</p>
+        </div>
+        <StatusBadge status={deployment.status} />
+      </div>
+      <div className="mt-3 grid gap-1.5">
+        {phases.map((phase, index) => (
+          <div key={phase} className="flex items-center gap-2 text-xs">
+            <span className={`h-2 w-2 rounded-full ${index <= currentIndex ? "bg-accent" : "bg-white/15"}`} />
+            <span className={index <= currentIndex ? "font-bold text-foreground" : "text-muted"}>{phase}</span>
+          </div>
+        ))}
+      </div>
+      {deployment.errorMessage ? <p className="mt-2 text-xs text-negative">{deployment.errorMessage}</p> : null}
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        {deployment.hostPort ? <ActionLink href={`http://127.0.0.1:${deployment.hostPort}`}>Open</ActionLink> : null}
+        <PillButton onClick={onLogs} disabled={!onLogs}>Logs</PillButton>
+      </div>
+    </div>
   );
 }
 

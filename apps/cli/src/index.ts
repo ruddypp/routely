@@ -28,7 +28,9 @@ import {
   runServerDoctorChecks,
   upsertWorkspaceConfigEntry,
   type RoutelyAppInput,
-  type RoutelyAppRecord
+  type RoutelyAppRecord,
+  type RoutelyDeploymentDto,
+  type RoutelyDeploymentLogDto
 } from "@routely/core";
 import {
   getAppByName,
@@ -121,6 +123,7 @@ Usage:
   routely ps               List registered apps
   routely logs [app]       Print app logs, optionally with --follow
   routely restart [app]    Restart one command app
+  routely deploy <app>     Trigger a Dockerfile production deployment, optionally with --watch
   routely doctor           Check local Routely prerequisites and port availability
   routely server init      Prepare production server foundation state and admin token
   routely server doctor    Check production server readiness
@@ -130,6 +133,35 @@ Usage:
 Defaults:
   Dashboard: http://localhost:3030
   Daemon:    http://127.0.0.1:9977`);
+}
+
+type DaemonResult<T> = { ok: true; data: T; status: number } | { ok: false; error: string; status: number };
+
+async function daemonRequest<T>(path: string, init: RequestInit = {}): Promise<DaemonResult<T>> {
+  const daemonUrl = process.env.ROUTELY_DAEMON_URL || `http://127.0.0.1:${process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT}`;
+  const adminToken = process.env.ROUTELY_ADMIN_TOKEN;
+
+  try {
+    const headers = {
+      ...(init.body == null ? {} : { "content-type": "application/json" }),
+      ...(adminToken ? { authorization: `Bearer ${adminToken}` } : {}),
+      ...(init.headers || {})
+    };
+    const response = await fetch(`${daemonUrl}${path}`, {
+      ...init,
+      headers
+    });
+    const text = await response.text();
+    const data = text ? JSON.parse(text) as T & { error?: string } : {} as T & { error?: string };
+
+    if (!response.ok) {
+      return { ok: false, status: response.status, error: data.error || `Daemon responded with HTTP ${response.status}` };
+    }
+
+    return { ok: true, status: response.status, data };
+  } catch (error) {
+    return { ok: false, status: 503, error: error instanceof Error ? error.message : "Could not reach the Routely daemon." };
+  }
 }
 
 function logDir(): string {
@@ -701,6 +733,82 @@ async function restartCommand(args: string[]): Promise<void> {
   db.close();
 }
 
+async function deployCommand(args: string[]): Promise<void> {
+  const { positionals, flags } = parseFlags(args);
+  const appName = String(positionals[0] || "").trim();
+
+  if (!appName) {
+    console.error("Usage: routely deploy <app> [--watch]");
+    process.exit(1);
+  }
+
+  const { db } = initializeRoutely(workspaceRoot);
+  syncConfig(db);
+  const app = getAppByName(db, appName);
+  db.close();
+
+  if (!app) {
+    console.error(`App not found: ${appName}`);
+    process.exit(1);
+  }
+
+  const result = await daemonRequest<{ deployment: RoutelyDeploymentDto }>(`/apps/${app.id}/deployments`, {
+    method: "POST"
+  });
+
+  if (!result.ok) {
+    console.error(`Deploy failed to start: ${result.error}`);
+    process.exit(1);
+  }
+
+  const deployment = result.data.deployment;
+  console.log(`Queued deployment ${deployment.id} for ${app.name}.`);
+  console.log(`Status: ${deployment.status}`);
+
+  if (flags.watch || flags.w) {
+    await watchDeployment(deployment.id);
+  }
+}
+
+async function watchDeployment(deploymentId: number): Promise<void> {
+  let afterSequence = 0;
+  let lastStatus = "queued";
+
+  console.log(`Watching deployment ${deploymentId}. Press Ctrl+C to stop.`);
+  while (true) {
+    const result = await daemonRequest<{ deployment: RoutelyDeploymentDto; logs: RoutelyDeploymentLogDto[] }>(`/deployments/${deploymentId}/logs?after=${afterSequence}`);
+
+    if (!result.ok) {
+      console.error(result.error);
+      process.exit(1);
+    }
+
+    for (const log of result.data.logs || []) {
+      process.stdout.write(log.message.endsWith("\n") ? log.message : `${log.message}\n`);
+      afterSequence = Math.max(afterSequence, log.sequence);
+    }
+
+    const status = result.data.deployment.status;
+    if (status !== lastStatus) {
+      console.log(`Deployment status: ${status}`);
+      lastStatus = status;
+    }
+
+    if (status === "succeeded") {
+      const url = result.data.deployment.hostPort ? `http://127.0.0.1:${result.data.deployment.hostPort}` : "temporary port unavailable";
+      console.log(`Deployment succeeded: ${url}`);
+      return;
+    }
+
+    if (status === "failed") {
+      console.error(`Deployment failed: ${result.data.deployment.errorMessage || "unknown error"}`);
+      process.exit(1);
+    }
+
+    await sleep(1000);
+  }
+}
+
 async function doctorCommand(): Promise<void> {
   const { db } = initializeRoutely(workspaceRoot);
   syncConfig(db);
@@ -841,6 +949,9 @@ switch (command) {
     break;
   case "restart":
     await restartCommand(argv.slice(1));
+    break;
+  case "deploy":
+    await deployCommand(argv.slice(1));
     break;
   case "doctor":
     await doctorCommand();

@@ -83,6 +83,62 @@ export function migrate(db) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS app_sources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+      source_type TEXT NOT NULL DEFAULT 'local',
+      repo TEXT,
+      branch TEXT,
+      path TEXT,
+      dockerfile_path TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(app_id, source_type)
+    );
+
+    CREATE TABLE IF NOT EXISTS healthchecks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+      path TEXT,
+      expected_status INTEGER NOT NULL DEFAULT 200,
+      last_status TEXT,
+      last_checked_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS deployments (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+      source_type TEXT NOT NULL DEFAULT 'local',
+      repo TEXT,
+      branch TEXT,
+      commit_sha TEXT,
+      status TEXT NOT NULL DEFAULT 'queued',
+      phase TEXT NOT NULL DEFAULT 'queued',
+      image_tag TEXT,
+      container_name TEXT,
+      previous_image_tag TEXT,
+      previous_container_name TEXT,
+      host_port INTEGER,
+      container_port INTEGER,
+      error_message TEXT,
+      started_at TEXT,
+      finished_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS deployment_logs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      deployment_id INTEGER NOT NULL REFERENCES deployments(id) ON DELETE CASCADE,
+      sequence INTEGER NOT NULL,
+      phase TEXT NOT NULL,
+      stream TEXT NOT NULL DEFAULT 'system',
+      message TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -105,6 +161,14 @@ export function migrate(db) {
   addColumnIfMissing(db, "apps", "volumes", "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(db, "apps", "compose_file", "TEXT");
   addColumnIfMissing(db, "apps", "compose_service", "TEXT");
+
+  addColumnIfMissing(db, "deployments", "phase", "TEXT NOT NULL DEFAULT 'queued'");
+  addColumnIfMissing(db, "deployments", "image_tag", "TEXT");
+  addColumnIfMissing(db, "deployments", "container_name", "TEXT");
+  addColumnIfMissing(db, "deployments", "previous_image_tag", "TEXT");
+  addColumnIfMissing(db, "deployments", "previous_container_name", "TEXT");
+  addColumnIfMissing(db, "deployments", "host_port", "INTEGER");
+  addColumnIfMissing(db, "deployments", "container_port", "INTEGER");
 
   db.prepare(`
     INSERT OR IGNORE INTO servers (id, name, kind, status)
@@ -445,6 +509,136 @@ export function recordRuntimeStop(db, appId, pid, exitCode, status = "stopped") 
     WHERE app_id = ? AND pid = ? AND stopped_at IS NULL
   `).run(status, exitCode, appId, pid);
   updateAppStatus(db, appId, status);
+}
+
+export function createDeployment(db, input) {
+  const source = input.source || {};
+  const previous = input.previous || {};
+  const result = db.prepare(`
+    INSERT INTO deployments (app_id, source_type, repo, branch, commit_sha, status, phase, previous_image_tag, previous_container_name, container_port, host_port, started_at)
+    VALUES (?, ?, ?, ?, ?, 'queued', 'queued', ?, ?, ?, ?, CURRENT_TIMESTAMP)
+  `).run(
+    input.appId,
+    source.type || "local",
+    source.repo || null,
+    source.branch || null,
+    source.commitSha || null,
+    previous.imageTag || null,
+    previous.containerName || null,
+    input.containerPort || null,
+    input.hostPort || null
+  );
+
+  return getDeploymentById(db, Number(result.lastInsertRowid));
+}
+
+export function getDeploymentById(db, deploymentId) {
+  const row = db.prepare(`
+    SELECT deployments.*, apps.name AS app_name
+    FROM deployments
+    JOIN apps ON apps.id = deployments.app_id
+    WHERE deployments.id = ?
+  `).get(deploymentId) || null;
+  return row ? parseDeploymentRecord(row) : null;
+}
+
+export function listDeployments(db, options = {}) {
+  const limit = Number.isInteger(options.limit) ? options.limit : 50;
+  return db.prepare(`
+    SELECT deployments.*, apps.name AS app_name
+    FROM deployments
+    JOIN apps ON apps.id = deployments.app_id
+    ORDER BY deployments.created_at DESC, deployments.id DESC
+    LIMIT ?
+  `).all(limit).map(parseDeploymentRecord);
+}
+
+export function listDeploymentsForApp(db, appId, options = {}) {
+  const limit = Number.isInteger(options.limit) ? options.limit : 20;
+  return db.prepare(`
+    SELECT deployments.*, apps.name AS app_name
+    FROM deployments
+    JOIN apps ON apps.id = deployments.app_id
+    WHERE deployments.app_id = ?
+    ORDER BY deployments.created_at DESC, deployments.id DESC
+    LIMIT ?
+  `).all(appId, limit).map(parseDeploymentRecord);
+}
+
+export function getLatestSuccessfulDeploymentForApp(db, appId) {
+  const row = db.prepare(`
+    SELECT deployments.*, apps.name AS app_name
+    FROM deployments
+    JOIN apps ON apps.id = deployments.app_id
+    WHERE deployments.app_id = ? AND deployments.status = 'succeeded'
+    ORDER BY deployments.finished_at DESC, deployments.id DESC
+    LIMIT 1
+  `).get(appId) || null;
+  return row ? parseDeploymentRecord(row) : null;
+}
+
+export function updateDeployment(db, deploymentId, patch) {
+  const existing = getDeploymentById(db, deploymentId);
+  if (!existing) return null;
+
+  const next = {
+    status: patch.status ?? existing.status,
+    phase: patch.phase ?? patch.status ?? existing.phase,
+    imageTag: patch.imageTag ?? existing.image_tag,
+    containerName: patch.containerName ?? existing.container_name,
+    hostPort: patch.hostPort ?? existing.host_port,
+    containerPort: patch.containerPort ?? existing.container_port,
+    errorMessage: patch.errorMessage === undefined ? existing.error_message : patch.errorMessage,
+    finishedAt: patch.finishedAt === undefined ? existing.finished_at : patch.finishedAt
+  };
+
+  db.prepare(`
+    UPDATE deployments
+    SET status = ?, phase = ?, image_tag = ?, container_name = ?, host_port = ?, container_port = ?, error_message = ?, finished_at = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(
+    next.status,
+    next.phase,
+    next.imageTag,
+    next.containerName,
+    next.hostPort,
+    next.containerPort,
+    next.errorMessage,
+    next.finishedAt,
+    deploymentId
+  );
+
+  return getDeploymentById(db, deploymentId);
+}
+
+export function appendDeploymentLog(db, deploymentId, input) {
+  const sequenceRow = db.prepare("SELECT COALESCE(MAX(sequence), 0) + 1 AS sequence FROM deployment_logs WHERE deployment_id = ?").get(deploymentId);
+  const sequence = Number(sequenceRow?.sequence || 1);
+  const result = db.prepare(`
+    INSERT INTO deployment_logs (deployment_id, sequence, phase, stream, message)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(deploymentId, sequence, input.phase || "system", input.stream || "system", String(input.message || ""));
+
+  return db.prepare("SELECT * FROM deployment_logs WHERE id = ?").get(Number(result.lastInsertRowid));
+}
+
+export function listDeploymentLogs(db, deploymentId, options = {}) {
+  const afterSequence = Number.isInteger(options.afterSequence) ? options.afterSequence : 0;
+  const limit = Number.isInteger(options.limit) ? options.limit : 500;
+  return db.prepare(`
+    SELECT * FROM deployment_logs
+    WHERE deployment_id = ? AND sequence > ?
+    ORDER BY sequence ASC
+    LIMIT ?
+  `).all(deploymentId, afterSequence, limit);
+}
+
+function parseDeploymentRecord(row) {
+  return {
+    ...row,
+    host_port: row.host_port == null ? null : Number(row.host_port),
+    container_port: row.container_port == null ? null : Number(row.container_port)
+  };
 }
 
 export function getSetting(db, key) {

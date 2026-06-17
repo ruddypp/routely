@@ -72,6 +72,13 @@ Lokasi dokumentasi:
 - The daemon exposes server foundation status at `/server/status`, auth status at `/auth/status`, and protected doctor checks at `/server/doctor`. In production mode, private daemon API paths require an admin bearer token.
 - Next.js route handlers continue to proxy browser access through same-origin `/api/*`; `/api/server/status` backs the dashboard server foundation panel, and server-side proxy calls can forward `ROUTELY_ADMIN_TOKEN` without exposing it to browser code.
 - The dashboard now has clearer operational zones for local resources, server foundation readiness, and disabled future production capabilities.
+- Checkpoint 5 has added a Dockerfile-first production deploy vertical slice.
+- SQLite now stores deployment history and incremental deployment logs in `deployments` and `deployment_logs`, with `app_sources` and `healthchecks` tables created for later production features.
+- The daemon exposes authenticated deployment endpoints at `/deployments`, `/apps/:id/deployments`, `/deployments/:id`, and `/deployments/:id/logs`.
+- `routely deploy <app>` queues a Dockerfile deployment through the daemon, and `routely deploy <app> --watch` streams incremental deployment logs until success or failure.
+- Dockerfile deploys currently build a local source path containing `Dockerfile`, start a container on a temporary `127.0.0.1:32xxx` host port, run either the configured HTTP healthcheck or a container-running check, and store image/container/port metadata for future rollback work.
+- The dashboard now includes a Dokploy-inspired production deploy panel and an inspector with Overview, Deployments, Logs, and Config tabs backed by daemon/API/storage data.
+- Domains, HTTPS automation, GitHub automation, backups, static deploys, rollback actions, and broader VPS operations remain deferred.
 
 ## Current Structure
 
@@ -184,6 +191,7 @@ routely down
 routely doctor
 routely server init --data-dir /var/lib/routely
 routely server doctor
+routely deploy web --watch
 routely
 ```
 
@@ -193,7 +201,7 @@ Command apps declared in `routely.yml` can use `depends_on` to control local sta
 
 Local Compose services declared in `services:` use `driver: compose`. Generated Compose files are written under `.routely/compose` unless `compose_file` is supplied. Database templates are local-development defaults and are internal by default where practical.
 
-Production server foundation is intentionally limited to readiness and auth primitives in this checkpoint. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Production deploys, domains, HTTPS automation, GitHub automation, backups, and real VPS app operations remain deferred to later checkpoints.
+Production server foundation now supports the first Dockerfile deployment slice. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API and CLI processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Dockerfile deployments are available through `routely deploy <app> [--watch]` and the dashboard deploy panel. Domains, HTTPS automation, GitHub automation, backups, static deploys, rollback actions, and broad VPS operations remain deferred to later checkpoints.
 
 ## CLI Build And Global Reinstall Flow
 
@@ -236,6 +244,9 @@ run command
 - Checkpoint 4 verification passed `npm run lint`, `npm run test --workspace apps/cli`, `npm run build --workspace apps/cli`, `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, and `node --check apps/daemon/src/server.js`.
 - Checkpoint 4 browser/API smoke passed with daemon and web dev servers running locally: `/api/server/status` returned server foundation readiness through same-origin Next.js, `/api/apps` returned the local registry, and desktop/tablet/mobile headless Chrome screenshots showed the production readiness panel and local resource surface without obvious overlap. The restricted tool session required elevated port binding for the daemon/web smoke.
 - Checkpoint 4 security smoke passed with a temporary production-mode daemon on port `9988`: unauthenticated `GET /apps` returned `401 Unauthorized` with `Routely production API requires an admin token.`
+- Checkpoint 5 verification passed `npm run lint`, `npm run test --workspace apps/cli`, `npm run build --workspace apps/cli`, `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, and `node --check apps/daemon/src/server.js`.
+- Checkpoint 5 tests cover deployment state/log persistence, Dockerfile command builders, and same-origin Next.js deployment route proxying.
+- Checkpoint 5 smoke used a temporary local workspace with a Dockerfile app. `/api/apps` and `/api/deployments` returned through same-origin Next.js routes, desktop/tablet/mobile headless Chrome screenshots rendered the deploy panel without obvious overlap or horizontal overflow, and `routely deploy web --watch` built `routely/web:2`, started `routely_web_2` on `127.0.0.1:32002`, passed the HTTP healthcheck, streamed deployment logs, and was cleaned up afterward.
 - `npm run build --workspace apps/web` still returns only the partial `Finished TypeScript...` progress line with no final exit marker and no remaining build process, matching the existing web build caveat.
 
 ## Environment Check
@@ -266,12 +277,12 @@ Ports checked as free during the latest setup audit:
 
 ## Next Development Target
 
-Recommended next implementation step after Checkpoint 4:
+Recommended next implementation step after Checkpoint 5:
 
 ```text
-Checkpoint 5: Production Deploy Vertical Slice
-  - Keep the scope narrow but end to end for Dockerfile/static deploy foundations.
-  - Reuse the production mode/auth/readiness state from Checkpoint 4.
-  - Do not implement domains, HTTPS, GitHub automation, backups, or broader production operations before their checkpoints.
+Checkpoint 6: Proxy, Domains, and HTTPS
+  - Reuse Checkpoint 5 deployment metadata/logging and container status.
+  - Add domain/proxy/HTTPS behavior only in that checkpoint.
+  - Keep GitHub automation, backups, and broader production operations deferred.
   - Keep browser calls routed through same-origin /api/* handlers.
 ```

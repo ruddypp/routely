@@ -53,6 +53,44 @@ export type DaemonAppLogsResponse = {
   truncated: boolean;
 };
 
+export type DaemonDeployment = {
+  id: number;
+  appId: number;
+  appName: string | null;
+  status: "queued" | "preparing" | "building" | "starting" | "healthchecking" | "succeeded" | "failed" | string;
+  phase: string;
+  sourceType: string | null;
+  repo: string | null;
+  branch: string | null;
+  commitSha: string | null;
+  imageTag: string | null;
+  containerName: string | null;
+  previousImageTag: string | null;
+  previousContainerName: string | null;
+  hostPort: number | null;
+  containerPort: number | null;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DaemonDeploymentLog = {
+  id: number;
+  deploymentId: number;
+  sequence: number;
+  phase: string;
+  stream: string;
+  message: string;
+  createdAt: string;
+};
+
+export type DaemonDeploymentLogsResponse = {
+  deployment: DaemonDeployment;
+  logs: DaemonDeploymentLog[];
+};
+
 export type DaemonHealth = {
   ok: boolean;
   service: string;
@@ -106,15 +144,16 @@ export async function daemonFetch<T>(path: string, init?: RequestInit): Promise<
   const adminToken = process.env.ROUTELY_ADMIN_TOKEN;
 
   try {
+    const headers = {
+      ...(init?.body == null ? {} : { "content-type": "application/json" }),
+      ...(adminToken ? { authorization: `Bearer ${adminToken}` } : {}),
+      ...(init?.headers || {})
+    };
     const response = await fetch(`${DAEMON_URL}${path}`, {
       ...init,
       cache: "no-store",
       signal: controller.signal,
-      headers: {
-        "content-type": "application/json",
-        ...(adminToken ? { authorization: `Bearer ${adminToken}` } : {}),
-        ...(init?.headers || {})
-      }
+      headers
     });
 
     const text = await response.text();

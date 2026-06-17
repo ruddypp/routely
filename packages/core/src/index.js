@@ -6,6 +6,7 @@ export const DEFAULT_DAEMON_PORT = 9977;
 export const APP_TYPES = ["app", "database", "compose", "static", "worker"];
 export const APP_DRIVERS = ["command", "compose", "dockerfile", "buildpack", "static"];
 export const APP_STATUSES = ["stopped", "running", "starting", "crashed", "unknown"];
+export const DEPLOYMENT_STATUSES = ["queued", "preparing", "building", "starting", "healthchecking", "succeeded", "failed"];
 
 const SECRET_ENV_PATTERN = /(SECRET|TOKEN|PASSWORD|PRIVATE|KEY)/i;
 
@@ -171,6 +172,43 @@ export function appToPublicDto(app) {
     status: app.status,
     createdAt: app.created_at,
     updatedAt: app.updated_at
+  };
+}
+
+export function deploymentToPublicDto(deployment) {
+  return {
+    id: deployment.id,
+    appId: deployment.app_id,
+    appName: deployment.app_name || null,
+    status: deployment.status,
+    phase: deployment.phase || deployment.status,
+    sourceType: deployment.source_type || null,
+    repo: deployment.repo || null,
+    branch: deployment.branch || null,
+    commitSha: deployment.commit_sha || null,
+    imageTag: deployment.image_tag || null,
+    containerName: deployment.container_name || null,
+    previousImageTag: deployment.previous_image_tag || null,
+    previousContainerName: deployment.previous_container_name || null,
+    hostPort: deployment.host_port == null ? null : Number(deployment.host_port),
+    containerPort: deployment.container_port == null ? null : Number(deployment.container_port),
+    errorMessage: deployment.error_message || null,
+    startedAt: deployment.started_at || null,
+    finishedAt: deployment.finished_at || null,
+    createdAt: deployment.created_at,
+    updatedAt: deployment.updated_at
+  };
+}
+
+export function deploymentLogToPublicDto(log) {
+  return {
+    id: log.id,
+    deploymentId: log.deployment_id,
+    sequence: Number(log.sequence || 0),
+    phase: log.phase,
+    stream: log.stream || "system",
+    message: log.message || "",
+    createdAt: log.created_at
   };
 }
 

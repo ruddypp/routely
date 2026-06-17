@@ -205,20 +205,43 @@ Checkpoint 4 is now implemented as the production server foundation slice:
 - The dashboard now has clearer Dokploy-inspired operational zones: local resources, server foundation readiness, and disabled future production placeholders.
 - Production deploys, domains, HTTPS automation, GitHub automation, backups, and real VPS app actions remain deferred.
 
-Recommended next step after Checkpoint 4 verification and commit:
+Checkpoint 5 is now implemented as a Dockerfile-first production deploy vertical slice:
+
+- SQLite migrations now create `deployments`, `deployment_logs`, `app_sources`, and `healthchecks` tables.
+- Shared DB helpers persist deployment lifecycle state and incremental log rows for `queued`, `preparing`, `building`, `starting`, `healthchecking`, `succeeded`, and `failed` phases.
+- `packages/drivers` includes conservative Dockerfile helpers for image tags, container names, `docker build`, `docker run`, container removal, and container running inspection.
+- The daemon exposes deployment endpoints:
+  - `GET /deployments`
+  - `GET /apps/:id/deployments`
+  - `POST /apps/:id/deployments`
+  - `GET /deployments/:id`
+  - `GET /deployments/:id/logs`
+- `POST /apps/:id/deployments` runs as a background Dockerfile deployment job and is protected by the existing production admin-token auth hook.
+- Dockerfile deploys validate the app is enabled, uses `driver: dockerfile`, has a source path, has a `Dockerfile`, and can reach Docker before build.
+- Deployment logs capture Docker stdout/stderr incrementally and are inspectable from CLI and dashboard.
+- Successful deploys run containers on temporary host ports in the `32000+` range and store image/container/port metadata for later rollback work.
+- Failed deploys mark the deployment failed, keep last successful deployment metadata intact, and remove the failed new container when practical.
+- `routely deploy <app>` and `routely deploy <app> --watch` call the daemon and pass `ROUTELY_ADMIN_TOKEN` when configured.
+- Next.js same-origin route handlers proxy deployment list/trigger/detail/log endpoints under `/api/*`.
+- The dashboard now has a Dokploy-inspired production deploy panel with server readiness cards, Dockerfile deploy actions, recent deployment phase rows, deployment logs, temporary URLs, and locked Domains/HTTPS/GitHub/Backups placeholders.
+- The right inspector has Overview, Deployments, Logs, and Config tabs backed by app/deployment/log API data.
+- Verification included a temporary local Dockerfile app smoke: `routely deploy web --watch` built an image, started a container on `127.0.0.1:32002`, passed HTTP healthcheck, streamed logs, and the test container/images were removed afterward.
+- Domains, HTTPS automation, GitHub automation, backups, static deploys, rollback UI/actions, and broad VPS operations remain deferred.
+
+Recommended next step after Checkpoint 5 verification and commit:
 
 ```text
-Move to Checkpoint 5: Production Deploy Vertical Slice.
+Move to Checkpoint 6: Proxy, Domains, and HTTPS.
 ```
 
-Do not start domains, HTTPS, GitHub automation, backups, or broader VPS operations before their checkpoints; production navigation remains locked placeholders except for the server foundation status surface.
+Do not start GitHub automation, backups, or broader VPS operations before their checkpoints. Domains/HTTPS are the next checkpoint; until then production navigation remains locked except for server readiness and Dockerfile deployment status/actions.
 
 ## Current Progress Snapshot For Next Agent
 
 Last completed commit:
 
 ```text
-965695d feat: add production server foundation
+pending commit: feat: add production deploy slice
 ```
 
 Current state:
@@ -229,17 +252,19 @@ Current state:
 - Checkpoint 2.5 frontend product shell is implemented and polished.
 - Checkpoint 3 config, presets, and Compose services is implemented.
 - Checkpoint 4 production server foundation is implemented.
+- Checkpoint 5 production deploy vertical slice is implemented.
 - Browser calls remain same-origin under `/api/*`.
 - The shell currently has desktop sidebar navigation, mobile bottom navigation, workspace/status header, local app/service separation, dense resource rows, app/service inspector, recent logs, and add/edit registry forms.
 - The latest frontend pass improved row rhythm, inspector/log hierarchy, form validation/focus/disabled states, loading/empty states, responsive action wrapping, and the server foundation readiness panel.
 - Checkpoint 3 added richer config fields, preset detection, Compose-backed database services, `routely db add`, local Compose driver behavior, SQLite persistence for expanded registry fields, daemon lifecycle support for Compose resources, and dashboard visibility/editing for local services/databases.
+- Checkpoint 5 added deployment history/log tables, Dockerfile driver helpers, daemon deployment endpoints, `routely deploy <app> [--watch]`, same-origin Next.js deployment routes, and a production deploy dashboard panel backed by real deployment state.
 - Known web build caveat remains: `npm run build --workspace apps/web` returns only `Finished TypeScript...` with no final exit marker and no remaining build process.
 
 Next execution direction:
 
-- Start Checkpoint 5 from `docs/14-implementation-plan.md` only after Checkpoint 4 is committed.
-- Reuse the production mode/auth/readiness primitives from Checkpoint 4.
-- Do not implement domains, HTTPS, GitHub automation, backups, or broader VPS app operations before their checkpoints.
+- Start Checkpoint 6 from `docs/14-implementation-plan.md` only after Checkpoint 5 is committed.
+- Reuse the deployment metadata/logging primitives from Checkpoint 5.
+- Keep GitHub automation, backups, and broader VPS app operations deferred until their checkpoints.
 
 ## Current Known Environment
 

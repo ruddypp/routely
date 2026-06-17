@@ -1,6 +1,7 @@
 export type RoutelyAppType = "app" | "database" | "compose" | "static" | "worker";
 export type RoutelyAppDriver = "command" | "compose" | "dockerfile" | "buildpack" | "static";
 export type RoutelyAppStatus = "stopped" | "running" | "starting" | "crashed" | "unknown";
+export type RoutelyDeploymentStatus = "queued" | "preparing" | "building" | "starting" | "healthchecking" | "succeeded" | "failed";
 
 export interface RoutelyDashboardConfig {
   port?: number;
@@ -142,15 +143,84 @@ export interface RoutelyAppDto {
   updatedAt: string;
 }
 
+export interface RoutelyDeploymentRecord {
+  id: number;
+  app_id: number;
+  app_name?: string | null;
+  source_type: string | null;
+  repo: string | null;
+  branch: string | null;
+  commit_sha: string | null;
+  status: RoutelyDeploymentStatus;
+  phase: string;
+  image_tag: string | null;
+  container_name: string | null;
+  previous_image_tag: string | null;
+  previous_container_name: string | null;
+  host_port: number | null;
+  container_port: number | null;
+  error_message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoutelyDeploymentDto {
+  id: number;
+  appId: number;
+  appName: string | null;
+  status: RoutelyDeploymentStatus;
+  phase: string;
+  sourceType: string | null;
+  repo: string | null;
+  branch: string | null;
+  commitSha: string | null;
+  imageTag: string | null;
+  containerName: string | null;
+  previousImageTag: string | null;
+  previousContainerName: string | null;
+  hostPort: number | null;
+  containerPort: number | null;
+  errorMessage: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoutelyDeploymentLogRecord {
+  id: number;
+  deployment_id: number;
+  sequence: number;
+  phase: string;
+  stream: string;
+  message: string;
+  created_at: string;
+}
+
+export interface RoutelyDeploymentLogDto {
+  id: number;
+  deploymentId: number;
+  sequence: number;
+  phase: string;
+  stream: string;
+  message: string;
+  createdAt: string;
+}
+
 export const routelyCoreVersion: string;
 export const DEFAULT_DASHBOARD_PORT: number;
 export const DEFAULT_DAEMON_PORT: number;
 export const APP_TYPES: RoutelyAppType[];
 export const APP_DRIVERS: RoutelyAppDriver[];
 export const APP_STATUSES: RoutelyAppStatus[];
+export const DEPLOYMENT_STATUSES: RoutelyDeploymentStatus[];
 export function normalizeWorkspaceConfig(input?: RoutelyWorkspaceConfigInput): RoutelyWorkspaceConfig;
 export function normalizeAppInput(input: RoutelyAppInput): NormalizedRoutelyAppInput;
 export function appToPublicDto(app: RoutelyAppRecord): RoutelyAppDto;
+export function deploymentToPublicDto(deployment: RoutelyDeploymentRecord): RoutelyDeploymentDto;
+export function deploymentLogToPublicDto(log: RoutelyDeploymentLogRecord): RoutelyDeploymentLogDto;
 export function appToConfigEntry(input: RoutelyAppInput): Record<string, unknown>;
 export function filterExportableEnv(env?: Record<string, string>): Record<string, string>;
 

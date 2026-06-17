@@ -3,7 +3,10 @@ import type {
   LoadedWorkspaceConfig,
   RoutelyAppInput,
   RoutelyAppRecord,
-  RoutelyAppStatus
+  RoutelyAppStatus,
+  RoutelyDeploymentLogRecord,
+  RoutelyDeploymentRecord,
+  RoutelyDeploymentStatus
 } from "@routely/core";
 
 export interface RoutelyDatabaseHandle {
@@ -43,6 +46,44 @@ export function syncWorkspaceConfig(db: Database.Database, loaded: LoadedWorkspa
 export function updateAppStatus(db: Database.Database, appId: number, status: RoutelyAppStatus): void;
 export function recordRuntimeStart(db: Database.Database, appId: number, pid: number): void;
 export function recordRuntimeStop(db: Database.Database, appId: number, pid: number, exitCode: number | null, status?: RoutelyAppStatus): void;
+export function createDeployment(
+  db: Database.Database,
+  input: {
+    appId: number;
+    source?: { type?: string | null; repo?: string | null; branch?: string | null; commitSha?: string | null };
+    previous?: { imageTag?: string | null; containerName?: string | null };
+    containerPort?: number | null;
+    hostPort?: number | null;
+  }
+): RoutelyDeploymentRecord;
+export function getDeploymentById(db: Database.Database, deploymentId: number): RoutelyDeploymentRecord | null;
+export function listDeployments(db: Database.Database, options?: { limit?: number }): RoutelyDeploymentRecord[];
+export function listDeploymentsForApp(db: Database.Database, appId: number, options?: { limit?: number }): RoutelyDeploymentRecord[];
+export function getLatestSuccessfulDeploymentForApp(db: Database.Database, appId: number): RoutelyDeploymentRecord | null;
+export function updateDeployment(
+  db: Database.Database,
+  deploymentId: number,
+  patch: {
+    status?: RoutelyDeploymentStatus;
+    phase?: string;
+    imageTag?: string | null;
+    containerName?: string | null;
+    hostPort?: number | null;
+    containerPort?: number | null;
+    errorMessage?: string | null;
+    finishedAt?: string | null;
+  }
+): RoutelyDeploymentRecord | null;
+export function appendDeploymentLog(
+  db: Database.Database,
+  deploymentId: number,
+  input: { phase?: string; stream?: string; message: string }
+): RoutelyDeploymentLogRecord;
+export function listDeploymentLogs(
+  db: Database.Database,
+  deploymentId: number,
+  options?: { afterSequence?: number; limit?: number }
+): RoutelyDeploymentLogRecord[];
 export function getSetting(db: Database.Database, key: string): string | null;
 export function setSetting(db: Database.Database, key: string, value: string): void;
 export interface RoutelyServerFoundationState {

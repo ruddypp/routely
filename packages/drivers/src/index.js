@@ -95,6 +95,63 @@ export function stopComposeService(app, workspaceRoot, options = {}) {
   });
 }
 
+export function buildDockerfileImageTag(appName, deploymentId) {
+  return `routely/${safeName(appName)}:${deploymentId}`;
+}
+
+export function buildDockerfileContainerName(appName, deploymentId) {
+  return `routely_${safeName(appName)}_${deploymentId}`;
+}
+
+export function dockerBuildArgs({ context, dockerfile, imageTag }) {
+  if (!context) throw new Error("Docker build context is required.");
+  if (!dockerfile) throw new Error("Dockerfile path is required.");
+  if (!imageTag) throw new Error("Docker image tag is required.");
+  return ["build", "--pull", "-t", imageTag, "-f", dockerfile, context];
+}
+
+export function dockerRunArgs({ containerName, imageTag, hostPort, containerPort, env = {} }) {
+  if (!containerName) throw new Error("Container name is required.");
+  if (!imageTag) throw new Error("Docker image tag is required.");
+  if (!Number.isInteger(hostPort) || hostPort <= 0) throw new Error("Host port is required.");
+  if (!Number.isInteger(containerPort) || containerPort <= 0) throw new Error("Container port is required.");
+
+  const args = [
+    "run",
+    "-d",
+    "--restart",
+    "unless-stopped",
+    "--name",
+    containerName,
+    "-p",
+    `${hostPort}:${containerPort}`
+  ];
+
+  for (const [key, value] of Object.entries(env || {})) {
+    args.push("-e", `${key}=${value}`);
+  }
+
+  args.push(imageTag);
+  return args;
+}
+
+export function dockerRemoveContainerArgs(containerName) {
+  return ["rm", "-f", containerName];
+}
+
+export function dockerInspectRunningArgs(containerName) {
+  return ["inspect", "-f", "{{.State.Running}}", containerName];
+}
+
+export function spawnDocker(args, options = {}) {
+  return spawn("docker", args, {
+    cwd: options.cwd || process.cwd(),
+    shell: false,
+    stdio: options.stdio || "pipe",
+    env: { ...process.env, ...(options.env || {}) }
+  });
+}
+
 function appendYamlValue(lines, key, value, indent) {
   const pad = " ".repeat(indent);
   if (Array.isArray(value)) {
