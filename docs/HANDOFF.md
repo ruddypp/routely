@@ -36,6 +36,7 @@ For Next.js changes, follow `AGENTS.md`: read the relevant guide in `node_module
 Recent history at handoff time:
 
 ```text
+d868b09 feat: add frontend product shell
 0daf3e3 feat: add dashboard local controls
 b5f62f0 docs: update checkpoint handoff
 8b296fb feat: finish local runner checkpoint
@@ -139,7 +140,7 @@ Checkpoint 2 has started. Implemented and committed in `0daf3e3`:
 - Dashboard app table controls for start, stop, restart, open local URL, manual refresh, and recent logs.
 - Focused route-handler tests for happy-path start proxying and daemon-unreachable log access.
 
-Additional Checkpoint 2 / 2.5 work now implemented after `0daf3e3`:
+Additional Checkpoint 2 / 2.5 work implemented and committed in `d868b09`:
 
 - Added daemon `PATCH /apps/:id` support for editing app registry entries by id.
 - Added same-origin Next.js `PATCH /api/apps/:id` proxying.
@@ -162,9 +163,10 @@ Web build caveat:
 
 - `npm run build --workspace apps/web` was attempted twice, including once with an explicit exit marker. The tool returned only `Finished TypeScript in ...` and no final exit marker, and no `next build`/Turbopack process remained afterward. This matches the known pre-existing build-reporting failure from the handoff rather than a new checkpoint-specific error.
 
-Remaining Checkpoint 2 / 2.5 scope before moving on:
+Recommended next step before moving on:
 
-- Commit the checkpoint changes after verification passes.
+- Do one more frontend design enhancement pass on the existing Checkpoint 2.5 shell, focused on visual quality, responsive polish, app row/action ergonomics, inspector/log readability, and form states.
+- After that, move to Checkpoint 3 only if the frontend remains stable and production/VPS work is still explicitly deferred.
 
 Checkpoint 2.5 has been added to `docs/14-implementation-plan.md` as the explicit frontend polish checkpoint:
 
@@ -177,10 +179,10 @@ Checkpoint 2.5 has been added to `docs/14-implementation-plan.md` as the explici
 Recommended next step:
 
 ```text
-Continue Checkpoint 2, then execute Checkpoint 2.5 before starting Checkpoint 3 or production/VPS work.
+Enhance the Checkpoint 2.5 frontend design polish, then move to Checkpoint 3 only after verification.
 ```
 
-Do not start production/VPS work yet. Continue with the remaining dashboard local controls scope, then polish the whole frontend product shell to the new Checkpoint 2.5 standard.
+Do not start production/VPS work yet. The next frontend pass should improve the existing product shell quality, not rebuild lifecycle controls or implement production actions.
 
 ## Current Known Environment
 
@@ -250,77 +252,68 @@ Copy this prompt into the next agent:
 ```text
 You are working in /home/ruddypp/Documents/work/routely.
 
-Read AGENTS.md, docs/HANDOFF.md, and docs/14-implementation-plan.md first. Follow AGENTS.md strictly, including the Next.js docs rule and auto-commit rule.
+Read AGENTS.md, docs/HANDOFF.md, docs/14-implementation-plan.md, docs/13-current-setup-status.md, and DESIGN.md first. Follow AGENTS.md strictly, including the Next.js docs rule and auto-commit rule.
 
-Project intent: Routely is a 9Router-inspired local app runner plus Dokploy-inspired VPS deployment platform. The core differentiator is local-to-production workflow for solo developers.
+Project intent:
+Routely is a 9Router-inspired local app runner plus Dokploy-inspired VPS deployment platform. The differentiator is local-to-production workflow for solo developers.
 
 Current progress:
-- Checkpoint 0 is complete.
+- Checkpoint 0 is complete and committed.
 - Checkpoint 1 local runner is complete and committed.
-- Checkpoint 2 Dashboard Local Controls has started.
-- Checkpoint 2.5 `9Router-Inspired Frontend Product Shell` has been added to docs/14-implementation-plan.md. This is the explicit checkpoint for making the entire Routely frontend feel 9Router-inspired while following DESIGN.md for visual taste.
-- Commit 0daf3e3 `feat: add dashboard local controls` is complete. It added daemon lifecycle/log endpoints, same-origin Next.js API proxying, dashboard start/stop/restart/open/log controls, loading/error/refresh states, focused route-handler tests, and docs updates.
-- Recent commits include:
-  - 0daf3e3 feat: add dashboard local controls
-  - b5f62f0 docs: update checkpoint handoff
-  - 8b296fb feat: finish local runner checkpoint
-  - 51005c1 feat: implement Routely dashboard with Spotify-inspired theme and API integration
-  - 8c48766 feat: add local runner lifecycle commands
-  - bde6da9 feat: stabilize workspace root resolution
+- Checkpoint 2 Dashboard Local Controls is mostly complete.
+- Checkpoint 2.5 9Router-inspired frontend product shell has been implemented in commit d868b09 `feat: add frontend product shell`.
+- The current browser UI has desktop sidebar navigation, mobile bottom navigation, workspace/status header, dense app/service rows, app inspector, recent log panel, and add/edit app registry forms.
+- Browser code calls same-origin `/api/*` routes only; it must not call the daemon directly.
+- Daemon lifecycle/log endpoints are already present. Do not redo them unless fixing a bug.
+- Daemon app registry editing now uses `PATCH /apps/:id`, proxied by Next.js through `PATCH /api/apps/:id`.
+- Future production sections are inert navigation placeholders only. Do not start production/VPS work yet.
 
 Your next task:
-Continue Checkpoint 2 from docs/14-implementation-plan.md, then execute Checkpoint 2.5 before moving to Checkpoint 3 or production/VPS work.
-1. Read the relevant Next.js docs in node_modules/next/dist/docs/ before editing apps/web.
-2. Read DESIGN.md before editing any frontend UI. The whole Routely frontend should feel 9Router-inspired, but the visual taste must follow DESIGN.md: near-black dense app UI, functional green accent, pill/circular controls, heavy dark elevation, responsive sidebar/mobile navigation, and no generic SaaS landing page.
-3. Do not redo the already-completed lifecycle/log controls unless you are fixing a bug in them.
-4. Finish the remaining Checkpoint 2 scope where practical:
-   - Add an app detail page or side panel beyond the current log panel if it improves the workflow.
-   - Add an add/edit app form using the app registry schema.
-   - Add broader browser smoke and responsive checks.
-   - Investigate or document the existing `npm run build --workspace apps/web` failure if you touch web build behavior.
-5. Then implement Checkpoint 2.5: build a cohesive 9Router-inspired frontend product shell for the whole browser app, not only the dashboard table:
-   - desktop sidebar/navigation
-   - mobile navigation behavior
-   - workspace/status header
-   - local apps/services control surface
-   - app detail/log region
-   - dense add/edit forms
-   - reusable UI primitives aligned with DESIGN.md
-   - inert placeholders for future production sections only if helpful; do not implement production actions yet.
-6. Keep browser calls same-origin under `/api/*`; browser code must not call the daemon directly.
-7. Add useful loading, disabled, error, empty, and refresh states for any new UI.
-8. Add or adjust tests where practical.
-9. Update docs if behavior changes.
-10. Run relevant verification commands. At minimum prefer `npm run lint`, `npm run test --workspace apps/web`, web TypeScript/build checks, and `npm run build --workspace apps/cli` if CLI is touched.
-11. Commit only the files changed for this checkpoint with a concise commit message.
+Do a design enhancement pass on the existing Checkpoint 2.5 frontend before moving to Checkpoint 3 or production/VPS work.
 
-Known verification caveat:
-- `npm run build --workspace apps/web` fails on the clean pre-change baseline and after 0daf3e3 with the same hidden `Turbopack build failed with 2 errors` summary. Treat it as an existing web build issue unless your changes specifically address it. Previously passing checks for 0daf3e3: `npm run test --workspace apps/web`, web `tsc --noEmit`, `node --check apps/daemon/src/server.js`, `npm run lint`, and `npm run build --workspace apps/cli`.
+Design direction:
+- Keep the product experience 9Router-inspired: local-first, dense, fast, status/log oriented, and control-focused.
+- Follow DESIGN.md for visual taste: near-black surfaces, compact typography, functional green accent, pill/circular controls, heavy dark elevation, responsive sidebar/mobile navigation, and no generic SaaS landing page.
+- Make the UI feel more polished and premium without making it spacious, decorative, or marketing-like.
+- The first screen must remain the actual product control surface.
 
-Do not start production/VPS work. Preserve unrelated user changes in the worktree. Do not use destructive git commands.
+Specific design enhancement goals:
+1. Read relevant Next.js docs in `node_modules/next/dist/docs/` before editing `apps/web`.
+2. Inspect `apps/web/src/app/dashboard-client.tsx` and `apps/web/src/app/globals.css` first.
+3. Improve the frontend visual quality beyond the current shell:
+   - Refine spacing density, alignment, row rhythm, and panel hierarchy.
+   - Improve the app row/action layout on desktop, tablet, and mobile.
+   - Improve the app inspector/log panel readability and affordances.
+   - Improve add/edit form layout, validation display, disabled states, and focus states.
+   - Make empty/loading/offline/error states feel native to the shell.
+   - Establish clearer reusable UI primitives if it reduces duplication.
+   - Use icons only if an existing icon library is already available; do not add unnecessary dependencies just for icons.
+4. Keep browser calls same-origin under `/api/*`.
+5. Do not implement production/VPS actions, deploy flows, domains, metrics, databases, backups, GitHub automation, auth, or server setup yet.
+6. Add or adjust tests where practical if behavior changes. Pure CSS/layout polish may not need new route tests.
+7. Run verification:
+   - `npm run lint`
+   - `npm run test --workspace apps/web`
+   - `npx tsc --noEmit --project apps/web/tsconfig.json`
+   - `node --check apps/daemon/src/server.js` if daemon is touched
+   - `npm run build --workspace apps/cli` if shared packages or CLI-related code are touched
+   - browser smoke/responsive screenshots for desktop, tablet, and mobile widths if frontend UI is changed
+8. Attempt `npm run build --workspace apps/web`, but note the known caveat: the tool currently returns only `Finished TypeScript...` with no final exit marker and no remaining build process. Treat this as pre-existing unless your changes produce a new explicit error.
+9. Update docs if behavior or verification status changes.
+10. Commit only files changed for this design/frontend checkpoint with a concise commit message.
+
+Preserve unrelated user changes. Do not use destructive git commands. Do not start production/VPS work.
 ```
 
 ## Immediate Next Checklist
 
 - [ ] Check `git status --short`.
-- [ ] Read `AGENTS.md`, this handoff, and `docs/14-implementation-plan.md`.
+- [ ] Read `AGENTS.md`, this handoff, `docs/14-implementation-plan.md`, `docs/13-current-setup-status.md`, and `DESIGN.md`.
 - [ ] Read relevant Next.js docs from `node_modules/next/dist/docs/` before editing `apps/web`.
-- [ ] Inspect `apps/daemon/src/server.js`, `apps/web/src/app/api`, and dashboard components.
-- [x] Implement daemon lifecycle/log endpoints for local command apps.
-- [x] Implement matching Next.js API route handlers.
-- [x] Add dashboard controls and log viewing UX.
-- [x] Add/adjust tests where practical.
-- [x] Run lint/build/tests checks for the committed dashboard controls slice.
-- [x] Update docs for the committed dashboard controls slice.
-- [x] Commit Checkpoint 2 dashboard controls slice only.
-- [ ] Continue remaining Checkpoint 2 scope: app detail/add-edit form/browser smoke-responsive checks.
-- [ ] Execute Checkpoint 2.5: 9Router-inspired frontend product shell across the whole browser app while following `DESIGN.md`.
-
-Verification note for the dashboard controls slice:
-
-- `npm run test --workspace apps/web` passed.
-- `../../node_modules/.bin/tsc --noEmit --pretty false` from `apps/web` passed.
-- `node --check apps/daemon/src/server.js` passed.
-- `npm run lint` passed.
-- `npm run build --workspace apps/cli` passed.
-- `npm run build --workspace apps/web` was attempted on the clean baseline and with this slice; both fail with the same hidden `Turbopack build failed with 2 errors` summary and no detailed diagnostics from the tool. Treat this as an existing web build issue, not introduced by the dashboard controls slice, until diagnosed separately.
+- [ ] Inspect `apps/web/src/app/dashboard-client.tsx` and `apps/web/src/app/globals.css`.
+- [ ] Do a focused frontend design enhancement pass on the existing Checkpoint 2.5 shell.
+- [ ] Keep production/VPS sections inert; do not implement production actions.
+- [ ] Run lint, web tests, web TypeScript, and browser smoke/responsive checks.
+- [ ] Attempt/document the web build caveat.
+- [ ] Update docs if behavior or verification notes change.
+- [ ] Commit the design/frontend checkpoint changes only.
