@@ -1,6 +1,6 @@
 # Routely Agent Handoff
 
-Last updated: 2026-06-17
+Last updated: 2026-06-18
 
 This file preserves the current implementation context so another agent can continue without relying on chat history.
 
@@ -206,7 +206,7 @@ Do not start production/VPS deploy actions until Checkpoint 4 begins; production
 Last completed commit:
 
 ```text
-14b5c0f feat: polish frontend product shell
+64d20ab feat: add local services config
 ```
 
 Current state:
@@ -215,9 +215,11 @@ Current state:
 - Checkpoint 1 local runner is complete.
 - Checkpoint 2 dashboard local lifecycle controls are implemented.
 - Checkpoint 2.5 frontend product shell is implemented and polished.
+- Checkpoint 3 config, presets, and Compose services is implemented.
 - Browser calls remain same-origin under `/api/*`.
-- The shell currently has desktop sidebar navigation, mobile bottom navigation, workspace/status header, dense local app rows, app inspector, recent logs, and add/edit app registry forms.
+- The shell currently has desktop sidebar navigation, mobile bottom navigation, workspace/status header, local app/service separation, dense resource rows, app/service inspector, recent logs, and add/edit registry forms.
 - The latest frontend pass improved row rhythm, inspector/log hierarchy, form validation/focus/disabled states, loading/empty states, and responsive action wrapping.
+- Checkpoint 3 added richer config fields, preset detection, Compose-backed database services, `routely db add`, local Compose driver behavior, SQLite persistence for expanded registry fields, daemon lifecycle support for Compose resources, and dashboard visibility/editing for local services/databases.
 - Known web build caveat remains: `npm run build --workspace apps/web` returns only `Finished TypeScript...` with no final exit marker and no remaining build process.
 
 Next execution direction:
@@ -289,7 +291,9 @@ node /home/ruddypp/Documents/work/routely/apps/cli/dist/index.js down
 
 ## Prompt For Next Agent
 
-Copy this prompt into the next agent:
+Copy `docs/NEXT_AGENT_PROMPT.md` into the next agent. That file is the canonical next prompt and targets Checkpoint 4 with a comprehensive backend/CLI/API/storage/dashboard slice plus a Dokploy-inspired panel enhancement.
+
+The older Checkpoint 3 prompt below is kept only as historical reference. Do not use it for the next run unless intentionally auditing or repairing Checkpoint 3.
 
 ```text
 You are working in /home/ruddypp/Documents/work/routely.
