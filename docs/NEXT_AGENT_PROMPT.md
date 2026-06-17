@@ -1,7 +1,7 @@
 # Next Agent Prompt
 
 Last updated: 2026-06-18  
-Latest completed commit: `64d20ab feat: add local services config`
+Latest completed commit: pending Checkpoint 4 commit after verification
 
 Use this prompt for the next implementation agent. It intentionally asks for a comprehensive product/backend/frontend slice, not a frontend-only redesign.
 
@@ -19,11 +19,12 @@ Current progress:
 - Checkpoint 2 dashboard local lifecycle controls are implemented and committed.
 - Checkpoint 2.5 frontend product shell is implemented and polished.
 - Checkpoint 3 config, presets, and Compose services is implemented and committed.
-- Latest completed commit: 64d20ab `feat: add local services config`.
+- Checkpoint 4 production server foundation is implemented and should be committed as `feat: add production server foundation`.
+- Latest completed commit before Checkpoint 4: 64d20ab `feat: add local services config`.
 - Browser code must keep using same-origin `/api/*`; do not call the daemon directly from browser code.
 - Local daemon should bind to `127.0.0.1` in local mode.
 - `routely.yml` remains desired portable config; SQLite stores runtime state/history.
-- Production/VPS behavior is not implemented yet. Do not implement deploy pipelines, domains, HTTPS, GitHub automation, backups, or production app actions before their checkpoints.
+- Production server readiness/auth foundation exists. Do not implement domains, HTTPS, GitHub automation, backups, or broader production app actions before their checkpoints.
 
 Current implemented surface:
 - CLI supports workspace init/sync/add/up/down/ps/logs/restart/doctor.
@@ -35,16 +36,21 @@ Current implemented surface:
 - Daemon lifecycle endpoints support command and Compose resources through existing `/apps/:id/start|stop|restart|logs` paths.
 - Next.js route handlers proxy same-origin `/api/*` requests to the daemon.
 - Dashboard has local app/service resource separation, dense rows, inspector, recent logs, add/edit registry forms, desktop sidebar, mobile bottom nav, and inert future production nav placeholders.
+- CLI now supports `routely server init` and `routely server doctor`.
+- SQLite settings persist production mode, production data directory, admin token hash/salt metadata, and latest server doctor result.
+- Daemon exposes `/server/status`, `/auth/status`, and `/server/doctor`; production mode requires an admin bearer token for private app/registry/lifecycle API paths.
+- Next.js exposes `/api/server/status` and forwards `ROUTELY_ADMIN_TOKEN` server-side when configured.
+- Dashboard includes a server foundation readiness panel backed by real server status data, while deploy/domain/HTTPS/GitHub/backup capabilities remain locked placeholders.
 
 Your next task:
-Implement Checkpoint 4 from docs/14-implementation-plan.md comprehensively: Production Server Foundation, while also enhancing the dashboard/panel design to feel more Dokploy-inspired operationally.
+Implement Checkpoint 5 from docs/14-implementation-plan.md comprehensively: Production Deploy Vertical Slice.
 
-This must be a full product/backend/frontend slice. Do not only polish CSS. Build real foundation behavior, data model, CLI/API surface, server checks, docs, and tests.
+This must be a full product/backend/frontend slice. Do not only polish CSS. Build the smallest end-to-end production deploy path, docs, and tests while reusing the Checkpoint 4 server foundation.
 
 Required reading before coding:
 1. AGENTS.md
 2. docs/HANDOFF.md
-3. docs/14-implementation-plan.md, especially Checkpoint 4
+3. docs/14-implementation-plan.md, especially Checkpoint 5
 4. docs/13-current-setup-status.md
 5. docs/01-prd.md
 6. docs/02-technical-architecture.md
@@ -73,43 +79,22 @@ Inspect current implementation before changing it:
 - packages/presets/*
 - packages/proxy/* if production foundation touches proxy planning
 
-Checkpoint 4 backend/product goals:
-- Implement `routely server init` for one-server production foundation. It should prepare local Routely production state/config without deploying user apps yet.
-- Implement `routely server doctor` for production readiness checks:
-  - Docker availability
-  - Docker Compose availability where relevant
-  - Node/npm availability if needed for the current install mode
-  - required ports such as 80, 443, daemon/dashboard port
-  - disk/memory basics where practical
-  - production data directory readiness
-  - mode/auth readiness status
-- Add production mode config/state in a conservative way:
-  - local mode remains no-auth and frictionless
-  - production mode requires an admin token/session foundation before infrastructure actions are exposed
-  - no public production actions should be reachable unauthenticated
-- Add a first-run admin token or equivalent local production auth foundation. Keep it simple and documented; do not overbuild full user management.
-- Add or prepare SQLite tables/settings for production server foundation where needed, without jumping ahead to deployments/domains/backups.
-- Add daemon/API endpoints only where needed for server status/doctor/auth foundation/dashboard display.
-- Add matching same-origin Next.js route handlers for browser access. Browser code must not call the daemon directly.
-- Keep production deploys, domains, HTTPS automation, GitHub automation, backups, and real VPS app operations deferred.
+Checkpoint 5 backend/product goals:
+- Add the smallest complete production deployment vertical slice, centered on Dockerfile first and static only if the Dockerfile path is stable.
+- Add deployment state tables/log tables needed for queued/preparing/building/starting/healthchecking/succeeded/failed lifecycle.
+- Add `routely deploy <app>` and `routely deploy <app> --watch` if consistent with the current CLI shape.
+- Implement a conservative Dockerfile deploy driver/helper that can build and start a container on the single server, with logs captured incrementally.
+- Keep the previous production app alive on failed deploy where practical; at minimum, do not delete known-good metadata on failure.
+- Add only the daemon/API and same-origin Next.js route handlers needed for deployment status/log display and triggering the vertical slice.
+- Require production auth for deployment actions. Local mode must remain frictionless for local runner behavior.
+- Keep domains, HTTPS automation, GitHub automation, backups, and broader VPS operations deferred.
 
-Dokploy-inspired frontend/panel goals:
-- Enhance the dashboard panel so it feels closer to Dokploy’s operational control plane while preserving Routely’s local-first identity and DESIGN.md.
+Frontend/product goals:
+- Extend the current Dokploy-inspired operational surface with a deploy/status/log vertical slice backed by real deployment data.
 - Do not create a landing page. The first screen must remain a usable product control surface.
-- Add a stronger production foundation panel/section, but keep unsafe actions disabled/inert until backend support exists.
-- Make the app feel like it has clear operational zones:
-  - Local resources: apps, services, databases, logs, dependencies.
-  - Server foundation: server mode, doctor checks, Docker/ports/data-dir/auth readiness.
-  - Future production: deployments/domains/backups/GitHub shown as disabled placeholders only.
-- Improve panel quality:
-  - better right-side inspector panels
-  - denser status cards/rows for server checks
-  - clearer resource/service/database cards or rows
-  - config and command metadata grouped cleanly
-  - health/auth/server readiness badges
-  - mobile and desktop responsive layouts with no overlap
+- Keep local resources and server foundation visible; add deployment status/log UI only where backend data exists.
+- Keep domains, HTTPS, GitHub, and backups disabled/inert until their checkpoints.
 - Keep the visual system aligned with DESIGN.md: near-black surfaces, compact typography, functional green accent, pill/circle controls, heavy dark elevation, no generic SaaS landing page.
-- Avoid a frontend-only pass. Every new panel should be backed by real data from CLI/daemon/API/storage where practical.
 
 Testing and verification:
 - Add or adjust tests for backend/server checks/config/API behavior. Pure CSS polish is not enough.

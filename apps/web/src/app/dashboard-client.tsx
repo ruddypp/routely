@@ -40,7 +40,35 @@ type DaemonHealth = {
   workspace?: string;
   database?: string;
   startedAt?: string;
+  server?: DaemonServerStatus;
   apps?: DaemonApp[];
+};
+
+type DaemonServerCheck = {
+  id: string;
+  label: string;
+  status: "ok" | "warn" | "error";
+  message: string;
+  detail: string | null;
+};
+
+type DaemonServerStatus = {
+  mode: string;
+  production: boolean;
+  dataDir: string | null;
+  initializedAt: string | null;
+  auth: {
+    required: boolean;
+    configured: boolean;
+    tokenCreatedAt: string | null;
+    tokenSource: string | null;
+  };
+  readiness: {
+    ok: boolean;
+    checkedAt: string | null;
+    checks: DaemonServerCheck[];
+  } | null;
+  disabledProductionActions: string[];
 };
 
 type DaemonAppLifecycleResponse = {
@@ -67,6 +95,11 @@ type HealthResponse = {
 type AppsResponse = {
   apps: DaemonApp[];
   error: string | null;
+};
+
+type ServerStatusResponse = {
+  server: DaemonServerStatus | null;
+  error?: string | null;
 };
 
 type AppAction = "start" | "stop" | "restart";
@@ -278,6 +311,8 @@ function appInitials(name: string): string {
 
 export default function DashboardClient() {
   const [health, setHealth] = useState<HealthResponse | null>(null);
+  const [serverStatus, setServerStatus] = useState<DaemonServerStatus | null>(null);
+  const [serverError, setServerError] = useState<string | null>(null);
   const [apps, setApps] = useState<DaemonApp[]>([]);
   const [appsError, setAppsError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
@@ -300,17 +335,21 @@ export default function DashboardClient() {
     if (showRefresh) setRefreshing(true);
 
     try {
-      const [healthRes, appsRes] = await Promise.all([
+      const [healthRes, appsRes, serverRes] = await Promise.all([
         fetch("/api/health", { cache: "no-store" }),
-        fetch("/api/apps", { cache: "no-store" })
+        fetch("/api/apps", { cache: "no-store" }),
+        fetch("/api/server/status", { cache: "no-store" })
       ]);
 
       const healthData = (await healthRes.json()) as HealthResponse;
       const appsData = (await appsRes.json()) as AppsResponse;
+      const serverData = (await serverRes.json().catch(() => ({ server: null, error: "Server status unavailable." }))) as ServerStatusResponse;
 
       if (!mounted.current) return;
 
       setHealth(healthData);
+      setServerStatus(serverData.server || healthData.health?.server || null);
+      setServerError(serverData.error || null);
       setApps(appsData.apps || []);
       setAppsError(appsData.error);
       setLastUpdated(new Date().toISOString());
@@ -318,6 +357,8 @@ export default function DashboardClient() {
     } catch {
       if (!mounted.current) return;
       setHealth({ connected: false, daemonUrl: "", error: "Dashboard could not reach its API." });
+      setServerStatus(null);
+      setServerError("Dashboard could not reach its API.");
       setAppsError("Dashboard could not reach its API.");
     } finally {
       if (mounted.current) setLoading(false);
@@ -481,6 +522,12 @@ export default function DashboardClient() {
           />
 
           <div className="grid gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:px-5 xl:grid-cols-[minmax(0,1fr)_410px]">
+            <ServerFoundationPanel
+              connected={connected}
+              error={serverError}
+              server={serverStatus}
+            />
+
             <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
               <div className="flex flex-col gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.035] to-transparent px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -601,6 +648,112 @@ function Sidebar({ connected }: { connected: boolean }) {
         </nav>
       </div>
     </aside>
+  );
+}
+
+function ServerFoundationPanel({ connected, error, server }: { connected: boolean; error: string | null; server: DaemonServerStatus | null }) {
+  const checks = server?.readiness?.checks || [];
+  const dockerChecks = checks.filter((check) => ["docker", "docker-compose"].includes(check.id));
+  const portChecks = checks.filter((check) => check.id.startsWith("port-"));
+  const dataCheck = checks.find((check) => check.id === "data-dir");
+  const authStatus = server?.auth.configured ? "ready" : server?.auth.required ? "missing" : "local bypass";
+
+  return (
+    <section className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
+      <div className="grid gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 lg:grid-cols-[1.1fr_1.4fr] lg:items-center">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Server foundation</p>
+          <h2 className="text-lg font-bold leading-tight sm:text-xl">Production readiness</h2>
+          <p className="mt-1 max-w-2xl text-sm text-muted">
+            {server?.production
+              ? "Production mode is enabled. Infrastructure actions stay locked until their checkpoints ship."
+              : "Local mode is active. Server init prepares the one-VPS foundation without adding deploy actions yet."}
+          </p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <ReadinessCard label="Mode" value={server?.mode || "local"} status={server?.production ? "warn" : "ok"} />
+          <ReadinessCard label="Auth" value={authStatus} status={server?.auth.configured || !server?.auth.required ? "ok" : "error"} />
+          <ReadinessCard label="Docker" value={summaryStatus(dockerChecks)} status={worstStatus(dockerChecks)} />
+          <ReadinessCard label="Ports" value={summaryStatus(portChecks)} status={worstStatus(portChecks)} />
+        </div>
+      </div>
+
+      {error ? <Alert title="Server status unavailable" message={error} /> : null}
+
+      <div className="grid gap-3 px-4 py-4 lg:grid-cols-[1.1fr_1.4fr]">
+        <div className="grid gap-2 text-xs sm:grid-cols-2">
+          <Meta label="Daemon" value={connected ? "connected" : "offline"} />
+          <Meta label="Data dir" value={server?.dataDir || "not initialized"} mono />
+          <Meta label="Initialized" value={server?.initializedAt ? timeAgo(server.initializedAt) : "not initialized"} />
+          <Meta label="Auth source" value={server?.auth.tokenSource || "none"} />
+          <Meta label="Last doctor" value={server?.readiness?.checkedAt ? timeAgo(server.readiness.checkedAt) : "not run"} />
+          <Meta label="Data check" value={dataCheck?.message || "pending"} wide />
+        </div>
+
+        <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+          {(checks.length > 0 ? checks.slice(0, 6) : emptyServerChecks()).map((check) => (
+            <CheckRow key={check.id} check={check} />
+          ))}
+        </div>
+      </div>
+
+      <div className="border-t border-white/5 bg-black/20 px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Future production</span>
+          {(server?.disabledProductionActions || ["deployments", "domains", "https", "github", "backups"]).map((item) => (
+            <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/60">
+              {item} locked
+            </span>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function emptyServerChecks(): DaemonServerCheck[] {
+  return [
+    { id: "docker", label: "Docker", status: "warn", message: "Run routely server doctor", detail: null },
+    { id: "data-dir", label: "Data directory", status: "warn", message: "Server init pending", detail: null },
+    { id: "auth", label: "Auth", status: "warn", message: "Admin token pending", detail: null }
+  ];
+}
+
+function worstStatus(checks: DaemonServerCheck[]): "ok" | "warn" | "error" {
+  if (checks.some((check) => check.status === "error")) return "error";
+  if (checks.some((check) => check.status === "warn") || checks.length === 0) return "warn";
+  return "ok";
+}
+
+function summaryStatus(checks: DaemonServerCheck[]): string {
+  if (checks.length === 0) return "pending";
+  const failed = checks.filter((check) => check.status === "error").length;
+  const warnings = checks.filter((check) => check.status === "warn").length;
+  if (failed > 0) return `${failed} failing`;
+  if (warnings > 0) return `${warnings} warnings`;
+  return "ready";
+}
+
+function ReadinessCard({ label, status, value }: { label: string; status: "ok" | "warn" | "error"; value: string }) {
+  const color = status === "ok" ? "text-accent" : status === "warn" ? "text-warning" : "text-negative";
+  return (
+    <div className={`rounded-md bg-surface-raised px-3 py-2 ${INSET_RING}`}>
+      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{label}</p>
+      <p className={`mt-1 truncate text-sm font-bold ${color}`}>{value}</p>
+    </div>
+  );
+}
+
+function CheckRow({ check }: { check: DaemonServerCheck }) {
+  const color = check.status === "ok" ? "bg-accent" : check.status === "warn" ? "bg-warning" : "bg-negative";
+  return (
+    <div className="min-w-0 rounded-md bg-black/22 px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.045)_inset]">
+      <div className="flex items-center gap-2">
+        <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} aria-hidden="true" />
+        <p className="truncate text-xs font-bold">{check.label}</p>
+      </div>
+      <p className="mt-1 truncate text-[11px] text-muted">{check.message}</p>
+    </div>
   );
 }
 
@@ -1048,9 +1201,9 @@ function ServiceEmpty() {
 
 function Meta({ label, mono, value, wide }: { label: string; mono?: boolean; value: string; wide?: boolean }) {
   return (
-    <div className={wide ? "col-span-2" : undefined}>
+    <div className={`min-w-0 ${wide ? "col-span-2" : ""}`}>
       <dt className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{label}</dt>
-      <dd className={`mt-1 break-words text-foreground ${mono ? "font-mono text-[11px]" : "text-xs"}`}>{value}</dd>
+      <dd className={`mt-1 text-foreground ${mono ? "break-all font-mono text-[11px]" : "break-words text-xs"}`}>{value}</dd>
     </div>
   );
 }

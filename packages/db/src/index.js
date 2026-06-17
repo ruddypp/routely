@@ -447,6 +447,55 @@ export function recordRuntimeStop(db, appId, pid, exitCode, status = "stopped") 
   updateAppStatus(db, appId, status);
 }
 
+export function getSetting(db, key) {
+  const row = db.prepare("SELECT value FROM settings WHERE key = ?").get(key);
+  return row ? row.value : null;
+}
+
+export function setSetting(db, key, value) {
+  db.prepare("INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)").run(key, String(value));
+}
+
+export function getServerFoundationState(db) {
+  const mode = getSetting(db, "server.mode") || "local";
+  const dataDir = getSetting(db, "server.data_dir");
+  const initializedAt = getSetting(db, "server.initialized_at");
+  const tokenHash = getSetting(db, "auth.admin_token_hash");
+  const tokenSalt = getSetting(db, "auth.admin_token_salt");
+  const tokenCreatedAt = getSetting(db, "auth.admin_token_created_at");
+  const lastDoctorJson = getSetting(db, "server.last_doctor");
+
+  return {
+    mode,
+    production: mode === "production",
+    dataDir,
+    initializedAt,
+    auth: {
+      required: mode === "production",
+      configured: Boolean(tokenHash && tokenSalt),
+      tokenHash,
+      tokenSalt,
+      tokenCreatedAt
+    },
+    lastDoctor: lastDoctorJson ? parseJsonObject(lastDoctorJson) : null
+  };
+}
+
+export function saveServerFoundationState(db, state) {
+  const apply = db.transaction((input) => {
+    if (input.mode) setSetting(db, "server.mode", input.mode);
+    if (input.dataDir) setSetting(db, "server.data_dir", input.dataDir);
+    if (input.initializedAt) setSetting(db, "server.initialized_at", input.initializedAt);
+    if (input.adminTokenHash) setSetting(db, "auth.admin_token_hash", input.adminTokenHash);
+    if (input.adminTokenSalt) setSetting(db, "auth.admin_token_salt", input.adminTokenSalt);
+    if (input.adminTokenCreatedAt) setSetting(db, "auth.admin_token_created_at", input.adminTokenCreatedAt);
+    if (input.lastDoctor) setSetting(db, "server.last_doctor", JSON.stringify(input.lastDoctor));
+  });
+
+  apply(state);
+  return getServerFoundationState(db);
+}
+
 export function initializeRoutely(root) {
   const database = openRoutelyDatabase(root);
   database.db

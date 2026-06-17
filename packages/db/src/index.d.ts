@@ -43,4 +43,33 @@ export function syncWorkspaceConfig(db: Database.Database, loaded: LoadedWorkspa
 export function updateAppStatus(db: Database.Database, appId: number, status: RoutelyAppStatus): void;
 export function recordRuntimeStart(db: Database.Database, appId: number, pid: number): void;
 export function recordRuntimeStop(db: Database.Database, appId: number, pid: number, exitCode: number | null, status?: RoutelyAppStatus): void;
+export function getSetting(db: Database.Database, key: string): string | null;
+export function setSetting(db: Database.Database, key: string, value: string): void;
+export interface RoutelyServerFoundationState {
+  mode: "local" | "production" | string;
+  production: boolean;
+  dataDir: string | null;
+  initializedAt: string | null;
+  auth: {
+    required: boolean;
+    configured: boolean;
+    tokenHash: string | null;
+    tokenSalt: string | null;
+    tokenCreatedAt: string | null;
+  };
+  lastDoctor: Record<string, unknown> | null;
+}
+export function getServerFoundationState(db: Database.Database): RoutelyServerFoundationState;
+export function saveServerFoundationState(
+  db: Database.Database,
+  state: {
+    mode?: string;
+    dataDir?: string;
+    initializedAt?: string;
+    adminTokenHash?: string;
+    adminTokenSalt?: string;
+    adminTokenCreatedAt?: string;
+    lastDoctor?: Record<string, unknown>;
+  }
+): RoutelyServerFoundationState;
 export function initializeRoutely(root: string): RoutelyDatabaseHandle;

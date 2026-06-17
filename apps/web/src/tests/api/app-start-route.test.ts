@@ -19,6 +19,7 @@ const app = {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  delete process.env.ROUTELY_ADMIN_TOKEN;
 });
 
 describe("POST /api/apps/:id/start", () => {
@@ -40,6 +41,27 @@ describe("POST /api/apps/:id/start", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:9977/apps/7/start",
       expect.objectContaining({ method: "POST", cache: "no-store" })
+    );
+  });
+
+  it("forwards the server-side admin token when configured", async () => {
+    process.env.ROUTELY_ADMIN_TOKEN = "test-token";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ app, pid: 1234 }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    await POST(new Request("http://localhost/api/apps/7/start", { method: "POST" }), {
+      params: Promise.resolve({ id: "7", action: "start" })
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:9977/apps/7/start",
+      expect.objectContaining({
+        headers: expect.objectContaining({ authorization: "Bearer test-token" })
+      })
     );
   });
 });

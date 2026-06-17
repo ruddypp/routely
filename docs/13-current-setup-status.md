@@ -2,7 +2,7 @@
 
 Version: 0.1  
 Status: Active setup note  
-Last updated: 2026-06-16
+Last updated: 2026-06-18
 Environment: Fedora Linux, npm, Node.js via NVM
 
 ## English
@@ -66,6 +66,12 @@ Lokasi dokumentasi:
 - `routely db add <postgres|mysql|mariadb|redis|mongodb>` registers a local Compose-backed database service and writes it to the `services:` section of `routely.yml`.
 - The local Compose driver generates per-service Compose files under `.routely/compose` and uses `docker compose` for service start/stop.
 - The dashboard now distinguishes apps from services/databases and exposes denser config metadata in rows, inspector sections, and add/edit forms while still routing browser mutations through same-origin `/api/*`.
+- Checkpoint 4 has added the production server foundation without enabling deploy/domain/HTTPS/GitHub/backup actions.
+- `routely server init` prepares production mode state, creates/checks a persistent data directory, generates a first-run admin token, stores only its salted hash in SQLite settings, and runs the production doctor checks.
+- `routely server doctor` reports Docker, Docker Compose, Node/npm, production data directory, disk, memory, and required production ports `80`, `443`, and the dashboard port.
+- The daemon exposes server foundation status at `/server/status`, auth status at `/auth/status`, and protected doctor checks at `/server/doctor`. In production mode, private daemon API paths require an admin bearer token.
+- Next.js route handlers continue to proxy browser access through same-origin `/api/*`; `/api/server/status` backs the dashboard server foundation panel, and server-side proxy calls can forward `ROUTELY_ADMIN_TOKEN` without exposing it to browser code.
+- The dashboard now has clearer operational zones for local resources, server foundation readiness, and disabled future production capabilities.
 
 ## Current Structure
 
@@ -176,6 +182,8 @@ routely logs web --follow
 routely restart web
 routely down
 routely doctor
+routely server init --data-dir /var/lib/routely
+routely server doctor
 routely
 ```
 
@@ -184,6 +192,8 @@ The dashboard app surface can start, stop, and restart local command-driver apps
 Command apps declared in `routely.yml` can use `depends_on` to control local startup order. Routely rejects dependency cycles before starting apps. CLI commands and daemon boot reconcile stale runtime PIDs so apps are not left marked `running` after an old managed process exits outside Routely.
 
 Local Compose services declared in `services:` use `driver: compose`. Generated Compose files are written under `.routely/compose` unless `compose_file` is supplied. Database templates are local-development defaults and are internal by default where practical.
+
+Production server foundation is intentionally limited to readiness and auth primitives in this checkpoint. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Production deploys, domains, HTTPS automation, GitHub automation, backups, and real VPS app operations remain deferred to later checkpoints.
 
 ## CLI Build And Global Reinstall Flow
 
@@ -223,6 +233,9 @@ run command
 - Checkpoint 3 verification added preset/config/Compose/database-template tests to the CLI suite and a temp workspace smoke for `init`, `db add postgres`, Next.js preset detection via `add`, config export, and `sync`.
 - Browser smoke was run against local daemon/web dev servers with desktop, tablet, and mobile headless Chrome screenshots. `/api/apps` and `/api/apps/3/logs` returned through the same-origin web API.
 - The latest frontend design pass passed `npm run lint`, `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, same-origin `/api/apps` smoke, and desktop/tablet/mobile headless Chrome screenshots. A desktop app-row overlap found in the first screenshot pass was fixed and rechecked.
+- Checkpoint 4 verification passed `npm run lint`, `npm run test --workspace apps/cli`, `npm run build --workspace apps/cli`, `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, and `node --check apps/daemon/src/server.js`.
+- Checkpoint 4 browser/API smoke passed with daemon and web dev servers running locally: `/api/server/status` returned server foundation readiness through same-origin Next.js, `/api/apps` returned the local registry, and desktop/tablet/mobile headless Chrome screenshots showed the production readiness panel and local resource surface without obvious overlap. The restricted tool session required elevated port binding for the daemon/web smoke.
+- Checkpoint 4 security smoke passed with a temporary production-mode daemon on port `9988`: unauthenticated `GET /apps` returned `401 Unauthorized` with `Routely production API requires an admin token.`
 - `npm run build --workspace apps/web` still returns only the partial `Finished TypeScript...` progress line with no final exit marker and no remaining build process, matching the existing web build caveat.
 
 ## Environment Check
@@ -253,13 +266,12 @@ Ports checked as free during the latest setup audit:
 
 ## Next Development Target
 
-Recommended next implementation step after the frontend design pass:
+Recommended next implementation step after Checkpoint 4:
 
 ```text
-Checkpoint 3: Config, presets, and Compose services
-  - Implement this as a comprehensive backend/CLI/API/storage/frontend slice, not frontend-only polish.
-  - Add real config/preset/Compose/database-service support before broad visual changes.
-  - Make the dashboard more Dokploy-inspired for local resources: apps, services, databases, dependencies, commands, and config metadata.
-  - Keep production/VPS work deferred until the production checkpoints.
+Checkpoint 5: Production Deploy Vertical Slice
+  - Keep the scope narrow but end to end for Dockerfile/static deploy foundations.
+  - Reuse the production mode/auth/readiness state from Checkpoint 4.
+  - Do not implement domains, HTTPS, GitHub automation, backups, or broader production operations before their checkpoints.
   - Keep browser calls routed through same-origin /api/* handlers.
 ```

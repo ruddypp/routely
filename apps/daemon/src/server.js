@@ -4,16 +4,26 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSyn
 import net from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_DAEMON_PORT, appToPublicDto, loadWorkspaceConfig, upsertWorkspaceConfigEntry } from "@routely/core";
+import {
+  DEFAULT_DAEMON_PORT,
+  appToPublicDto,
+  defaultProductionDataDir,
+  loadWorkspaceConfig,
+  runServerDoctorChecks,
+  upsertWorkspaceConfigEntry,
+  verifyAdminToken
+} from "@routely/core";
 import {
   deleteApp,
   getAppById,
+  getServerFoundationState,
   initializeRoutely,
   listRunningRuntimeInstances,
   listApps,
   recordRuntimeStart,
   recordRuntimeStop,
   reconcileStaleRuntimeInstances,
+  saveServerFoundationState,
   syncWorkspaceConfig,
   updateApp,
   updateAppStatus,
@@ -42,6 +52,92 @@ try {
 reconcileStaleRuntimeInstances(db);
 
 const app = Fastify({ logger: true });
+
+function serverFoundationState() {
+  const state = getServerFoundationState(db);
+  const envProduction = process.env.ROUTELY_SERVER_MODE === "production";
+  const envTokenConfigured = Boolean(process.env.ROUTELY_ADMIN_TOKEN);
+
+  return {
+    ...state,
+    mode: envProduction ? "production" : state.mode,
+    production: envProduction || state.production,
+    dataDir: state.dataDir || defaultProductionDataDir(workspaceRoot),
+    auth: {
+      ...state.auth,
+      required: envProduction || state.auth.required,
+      configured: state.auth.configured || envTokenConfigured,
+      envTokenConfigured
+    }
+  };
+}
+
+function publicServerStatus() {
+  const state = serverFoundationState();
+  const lastDoctor = state.lastDoctor;
+
+  return {
+    mode: state.production ? "production" : "local",
+    production: state.production,
+    dataDir: state.dataDir,
+    initializedAt: state.initializedAt,
+    auth: {
+      required: state.auth.required,
+      configured: state.auth.configured,
+      tokenCreatedAt: state.auth.tokenCreatedAt,
+      tokenSource: state.auth.envTokenConfigured ? "environment" : state.auth.configured ? "settings" : null
+    },
+    readiness: lastDoctor
+      ? {
+          ok: Boolean(lastDoctor.ok),
+          checkedAt: lastDoctor.checkedAt || null,
+          checks: Array.isArray(lastDoctor.checks) ? lastDoctor.checks : []
+        }
+      : null,
+    disabledProductionActions: ["deployments", "domains", "https", "github", "backups"]
+  };
+}
+
+function requestToken(request) {
+  const header = request.headers.authorization || "";
+  if (header.startsWith("Bearer ")) {
+    return header.slice("Bearer ".length).trim();
+  }
+  const token = request.headers["x-routely-admin-token"];
+  return Array.isArray(token) ? token[0] : token || null;
+}
+
+function isAuthorized(request) {
+  const state = serverFoundationState();
+
+  if (!state.production) {
+    return true;
+  }
+
+  const token = requestToken(request);
+  if (!token) {
+    return false;
+  }
+
+  if (process.env.ROUTELY_ADMIN_TOKEN && token === process.env.ROUTELY_ADMIN_TOKEN) {
+    return true;
+  }
+
+  return verifyAdminToken(token, state.auth.tokenSalt, state.auth.tokenHash);
+}
+
+app.addHook("preHandler", async (request, reply) => {
+  const url = request.url.split("?")[0];
+  const publicPaths = new Set(["/health", "/server/status", "/auth/status"]);
+
+  if (publicPaths.has(url)) {
+    return;
+  }
+
+  if (!isAuthorized(request)) {
+    return reply.code(401).send({ error: "Routely production API requires an admin token." });
+  }
+});
 
 function logDir() {
   return resolve(workspaceRoot, ".routely", "logs");
@@ -322,7 +418,8 @@ function readRecentLogs(appRecord) {
   return { path: logPath, content, bytes: stats.size, truncated: start > 0 };
 }
 
-app.get("/health", async () => {
+app.get("/health", async (request) => {
+  const server = publicServerStatus();
   return {
     ok: true,
     service: "routely-daemon",
@@ -330,8 +427,31 @@ app.get("/health", async () => {
     workspace: workspaceRoot,
     database: databasePath,
     startedAt,
-    apps: listApps(db).map(appToPublicDto)
+    server,
+    apps: server.production && !isAuthorized(request) ? [] : listApps(db).map(appToPublicDto)
   };
+});
+
+app.get("/server/status", async () => {
+  return { server: publicServerStatus() };
+});
+
+app.get("/auth/status", async () => {
+  const server = publicServerStatus();
+  return { auth: server.auth, mode: server.mode };
+});
+
+app.get("/server/doctor", async () => {
+  const state = serverFoundationState();
+  const doctor = await runServerDoctorChecks({
+    workspaceRoot,
+    dataDir: state.dataDir,
+    ports: [80, 443, Number(process.env.ROUTELY_DASHBOARD_PORT || 3030)],
+    createDataDir: false
+  });
+
+  saveServerFoundationState(db, { lastDoctor: doctor });
+  return { doctor, server: publicServerStatus() };
 });
 
 app.get("/apps", async () => {

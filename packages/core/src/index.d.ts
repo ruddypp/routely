@@ -167,3 +167,33 @@ export function upsertWorkspaceConfigEntry(
   input: RoutelyAppInput,
   sectionName?: "apps" | "services"
 ): { configPath: string; entry: Record<string, unknown>; section: string };
+
+export type RoutelyServerMode = "local" | "production";
+export type RoutelyServerCheckStatus = "ok" | "warn" | "error";
+export interface RoutelyServerCheck {
+  id: string;
+  label: string;
+  status: RoutelyServerCheckStatus;
+  message: string;
+  detail: string | null;
+}
+export interface RoutelyServerDoctorResult {
+  ok: boolean;
+  dataDir: string;
+  ports: number[];
+  checkedAt: string;
+  checks: RoutelyServerCheck[];
+}
+export const SERVER_MODE_LOCAL: "local";
+export const SERVER_MODE_PRODUCTION: "production";
+export const DEFAULT_PRODUCTION_PORTS: number[];
+export function defaultProductionDataDir(workspaceRoot?: string): string;
+export function generateAdminToken(): string;
+export function hashAdminToken(token: string, salt?: string): { salt: string; hash: string };
+export function verifyAdminToken(token: string, salt?: string | null, expectedHash?: string | null): boolean;
+export function runServerDoctorChecks(options?: {
+  workspaceRoot?: string;
+  dataDir?: string;
+  ports?: number[];
+  createDataDir?: boolean;
+}): Promise<RoutelyServerDoctorResult>;

@@ -60,7 +60,35 @@ export type DaemonHealth = {
   workspace?: string;
   database?: string;
   startedAt?: string;
+  server?: DaemonServerStatus;
   apps?: DaemonApp[];
+};
+
+export type DaemonServerCheck = {
+  id: string;
+  label: string;
+  status: "ok" | "warn" | "error";
+  message: string;
+  detail: string | null;
+};
+
+export type DaemonServerStatus = {
+  mode: "local" | "production" | string;
+  production: boolean;
+  dataDir: string | null;
+  initializedAt: string | null;
+  auth: {
+    required: boolean;
+    configured: boolean;
+    tokenCreatedAt: string | null;
+    tokenSource: string | null;
+  };
+  readiness: {
+    ok: boolean;
+    checkedAt: string | null;
+    checks: DaemonServerCheck[];
+  } | null;
+  disabledProductionActions: string[];
 };
 
 export type DaemonResult<T> =
@@ -75,13 +103,18 @@ export type DaemonResult<T> =
 export async function daemonFetch<T>(path: string, init?: RequestInit): Promise<DaemonResult<T>> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2500);
+  const adminToken = process.env.ROUTELY_ADMIN_TOKEN;
 
   try {
     const response = await fetch(`${DAEMON_URL}${path}`, {
       ...init,
       cache: "no-store",
       signal: controller.signal,
-      headers: { "content-type": "application/json", ...(init?.headers || {}) }
+      headers: {
+        "content-type": "application/json",
+        ...(adminToken ? { authorization: `Bearer ${adminToken}` } : {}),
+        ...(init?.headers || {})
+      }
     });
 
     const text = await response.text();

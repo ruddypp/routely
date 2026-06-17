@@ -193,13 +193,23 @@ Checkpoint 3 is now implemented as a comprehensive local resource slice:
 - Daemon lifecycle endpoints now support command and Compose resources; browser mutations remain behind same-origin `/api/*` route handlers.
 - The dashboard distinguishes apps from services/databases and exposes richer config/service metadata in rows, inspector, and add/edit forms.
 
-Recommended next step after Checkpoint 3 verification and commit:
+Checkpoint 4 is now implemented as the production server foundation slice:
+
+- `routely server init` prepares production mode state, creates/checks the production data directory, generates a one-time admin token, stores only a salted hash in SQLite settings, and runs server doctor checks.
+- `routely server doctor` checks Docker, Docker Compose, Node/npm, disk, memory, data directory readiness, and required production ports `80`, `443`, and the dashboard port.
+- SQLite settings now persist server mode, production data directory, admin token metadata, and the latest doctor result without adding deploy/domain/backup tables early.
+- Daemon endpoints now expose server readiness/auth foundation at `/server/status`, `/auth/status`, and `/server/doctor`; production mode requires an admin bearer token for private app/registry/lifecycle API paths.
+- Next.js continues to proxy browser access through same-origin `/api/*`; `/api/server/status` backs the dashboard panel and server-side proxy calls can forward `ROUTELY_ADMIN_TOKEN` without exposing it to browser code.
+- The dashboard now has clearer Dokploy-inspired operational zones: local resources, server foundation readiness, and disabled future production placeholders.
+- Production deploys, domains, HTTPS automation, GitHub automation, backups, and real VPS app actions remain deferred.
+
+Recommended next step after Checkpoint 4 verification and commit:
 
 ```text
-Move to Checkpoint 4: Production Server Foundation.
+Move to Checkpoint 5: Production Deploy Vertical Slice.
 ```
 
-Do not start production/VPS deploy actions until Checkpoint 4 begins; production navigation remains inert placeholders.
+Do not start domains, HTTPS, GitHub automation, backups, or broader VPS operations before their checkpoints; production navigation remains locked placeholders except for the server foundation status surface.
 
 ## Current Progress Snapshot For Next Agent
 
@@ -216,17 +226,18 @@ Current state:
 - Checkpoint 2 dashboard local lifecycle controls are implemented.
 - Checkpoint 2.5 frontend product shell is implemented and polished.
 - Checkpoint 3 config, presets, and Compose services is implemented.
+- Checkpoint 4 production server foundation is implemented.
 - Browser calls remain same-origin under `/api/*`.
 - The shell currently has desktop sidebar navigation, mobile bottom navigation, workspace/status header, local app/service separation, dense resource rows, app/service inspector, recent logs, and add/edit registry forms.
-- The latest frontend pass improved row rhythm, inspector/log hierarchy, form validation/focus/disabled states, loading/empty states, and responsive action wrapping.
+- The latest frontend pass improved row rhythm, inspector/log hierarchy, form validation/focus/disabled states, loading/empty states, responsive action wrapping, and the server foundation readiness panel.
 - Checkpoint 3 added richer config fields, preset detection, Compose-backed database services, `routely db add`, local Compose driver behavior, SQLite persistence for expanded registry fields, daemon lifecycle support for Compose resources, and dashboard visibility/editing for local services/databases.
 - Known web build caveat remains: `npm run build --workspace apps/web` returns only `Finished TypeScript...` with no final exit marker and no remaining build process.
 
 Next execution direction:
 
-- Start Checkpoint 4 from `docs/14-implementation-plan.md` only after Checkpoint 3 is committed.
-- Keep the local-first Routely identity while adding production foundation primitives.
-- Do not implement deploy pipelines, domains, HTTPS, GitHub automation, backups, or real VPS app actions before their checkpoints.
+- Start Checkpoint 5 from `docs/14-implementation-plan.md` only after Checkpoint 4 is committed.
+- Reuse the production mode/auth/readiness primitives from Checkpoint 4.
+- Do not implement domains, HTTPS, GitHub automation, backups, or broader VPS app operations before their checkpoints.
 
 ## Current Known Environment
 

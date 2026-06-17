@@ -228,3 +228,14 @@ export {
   readRawWorkspaceConfig,
   upsertWorkspaceConfigEntry
 } from "./config.js";
+
+export {
+  SERVER_MODE_LOCAL,
+  SERVER_MODE_PRODUCTION,
+  DEFAULT_PRODUCTION_PORTS,
+  defaultProductionDataDir,
+  generateAdminToken,
+  hashAdminToken,
+  verifyAdminToken,
+  runServerDoctorChecks
+} from "./server-foundation.js";

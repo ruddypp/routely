@@ -21,7 +21,11 @@ import {
   DEFAULT_DAEMON_PORT,
   DEFAULT_DASHBOARD_PORT,
   appToPublicDto,
+  defaultProductionDataDir,
+  generateAdminToken,
+  hashAdminToken,
   loadWorkspaceConfig,
+  runServerDoctorChecks,
   upsertWorkspaceConfigEntry,
   type RoutelyAppInput,
   type RoutelyAppRecord
@@ -34,6 +38,7 @@ import {
   reconcileStaleRuntimeInstances,
   recordRuntimeStart,
   recordRuntimeStop,
+  saveServerFoundationState,
   syncWorkspaceConfig,
   updateAppStatus,
   upsertApp
@@ -117,6 +122,8 @@ Usage:
   routely logs [app]       Print app logs, optionally with --follow
   routely restart [app]    Restart one command app
   routely doctor           Check local Routely prerequisites and port availability
+  routely server init      Prepare production server foundation state and admin token
+  routely server doctor    Check production server readiness
   routely add [path] --name <name> [--command <command>] [--port <port>] [--preset <preset>]
   routely db add <type>    Register a local Compose database service
 
@@ -730,6 +737,92 @@ async function doctorCommand(): Promise<void> {
   db.close();
 }
 
+async function serverCommand(args: string[]): Promise<void> {
+  const subcommand = args[0];
+
+  if (subcommand === "init") {
+    await serverInitCommand(args.slice(1));
+    return;
+  }
+
+  if (subcommand === "doctor") {
+    await serverDoctorCommand(args.slice(1));
+    return;
+  }
+
+  console.error("Usage: routely server <init|doctor> [--data-dir <path>] [--dashboard-port <port>]");
+  process.exit(1);
+}
+
+function serverPortsFromFlags(flags: Record<string, string | boolean>): number[] {
+  const dashboardPort = Number(flags["dashboard-port"] || process.env.ROUTELY_DASHBOARD_PORT || DEFAULT_DASHBOARD_PORT);
+  return [80, 443, dashboardPort].filter((port) => Number.isInteger(port) && port > 0);
+}
+
+async function serverInitCommand(args: string[]): Promise<void> {
+  const { flags } = parseFlags(args);
+  const dataDir = resolve(invocationCwd, String(flags["data-dir"] || defaultProductionDataDir(workspaceRoot)));
+  const ports = serverPortsFromFlags(flags);
+  const token = generateAdminToken();
+  const hashed = hashAdminToken(token);
+  const doctor = await runServerDoctorChecks({ workspaceRoot, dataDir, ports, createDataDir: true });
+  const { db, databasePath } = initializeRoutely(workspaceRoot);
+  const initializedAt = new Date().toISOString();
+
+  saveServerFoundationState(db, {
+    mode: "production",
+    dataDir,
+    initializedAt,
+    adminTokenHash: hashed.hash,
+    adminTokenSalt: hashed.salt,
+    adminTokenCreatedAt: initializedAt,
+    lastDoctor: doctor as unknown as Record<string, unknown>
+  });
+
+  console.log("Routely production server foundation initialized.");
+  console.log(`Workspace: ${workspaceRoot}`);
+  console.log(`Database:  ${databasePath}`);
+  console.log(`Data dir:  ${dataDir}`);
+  console.log(`Mode:      production`);
+  console.log(`Auth:      admin token created`);
+  console.log("");
+  console.log("Admin token:");
+  console.log(token);
+  console.log("");
+  console.log("Keep this token secret. Set ROUTELY_ADMIN_TOKEN for the dashboard/API process until full login UI lands.");
+  printDoctorSummary(doctor);
+  db.close();
+}
+
+async function serverDoctorCommand(args: string[]): Promise<void> {
+  const { flags } = parseFlags(args);
+  const dataDir = resolve(invocationCwd, String(flags["data-dir"] || defaultProductionDataDir(workspaceRoot)));
+  const ports = serverPortsFromFlags(flags);
+  const doctor = await runServerDoctorChecks({ workspaceRoot, dataDir, ports, createDataDir: false });
+  const { db } = initializeRoutely(workspaceRoot);
+
+  saveServerFoundationState(db, { lastDoctor: doctor as unknown as Record<string, unknown> });
+  printDoctorSummary(doctor);
+  db.close();
+
+  if (!doctor.ok) {
+    process.exitCode = 1;
+  }
+}
+
+function printDoctorSummary(doctor: Awaited<ReturnType<typeof runServerDoctorChecks>>): void {
+  console.log("");
+  console.log(`Server doctor: ${doctor.ok ? "OK" : "CHECK"}`);
+  console.log(`Data dir:      ${doctor.dataDir}`);
+  for (const check of doctor.checks) {
+    const label = check.status === "ok" ? "OK" : check.status === "warn" ? "WARN" : "ERROR";
+    console.log(`${label} ${check.label}: ${check.message}`);
+    if (check.detail) {
+      console.log(`  ${check.detail}`);
+    }
+  }
+}
+
 switch (command) {
   case "init":
     initCommand();
@@ -751,6 +844,9 @@ switch (command) {
     break;
   case "doctor":
     await doctorCommand();
+    break;
+  case "server":
+    await serverCommand(argv.slice(1));
     break;
   case "add":
     addCommand(argv.slice(1));
