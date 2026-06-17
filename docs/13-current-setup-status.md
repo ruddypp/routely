@@ -246,6 +246,9 @@ Recommended next implementation step after the frontend design pass:
 
 ```text
 Checkpoint 3: Config, presets, and Compose services
+  - Implement this as a comprehensive backend/CLI/API/storage/frontend slice, not frontend-only polish.
+  - Add real config/preset/Compose/database-service support before broad visual changes.
+  - Make the dashboard more Dokploy-inspired for local resources: apps, services, databases, dependencies, commands, and config metadata.
   - Keep production/VPS work deferred until the production checkpoints.
   - Keep browser calls routed through same-origin /api/* handlers.
 ```

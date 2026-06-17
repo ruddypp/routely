@@ -351,6 +351,15 @@ This checkpoint exists because the frontend should not be treated as only a dash
 
 Goal: support realistic local workspaces with databases and common app stacks.
 
+This checkpoint should be a comprehensive implementation slice across backend, CLI, daemon/API, storage, and dashboard. It should not be treated as frontend-only polish. The frontend should become more Dokploy-inspired in operational clarity for local resources and services, while the backend gains the real config/preset/Compose capabilities needed to support that UI.
+
+Dokploy-inspired in this checkpoint means:
+
+- Clear resource/service mental model for local apps, databases, and Compose services.
+- Dense operational surfaces showing status, driver, ports, dependencies, commands, and service metadata.
+- Inspector/forms that make app/service configuration explicit and editable.
+- No production deploy, domain, HTTPS, GitHub, backup, auth, or VPS actions yet. Production navigation can remain inert placeholders only.
+
 ### Implementation
 
 - Expand `packages/presets` with editable defaults for:
@@ -384,6 +393,8 @@ Goal: support realistic local workspaces with databases and common app stacks.
 - Add `routely db add <type>` for local service registration.
 - Add safe import/export behavior between dashboard changes and `routely.yml`.
 - Do not export secrets by default.
+- Update the dashboard/API surface as needed so users can view and edit the new local config/service fields through same-origin `/api/*` routes.
+- Preserve the polished Checkpoint 2.5 shell while improving it for Checkpoint 3 local services: app/service separation, database service visibility, dependency editing, preset selection, and clearer config sections in the inspector.
 
 ### Exit Criteria
 
@@ -398,8 +409,11 @@ Goal: support realistic local workspaces with databases and common app stacks.
 - Unit tests for preset detection.
 - Unit tests for config normalization.
 - Unit tests for Compose config generation.
+- Unit tests for database service template generation where implemented.
+- Route-handler or daemon tests for new local config/service API behavior where implemented.
 - Integration test with one app depending on PostgreSQL.
 - Manual test with at least two real sample stacks.
+- Browser smoke/responsive check if the dashboard shell or forms change.
 
 ## 11. Checkpoint 4: Production Server Foundation
 
