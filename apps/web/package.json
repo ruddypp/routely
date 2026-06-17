@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run src/tests/api/app-start-route.test.ts src/tests/api/app-logs-route.test.ts"
+    "test": "vitest run src/tests/api/*.test.ts"
   },
   "dependencies": {
     "next": "16.2.9",

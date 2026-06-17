@@ -40,8 +40,44 @@ html,
 body {
   background: var(--background);
   color: var(--foreground);
+  min-height: 100%;
 }
 
 body {
   font-family: var(--font-sans);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+::selection {
+  background: rgba(30, 215, 96, 0.28);
+  color: var(--foreground);
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+}
+
+select {
+  color-scheme: dark;
+}
+
+::-webkit-scrollbar {
+  height: 10px;
+  width: 10px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #4d4d4d;
+  border: 2px solid #121212;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-track {
+  background: #121212;
 }

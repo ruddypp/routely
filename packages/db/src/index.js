@@ -238,6 +238,43 @@ export function upsertApp(db, input) {
   return getAppByName(db, app.name);
 }
 
+export function updateApp(db, appId, input) {
+  const existing = getAppById(db, appId);
+
+  if (!existing) {
+    return null;
+  }
+
+  const app = normalizeAppInput({
+    ...existing,
+    ...input,
+    server_id: input.server_id ?? existing.server_id,
+    name: input.name ?? existing.name,
+    status: input.status ?? existing.status
+  });
+
+  db.prepare(`
+    UPDATE apps
+    SET server_id = ?, name = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, port = ?, depends_on = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(
+    app.server_id,
+    app.name,
+    app.type,
+    app.preset,
+    app.driver,
+    app.path,
+    app.command,
+    app.port,
+    serializeDependsOn(app.depends_on),
+    app.enabled ? 1 : 0,
+    app.status,
+    appId
+  );
+
+  return getAppById(db, appId);
+}
+
 /**
  * Synchronize a loaded workspace config (routely.yml) into the apps table.
  *

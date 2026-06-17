@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import type { ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FormEvent, ReactNode } from "react";
 
 type DaemonApp = {
   id: number;
@@ -13,6 +13,7 @@ type DaemonApp = {
   path: string | null;
   command: string | null;
   port: number | null;
+  dependsOn?: string[];
   enabled: boolean;
   status: string;
   createdAt: string;
@@ -56,21 +57,62 @@ type AppsResponse = {
 };
 
 type AppAction = "start" | "stop" | "restart";
+type FormMode = "create" | "edit";
+
+type AppFormState = {
+  name: string;
+  type: string;
+  preset: string;
+  driver: string;
+  path: string;
+  command: string;
+  port: string;
+  enabled: boolean;
+  dependsOn: string;
+};
 
 const POLL_INTERVAL_MS = 4000;
+const APP_TYPES = ["app", "database", "compose", "static", "worker"];
+const APP_DRIVERS = ["command", "compose", "dockerfile", "buildpack", "static"];
 
 const STATUS_STYLES: Record<string, string> = {
-  running: "bg-accent/15 text-accent",
-  starting: "bg-info/15 text-info",
-  stopped: "bg-white/10 text-muted",
-  crashed: "bg-negative/15 text-negative",
-  unknown: "bg-white/10 text-muted"
+  running: "bg-accent/15 text-accent shadow-[0_0_0_1px_rgba(30,215,96,0.22)_inset]",
+  starting: "bg-info/15 text-info shadow-[0_0_0_1px_rgba(83,157,245,0.2)_inset]",
+  stopped: "bg-white/10 text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]",
+  crashed: "bg-negative/15 text-negative shadow-[0_0_0_1px_rgba(243,114,127,0.2)_inset]",
+  unknown: "bg-white/10 text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]"
 };
+
+const blankForm: AppFormState = {
+  name: "",
+  type: "app",
+  preset: "custom",
+  driver: "command",
+  path: "",
+  command: "",
+  port: "",
+  enabled: true,
+  dependsOn: ""
+};
+
+function formFromApp(app: DaemonApp): AppFormState {
+  return {
+    name: app.name,
+    type: app.type,
+    preset: app.preset,
+    driver: app.driver,
+    path: app.path || "",
+    command: app.command || "",
+    port: app.port == null ? "" : String(app.port),
+    enabled: app.enabled,
+    dependsOn: (app.dependsOn || []).join(", ")
+  };
+}
 
 function StatusBadge({ status }: { status: string }) {
   const style = STATUS_STYLES[status] || STATUS_STYLES.unknown;
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-bold ${style}`}>
+    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10.5px] font-bold capitalize ${style}`}>
       <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
       {status}
     </span>
@@ -91,9 +133,32 @@ function appUrl(app: DaemonApp): string | null {
   return app.port ? `http://localhost:${app.port}` : null;
 }
 
+function shortPath(path: string | null): string {
+  if (!path) return "-";
+  const parts = path.split("/").filter(Boolean);
+  return parts.length > 3 ? `.../${parts.slice(-3).join("/")}` : path;
+}
+
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => ({}))) as { error?: string };
   return body.error || `Request failed with HTTP ${response.status}`;
+}
+
+function formPayload(form: AppFormState) {
+  return {
+    name: form.name.trim(),
+    type: form.type,
+    preset: form.preset.trim() || "custom",
+    driver: form.driver,
+    path: form.path.trim() || null,
+    command: form.command.trim() || null,
+    port: form.port.trim() === "" ? null : Number(form.port),
+    enabled: form.enabled,
+    depends_on: form.dependsOn
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+  };
 }
 
 export default function DashboardClient() {
@@ -105,10 +170,15 @@ export default function DashboardClient() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionByAppId, setActionByAppId] = useState<Record<number, AppAction | null>>({});
   const [actionError, setActionError] = useState<string | null>(null);
-  const [selectedLogAppId, setSelectedLogAppId] = useState<number | null>(null);
+  const [selectedAppId, setSelectedAppId] = useState<number | null>(null);
   const [logs, setLogs] = useState<DaemonAppLogsResponse | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
   const [logsError, setLogsError] = useState<string | null>(null);
+  const [formMode, setFormMode] = useState<FormMode | null>(null);
+  const [editingAppId, setEditingAppId] = useState<number | null>(null);
+  const [form, setForm] = useState<AppFormState>(blankForm);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formSaving, setFormSaving] = useState(false);
   const mounted = useRef(true);
 
   const poll = useCallback(async (showRefresh = false) => {
@@ -129,6 +199,7 @@ export default function DashboardClient() {
       setApps(appsData.apps || []);
       setAppsError(appsData.error);
       setLastUpdated(new Date().toISOString());
+      setSelectedAppId((current) => current ?? appsData.apps?.[0]?.id ?? null);
     } catch {
       if (!mounted.current) return;
       setHealth({ connected: false, daemonUrl: "", error: "Dashboard could not reach its API." });
@@ -143,8 +214,13 @@ export default function DashboardClient() {
     setApps((current) => current.map((item) => (item.id === updated.id ? updated : item)));
   }, []);
 
+  const selectedApp = useMemo(() => {
+    if (!selectedAppId) return null;
+    return apps.find((app) => app.id === selectedAppId) || logs?.app || null;
+  }, [apps, logs?.app, selectedAppId]);
+
   const loadLogs = useCallback(async (app: DaemonApp) => {
-    setSelectedLogAppId(app.id);
+    setSelectedAppId(app.id);
     setLogsLoading(true);
     setLogsError(null);
 
@@ -180,12 +256,9 @@ export default function DashboardClient() {
 
         const data = (await response.json()) as DaemonAppLifecycleResponse;
         replaceApp(data.app);
+        setSelectedAppId(data.app.id);
         setLastUpdated(new Date().toISOString());
-
-        if (selectedLogAppId === app.id) {
-          void loadLogs(data.app);
-        }
-
+        void loadLogs(data.app);
         void poll();
       } catch (error) {
         setActionError(error instanceof Error ? error.message : `Could not ${action} ${app.name}.`);
@@ -193,13 +266,72 @@ export default function DashboardClient() {
         setActionByAppId((current) => ({ ...current, [app.id]: null }));
       }
     },
-    [loadLogs, poll, replaceApp, selectedLogAppId]
+    [loadLogs, poll, replaceApp]
   );
+
+  function openCreateForm() {
+    setFormMode("create");
+    setEditingAppId(null);
+    setForm(blankForm);
+    setFormError(null);
+  }
+
+  function openEditForm(app: DaemonApp) {
+    setFormMode("edit");
+    setEditingAppId(app.id);
+    setForm(formFromApp(app));
+    setFormError(null);
+  }
+
+  async function submitForm(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setFormError(null);
+
+    if (!form.name.trim()) {
+      setFormError("App name is required.");
+      return;
+    }
+
+    if (form.port.trim() && (!Number.isInteger(Number(form.port)) || Number(form.port) <= 0)) {
+      setFormError("Port must be a positive integer.");
+      return;
+    }
+
+    setFormSaving(true);
+
+    try {
+      const isEdit = formMode === "edit" && editingAppId != null;
+      const response = await fetch(isEdit ? `/api/apps/${editingAppId}` : "/api/apps", {
+        method: isEdit ? "PATCH" : "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(formPayload(form))
+      });
+
+      if (!response.ok) {
+        throw new Error(await readError(response));
+      }
+
+      const data = (await response.json()) as { app: DaemonApp };
+      setApps((current) => {
+        const exists = current.some((item) => item.id === data.app.id);
+        const next = exists ? current.map((item) => (item.id === data.app.id ? data.app : item)) : [...current, data.app];
+        return [...next].sort((a, b) => a.name.localeCompare(b.name));
+      });
+      setSelectedAppId(data.app.id);
+      setFormMode(null);
+      setEditingAppId(null);
+      setLastUpdated(new Date().toISOString());
+      void poll();
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : "Could not save app.");
+    } finally {
+      setFormSaving(false);
+    }
+  }
 
   useEffect(() => {
     mounted.current = true;
-    // Defer the first poll so it runs after commit rather than synchronously
-    // inside the effect body.
     const initial = setTimeout(poll, 0);
     const timer = setInterval(poll, POLL_INTERVAL_MS);
     return () => {
@@ -211,232 +343,516 @@ export default function DashboardClient() {
 
   const connected = Boolean(health?.connected);
   const runningCount = apps.filter((app) => app.status === "running").length;
-  const selectedLogApp = selectedLogAppId ? apps.find((app) => app.id === selectedLogAppId) || logs?.app || null : null;
+  const disabledCount = apps.filter((app) => !app.enabled).length;
+  const workspace = health?.health?.workspace || "local workspace";
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="mx-auto flex w-full max-w-6xl flex-col gap-8 px-5 py-10 sm:px-8">
-        <header className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <div>
-              <p className="text-xs font-bold uppercase tracking-[0.18em] text-muted">Routely</p>
-              <h1 className="text-2xl font-bold tracking-tight">Dashboard</h1>
-            </div>
-          </div>
+      <div className="grid min-h-screen grid-rows-[1fr_auto] lg:grid-cols-[248px_1fr] lg:grid-rows-1">
+        <Sidebar connected={connected} />
 
-          <div className="flex items-center gap-3 rounded-full border border-border/60 bg-surface-raised px-4 py-2.5">
-            <span
-              className={`h-2.5 w-2.5 rounded-full ${connected ? "bg-accent" : "bg-negative"} ${
-                connected ? "shadow-[0_0_0_4px_rgba(30,215,96,0.15)]" : "shadow-[0_0_0_4px_rgba(243,114,127,0.15)]"
-              }`}
-              aria-hidden="true"
+        <section className="min-w-0 pb-20 lg:pb-0">
+          <WorkspaceHeader
+            connected={connected}
+            daemonUrl={health?.daemonUrl || "-"}
+            workspace={workspace}
+            updated={timeAgo(lastUpdated)}
+            loading={loading}
+            refreshing={refreshing}
+            onRefresh={() => void poll(true)}
+          />
+
+          <div className="grid gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[minmax(0,1fr)_390px] lg:items-start lg:px-5">
+            <section className="min-w-0 overflow-hidden rounded-lg bg-surface shadow-[rgba(0,0,0,0.5)_0px_8px_24px]">
+              <div className="flex flex-col gap-3 border-b border-white/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Local runner</p>
+                  <h1 className="text-xl font-bold leading-tight">Apps & services</h1>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <MetricPill label="running" value={`${runningCount}/${apps.length}`} accent />
+                  <MetricPill label="disabled" value={String(disabledCount)} />
+                  <PillButton onClick={openCreateForm} strong disabled={!connected}>
+                    Add app
+                  </PillButton>
+                </div>
+              </div>
+
+              {!connected && health ? <Alert title="Daemon offline" message={health.error || "Start Routely from the CLI to bring the local control plane online."} /> : null}
+              {actionError ? <Alert title="Action failed" message={actionError} /> : null}
+              {appsError ? <Alert title="Registry unavailable" message={appsError} /> : null}
+
+              {formMode ? (
+                <AppForm
+                  mode={formMode}
+                  form={form}
+                  error={formError}
+                  saving={formSaving}
+                  onChange={setForm}
+                  onCancel={() => setFormMode(null)}
+                  onSubmit={submitForm}
+                />
+              ) : null}
+
+              <div className="divide-y divide-white/5">
+                {loading ? (
+                  <LoadingRows />
+                ) : apps.length === 0 ? (
+                  <EmptyState connected={connected} onAdd={openCreateForm} />
+                ) : (
+                  apps.map((app) => (
+                    <AppRow
+                      key={app.id}
+                      app={app}
+                      active={selectedAppId === app.id}
+                      connected={connected}
+                      currentAction={actionByAppId[app.id]}
+                      onSelect={() => setSelectedAppId(app.id)}
+                      onLogs={() => void loadLogs(app)}
+                      onEdit={() => openEditForm(app)}
+                      onAction={(action) => void runAction(app, action)}
+                    />
+                  ))
+                )}
+              </div>
+            </section>
+
+            <DetailPanel
+              app={selectedApp}
+              connected={connected}
+              logs={logs}
+              loading={logsLoading}
+              error={logsError}
+              currentAction={selectedApp ? actionByAppId[selectedApp.id] : null}
+              onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined}
+              onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined}
+              onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined}
             />
-            <div className="leading-tight">
-              <p className="text-sm font-bold">Daemon {connected ? "connected" : "disconnected"}</p>
-              <p className="font-mono text-[11px] text-muted">{health?.daemonUrl || "—"}</p>
-            </div>
           </div>
-        </header>
-
-        <section className="grid gap-4 sm:grid-cols-3">
-          <StatCard label="Service" value={health?.health?.service || (loading ? "…" : "unavailable")} />
-          <StatCard label="Version" value={health?.health?.version || "—"} />
-          <StatCard label="Apps running" value={`${runningCount} / ${apps.length}`} accent />
         </section>
 
-        {health && !connected ? (
-          <section className="rounded-lg border border-negative/40 bg-negative/10 p-5">
-            <p className="font-bold text-negative">Daemon is not reachable</p>
-            <p className="mt-1 text-sm text-muted">
-              {health.error || "Start Routely with the `routely` command to bring the daemon online."}
-            </p>
-          </section>
-        ) : null}
-
-        {actionError ? (
-          <section className="rounded-lg border border-negative/40 bg-negative/10 p-5">
-            <p className="font-bold text-negative">Action failed</p>
-            <p className="mt-1 text-sm text-muted">{actionError}</p>
-          </section>
-        ) : null}
-
-        <section className="overflow-hidden rounded-lg bg-surface shadow-[rgba(0,0,0,0.3)_0px_8px_24px]">
-          <div className="flex flex-col gap-3 border-b border-white/5 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-            <h2 className="text-lg font-bold">Apps</h2>
-            <div className="flex items-center gap-3">
-              <p className="text-xs text-muted">{loading ? "loading…" : `updated ${timeAgo(lastUpdated)}`}</p>
-              <button
-                type="button"
-                onClick={() => void poll(true)}
-                disabled={refreshing || loading}
-                className="rounded-full border border-border px-3 py-1.5 text-xs font-bold text-foreground transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                {refreshing ? "Refreshing" : "Refresh"}
-              </button>
-            </div>
-          </div>
-
-          {apps.length === 0 ? (
-            <div className="px-5 py-12 text-center text-sm text-muted">
-              {appsError ? appsError : "No apps registered yet. Add one with `routely add` or in routely.yml."}
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[960px] border-collapse text-left text-sm">
-                <thead>
-                  <tr className="text-xs uppercase tracking-[0.08em] text-muted">
-                    <th className="px-5 py-3 font-bold">Name</th>
-                    <th className="px-5 py-3 font-bold">Status</th>
-                    <th className="px-5 py-3 font-bold">Driver</th>
-                    <th className="px-5 py-3 font-bold">Port</th>
-                    <th className="px-5 py-3 font-bold">Command</th>
-                    <th className="px-5 py-3 font-bold">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {apps.map((app) => {
-                    const currentAction = actionByAppId[app.id];
-                    const busy = Boolean(currentAction);
-                    const running = app.status === "running" || app.status === "starting";
-                    const localUrl = appUrl(app);
-
-                    return (
-                      <tr key={app.id} className="border-t border-white/5 transition-colors hover:bg-white/[0.03]">
-                        <td className="px-5 py-4 font-bold">{app.name}</td>
-                        <td className="px-5 py-4">
-                          <StatusBadge status={app.status} />
-                        </td>
-                        <td className="px-5 py-4 text-muted">{app.driver}</td>
-                        <td className="px-5 py-4 font-mono text-xs text-muted">{app.port ? `:${app.port}` : "—"}</td>
-                        <td className="max-w-[300px] truncate px-5 py-4 font-mono text-xs text-muted">
-                          {app.command || "—"}
-                        </td>
-                        <td className="px-5 py-4">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <ActionButton
-                              onClick={() => void runAction(app, "start")}
-                              disabled={busy || !connected || !app.enabled || running}
-                              active={currentAction === "start"}
-                            >
-                              Start
-                            </ActionButton>
-                            <ActionButton
-                              onClick={() => void runAction(app, "stop")}
-                              disabled={busy || !connected || !running}
-                              active={currentAction === "stop"}
-                            >
-                              Stop
-                            </ActionButton>
-                            <ActionButton
-                              onClick={() => void runAction(app, "restart")}
-                              disabled={busy || !connected || !app.enabled}
-                              active={currentAction === "restart"}
-                            >
-                              Restart
-                            </ActionButton>
-                            <a
-                              href={localUrl || undefined}
-                              target="_blank"
-                              rel="noreferrer"
-                              aria-disabled={!localUrl}
-                              className={`rounded-full border px-3 py-1.5 text-xs font-bold transition ${
-                                localUrl
-                                  ? "border-border text-foreground hover:border-accent hover:text-accent"
-                                  : "pointer-events-none border-border text-muted opacity-50"
-                              }`}
-                            >
-                              Open
-                            </a>
-                            <ActionButton onClick={() => void loadLogs(app)} disabled={!connected} active={logsLoading && selectedLogAppId === app.id}>
-                              Logs
-                            </ActionButton>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-
-        {selectedLogApp ? (
-          <section className="overflow-hidden rounded-lg bg-surface shadow-[rgba(0,0,0,0.3)_0px_8px_24px]">
-            <div className="flex flex-col gap-3 border-b border-white/5 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
-              <div>
-                <p className="text-xs uppercase tracking-[0.1em] text-muted">Recent logs</p>
-                <h2 className="text-lg font-bold">{selectedLogApp.name}</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void loadLogs(selectedLogApp)}
-                  disabled={logsLoading}
-                  className="rounded-full border border-border px-3 py-1.5 text-xs font-bold text-foreground transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  {logsLoading ? "Loading" : "Reload"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSelectedLogAppId(null);
-                    setLogs(null);
-                    setLogsError(null);
-                  }}
-                  className="rounded-full border border-border px-3 py-1.5 text-xs font-bold text-muted transition hover:border-foreground hover:text-foreground"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-
-            {logsError ? (
-              <div className="border-b border-negative/30 bg-negative/10 px-5 py-3 text-sm text-negative">{logsError}</div>
-            ) : null}
-
-            <pre className="max-h-[420px] min-h-[220px] overflow-auto whitespace-pre-wrap bg-black/35 px-5 py-4 font-mono text-xs leading-5 text-foreground">
-              {logsLoading && !logs ? "Loading logs…" : logs?.logs || "No logs captured yet."}
-            </pre>
-
-            {logs?.truncated ? (
-              <p className="border-t border-white/5 px-5 py-3 text-xs text-muted">Showing the most recent 64 KB.</p>
-            ) : null}
-          </section>
-        ) : null}
+        <MobileNav connected={connected} />
       </div>
     </main>
   );
 }
 
-function ActionButton({
-  active,
-  children,
-  disabled,
-  onClick
+function Sidebar({ connected }: { connected: boolean }) {
+  return (
+    <aside className="hidden border-r border-white/5 bg-[#121212] px-3 py-4 shadow-[rgba(0,0,0,0.5)_0px_8px_24px] lg:block">
+      <div className="flex items-center gap-3 px-2">
+        <div className="grid h-9 w-9 place-items-center rounded-full bg-accent text-sm font-black text-black">R</div>
+        <div>
+          <p className="text-sm font-bold leading-tight">Routely</p>
+          <p className="text-[11px] text-muted">Local control plane</p>
+        </div>
+      </div>
+      <nav className="mt-7 space-y-1">
+        <NavItem active label="Local apps" dot={connected} />
+        <NavItem label="Logs" />
+        <NavItem label="Metrics" />
+      </nav>
+      <div className="mt-7 border-t border-white/5 pt-4">
+        <p className="px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Later</p>
+        <nav className="mt-2 space-y-1">
+          <NavItem label="Deployments" disabled />
+          <NavItem label="Domains" disabled />
+          <NavItem label="Databases" disabled />
+          <NavItem label="Backups" disabled />
+          <NavItem label="Settings" disabled />
+        </nav>
+      </div>
+    </aside>
+  );
+}
+
+function MobileNav({ connected }: { connected: boolean }) {
+  return (
+    <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 gap-1 border-t border-white/5 bg-[#121212]/95 px-2 py-2 shadow-[rgba(0,0,0,0.5)_0px_-8px_24px] backdrop-blur lg:hidden">
+      <MobileNavItem active label="Apps" />
+      <MobileNavItem label="Logs" />
+      <MobileNavItem label="Deploy" disabled />
+      <MobileNavItem label={connected ? "Online" : "Offline"} status={connected} />
+    </nav>
+  );
+}
+
+function WorkspaceHeader({
+  connected,
+  daemonUrl,
+  loading,
+  onRefresh,
+  refreshing,
+  updated,
+  workspace
 }: {
-  active?: boolean;
-  children: ReactNode;
-  disabled?: boolean;
-  onClick: () => void;
+  connected: boolean;
+  daemonUrl: string;
+  loading: boolean;
+  onRefresh: () => void;
+  refreshing: boolean;
+  updated: string;
+  workspace: string;
 }) {
+  return (
+    <header className="sticky top-0 z-20 border-b border-white/5 bg-background/92 px-3 py-3 backdrop-blur sm:px-4 lg:px-5">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Workspace</p>
+          <p className="truncate text-sm font-bold sm:text-base">{workspace}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 items-center gap-2 rounded-full bg-surface-raised px-3 py-2 shadow-[rgb(18,18,18)_0px_1px_0px,rgb(124,124,124)_0px_0px_0px_1px_inset]">
+            <span className={`h-2 w-2 rounded-full ${connected ? "bg-accent" : "bg-negative"}`} aria-hidden="true" />
+            <span className="text-xs font-bold">Daemon {connected ? "connected" : "offline"}</span>
+            <span className="hidden max-w-[220px] truncate font-mono text-[10px] text-muted sm:inline">{daemonUrl}</span>
+          </div>
+          <span className="text-xs text-muted">{loading ? "loading" : `updated ${updated}`}</span>
+          <PillButton onClick={onRefresh} disabled={refreshing || loading}>
+            {refreshing ? "Refreshing" : "Refresh"}
+          </PillButton>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function AppRow({
+  active,
+  app,
+  connected,
+  currentAction,
+  onAction,
+  onEdit,
+  onLogs,
+  onSelect
+}: {
+  active: boolean;
+  app: DaemonApp;
+  connected: boolean;
+  currentAction?: AppAction | null;
+  onAction: (action: AppAction) => void;
+  onEdit: () => void;
+  onLogs: () => void;
+  onSelect: () => void;
+}) {
+  const busy = Boolean(currentAction);
+  const running = app.status === "running" || app.status === "starting";
+  const localUrl = appUrl(app);
+
+  return (
+    <article className={`grid gap-3 px-4 py-3 transition hover:bg-white/[0.035] xl:grid-cols-[minmax(190px,1fr)_112px_80px_minmax(150px,0.9fr)] xl:items-center ${active ? "bg-white/[0.045]" : ""}`}>
+      <button type="button" onClick={onSelect} className="min-w-0 text-left">
+        <div className="flex items-center gap-3">
+          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-black ${running ? "bg-accent text-black" : "bg-surface-raised text-muted"}`}>
+            {app.name.slice(0, 2).toUpperCase()}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-bold">{app.name}</span>
+            <span className="block truncate font-mono text-[11px] text-muted">{shortPath(app.path)}</span>
+          </span>
+        </div>
+      </button>
+      <div>
+        <StatusBadge status={app.status} />
+      </div>
+      <div className="font-mono text-xs text-muted">{app.port ? `:${app.port}` : "no port"}</div>
+      <div className="min-w-0 truncate font-mono text-xs text-muted">{app.command || "no command"}</div>
+      <div className="flex flex-wrap items-center gap-2 xl:col-span-4">
+        <RoundAction label="Start" onClick={() => onAction("start")} disabled={busy || !connected || !app.enabled || running} active={currentAction === "start"} />
+        <RoundAction label="Stop" onClick={() => onAction("stop")} disabled={busy || !connected || !running} active={currentAction === "stop"} />
+        <RoundAction label="Restart" onClick={() => onAction("restart")} disabled={busy || !connected || !app.enabled} active={currentAction === "restart"} />
+        <a
+          href={localUrl || undefined}
+          target="_blank"
+          rel="noreferrer"
+          aria-disabled={!localUrl}
+          className={`rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] transition ${localUrl ? "bg-surface-raised text-foreground hover:text-accent" : "pointer-events-none bg-surface-raised text-muted opacity-50"}`}
+        >
+          Open
+        </a>
+        <PillButton onClick={onLogs} disabled={!connected}>Logs</PillButton>
+        <PillButton onClick={onEdit} disabled={!connected}>Edit</PillButton>
+      </div>
+    </article>
+  );
+}
+
+function DetailPanel({
+  app,
+  connected,
+  currentAction,
+  error,
+  loading,
+  logs,
+  onAction,
+  onEdit,
+  onReload
+}: {
+  app: DaemonApp | null;
+  connected: boolean;
+  currentAction?: AppAction | null;
+  error: string | null;
+  loading: boolean;
+  logs: DaemonAppLogsResponse | null;
+  onAction?: (action: AppAction) => void;
+  onEdit?: () => void;
+  onReload?: () => void;
+}) {
+  if (!app) {
+    return (
+      <aside className="rounded-lg bg-surface px-4 py-10 text-center shadow-[rgba(0,0,0,0.5)_0px_8px_24px] lg:sticky lg:top-[84px]">
+        <p className="text-sm font-bold">No app selected</p>
+        <p className="mt-1 text-sm text-muted">Select a local app to inspect its command, URL, dependencies, and logs.</p>
+      </aside>
+    );
+  }
+
+  const running = app.status === "running" || app.status === "starting";
+  const localUrl = appUrl(app);
+
+  return (
+    <aside className="overflow-hidden rounded-lg bg-surface shadow-[rgba(0,0,0,0.5)_0px_8px_24px] lg:sticky lg:top-[84px]">
+      <div className="border-b border-white/5 px-4 py-4">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Inspector</p>
+            <h2 className="truncate text-xl font-bold">{app.name}</h2>
+          </div>
+          <StatusBadge status={app.status} />
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <RoundAction label="Start" onClick={() => onAction?.("start")} disabled={!onAction || !connected || !app.enabled || running || Boolean(currentAction)} active={currentAction === "start"} />
+          <RoundAction label="Stop" onClick={() => onAction?.("stop")} disabled={!onAction || !connected || !running || Boolean(currentAction)} active={currentAction === "stop"} />
+          <RoundAction label="Restart" onClick={() => onAction?.("restart")} disabled={!onAction || !connected || !app.enabled || Boolean(currentAction)} active={currentAction === "restart"} />
+          <PillButton onClick={onEdit} disabled={!onEdit || !connected}>Edit</PillButton>
+          <a className={`rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] ${localUrl ? "bg-surface-raised text-foreground hover:text-accent" : "pointer-events-none bg-surface-raised text-muted opacity-50"}`} href={localUrl || undefined} target="_blank" rel="noreferrer">
+            Open
+          </a>
+        </div>
+      </div>
+
+      <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
+        <Meta label="Type" value={app.type} />
+        <Meta label="Driver" value={app.driver} />
+        <Meta label="Preset" value={app.preset} />
+        <Meta label="Port" value={app.port ? String(app.port) : "-"} mono />
+        <Meta label="Enabled" value={app.enabled ? "yes" : "no"} />
+        <Meta label="Updated" value={timeAgo(app.updatedAt)} />
+        <Meta label="Path" value={app.path || "-"} mono wide />
+        <Meta label="Command" value={app.command || "-"} mono wide />
+        <Meta label="Depends on" value={(app.dependsOn || []).join(", ") || "-"} wide />
+      </dl>
+
+      <div className="border-t border-white/5">
+        <div className="flex items-center justify-between gap-3 px-4 py-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Recent logs</p>
+            <p className="text-xs text-muted">{logs?.truncated ? "tail 64 KB" : "latest local output"}</p>
+          </div>
+          <PillButton onClick={onReload} disabled={!onReload || loading || !connected}>{loading ? "Loading" : "Reload"}</PillButton>
+        </div>
+        {error ? <div className="border-y border-negative/20 bg-negative/10 px-4 py-2 text-xs text-negative">{error}</div> : null}
+        <pre className="max-h-[360px] min-h-[240px] overflow-auto whitespace-pre-wrap bg-black/35 px-4 py-3 font-mono text-xs leading-5 text-foreground">
+          {loading && !logs ? "Loading logs..." : logs?.app.id === app.id ? logs.logs || "No logs captured yet." : "Logs pending."}
+        </pre>
+      </div>
+    </aside>
+  );
+}
+
+function AppForm({
+  error,
+  form,
+  mode,
+  onCancel,
+  onChange,
+  onSubmit,
+  saving
+}: {
+  error: string | null;
+  form: AppFormState;
+  mode: FormMode;
+  onCancel: () => void;
+  onChange: (form: AppFormState) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  saving: boolean;
+}) {
+  const update = (patch: Partial<AppFormState>) => onChange({ ...form, ...patch });
+
+  return (
+    <form onSubmit={onSubmit} className="border-b border-white/5 bg-black/20 px-4 py-4">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{mode === "create" ? "Add local app" : "Edit local app"}</p>
+          <h2 className="text-base font-bold">Registry definition</h2>
+        </div>
+        <div className="flex gap-2">
+          <PillButton type="button" onClick={onCancel} disabled={saving}>Cancel</PillButton>
+          <PillButton type="submit" strong disabled={saving}>{saving ? "Saving" : "Save"}</PillButton>
+        </div>
+      </div>
+
+      {error ? <div className="mt-3 rounded-md bg-negative/10 px-3 py-2 text-sm text-negative shadow-[0_0_0_1px_rgba(243,114,127,0.22)_inset]">{error}</div> : null}
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <Field label="Name" value={form.name} onChange={(value) => update({ name: value })} required />
+        <SelectField label="Type" value={form.type} values={APP_TYPES} onChange={(value) => update({ type: value })} />
+        <Field label="Preset" value={form.preset} onChange={(value) => update({ preset: value })} />
+        <SelectField label="Driver" value={form.driver} values={APP_DRIVERS} onChange={(value) => update({ driver: value })} />
+        <Field label="Path" value={form.path} onChange={(value) => update({ path: value })} mono wide />
+        <Field label="Command" value={form.command} onChange={(value) => update({ command: value })} mono wide />
+        <Field label="Port" value={form.port} onChange={(value) => update({ port: value })} type="number" />
+        <Field label="Depends on" value={form.dependsOn} onChange={(value) => update({ dependsOn: value })} />
+        <label className="flex items-center justify-between rounded-md bg-surface-raised px-3 py-2 shadow-[rgb(18,18,18)_0px_1px_0px,rgb(124,124,124)_0px_0px_0px_1px_inset]">
+          <span>
+            <span className="block text-xs font-bold">Enabled</span>
+            <span className="text-[11px] text-muted">Included in local runner</span>
+          </span>
+          <input checked={form.enabled} onChange={(event) => update({ enabled: event.target.checked })} type="checkbox" className="h-4 w-4 accent-[var(--accent)]" />
+        </label>
+      </div>
+    </form>
+  );
+}
+
+function Field({
+  label,
+  mono,
+  onChange,
+  required,
+  type = "text",
+  value,
+  wide
+}: {
+  label: string;
+  mono?: boolean;
+  onChange: (value: string) => void;
+  required?: boolean;
+  type?: string;
+  value: string;
+  wide?: boolean;
+}) {
+  return (
+    <label className={wide ? "md:col-span-2" : undefined}>
+      <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">{label}</span>
+      <input
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        required={required}
+        type={type}
+        className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none shadow-[rgb(18,18,18)_0px_1px_0px,rgb(124,124,124)_0px_0px_0px_1px_inset] transition focus:shadow-[rgb(18,18,18)_0px_1px_0px,rgb(30,215,96)_0px_0px_0px_1px_inset] ${mono ? "font-mono text-xs" : ""}`}
+      />
+    </label>
+  );
+}
+
+function SelectField({ label, onChange, value, values }: { label: string; onChange: (value: string) => void; value: string; values: string[] }) {
+  return (
+    <label>
+      <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none shadow-[rgb(18,18,18)_0px_1px_0px,rgb(124,124,124)_0px_0px_0px_1px_inset] transition focus:shadow-[rgb(18,18,18)_0px_1px_0px,rgb(30,215,96)_0px_0px_0px_1px_inset]"
+      >
+        {values.map((item) => (
+          <option key={item} value={item}>{item}</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function RoundAction({ active, disabled, label, onClick }: { active?: boolean; disabled?: boolean; label: string; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="rounded-full border border-border px-3 py-1.5 text-xs font-bold text-foreground transition hover:border-accent hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+      className={`rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-40 ${active ? "bg-accent text-black" : "bg-surface-raised text-foreground hover:text-accent"}`}
     >
-      {active ? "Working" : children}
+      {active ? "Working" : label}
     </button>
   );
 }
 
-function StatCard({ label, value, accent }: { label: string; value: string; accent?: boolean }) {
+function PillButton({ children, disabled, onClick, strong, type = "button" }: { children: ReactNode; disabled?: boolean; onClick?: () => void; strong?: boolean; type?: "button" | "submit" }) {
   return (
-    <div className="rounded-lg bg-surface p-5 shadow-[rgba(0,0,0,0.3)_0px_8px_8px]">
-      <p className="text-xs uppercase tracking-[0.1em] text-muted">{label}</p>
-      <p className={`mt-2 text-2xl font-bold ${accent ? "text-accent" : "text-foreground"}`}>{value}</p>
+    <button
+      type={type}
+      onClick={onClick}
+      disabled={disabled}
+      className={`rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] transition disabled:cursor-not-allowed disabled:opacity-40 ${strong ? "bg-accent text-black hover:scale-[1.02]" : "bg-surface-raised text-foreground hover:text-accent"}`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function NavItem({ active, disabled, dot, label }: { active?: boolean; disabled?: boolean; dot?: boolean; label: string }) {
+  return (
+    <div className={`flex items-center justify-between rounded-full px-3 py-2 text-sm ${active ? "bg-surface-raised font-bold text-foreground" : disabled ? "text-muted/50" : "text-muted"}`}>
+      <span>{label}</span>
+      {dot ? <span className="h-2 w-2 rounded-full bg-accent" aria-hidden="true" /> : null}
+    </div>
+  );
+}
+
+function MobileNavItem({ active, disabled, label, status }: { active?: boolean; disabled?: boolean; label: string; status?: boolean }) {
+  return (
+    <div className={`flex h-10 items-center justify-center rounded-full text-xs font-bold ${active ? "bg-surface-raised text-foreground" : disabled ? "text-muted/50" : "text-muted"}`}>
+      {status != null ? <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${status ? "bg-accent" : "bg-negative"}`} aria-hidden="true" /> : null}
+      {label}
+    </div>
+  );
+}
+
+function MetricPill({ accent, label, value }: { accent?: boolean; label: string; value: string }) {
+  return (
+    <div className="rounded-full bg-surface-raised px-3 py-1.5 text-xs shadow-[rgb(18,18,18)_0px_1px_0px,rgb(124,124,124)_0px_0px_0px_1px_inset]">
+      <span className={accent ? "font-bold text-accent" : "font-bold text-foreground"}>{value}</span>
+      <span className="ml-1 text-muted">{label}</span>
+    </div>
+  );
+}
+
+function Meta({ label, mono, value, wide }: { label: string; mono?: boolean; value: string; wide?: boolean }) {
+  return (
+    <div className={wide ? "col-span-2" : undefined}>
+      <dt className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{label}</dt>
+      <dd className={`mt-1 break-words text-foreground ${mono ? "font-mono text-[11px]" : "text-xs"}`}>{value}</dd>
+    </div>
+  );
+}
+
+function Alert({ message, title }: { message: string; title: string }) {
+  return (
+    <div className="border-b border-negative/20 bg-negative/10 px-4 py-3">
+      <p className="text-sm font-bold text-negative">{title}</p>
+      <p className="mt-0.5 text-sm text-muted">{message}</p>
+    </div>
+  );
+}
+
+function LoadingRows() {
+  return (
+    <div className="space-y-1 p-4">
+      {[0, 1, 2].map((item) => (
+        <div key={item} className="h-16 animate-pulse rounded-md bg-white/[0.04]" />
+      ))}
+    </div>
+  );
+}
+
+function EmptyState({ connected, onAdd }: { connected: boolean; onAdd: () => void }) {
+  return (
+    <div className="px-4 py-12 text-center">
+      <p className="text-sm font-bold">No local apps registered</p>
+      <p className="mx-auto mt-1 max-w-md text-sm text-muted">Create a command app here or sync an existing `routely.yml` registry.</p>
+      <div className="mt-4">
+        <PillButton onClick={onAdd} strong disabled={!connected}>Add app</PillButton>
+      </div>
     </div>
   );
 }

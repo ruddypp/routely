@@ -37,6 +37,7 @@ export function reconcileStaleRuntimeInstances(
   isPidAlive?: (pid: number) => boolean
 ): RunningRuntimeInstanceRecord[];
 export function upsertApp(db: Database.Database, input: RoutelyAppInput): RoutelyAppRecord;
+export function updateApp(db: Database.Database, appId: number, input: Partial<RoutelyAppInput>): RoutelyAppRecord | null;
 export function deleteApp(db: Database.Database, appId: number): boolean;
 export function syncWorkspaceConfig(db: Database.Database, loaded: LoadedWorkspaceConfig | null): string[];
 export function updateAppStatus(db: Database.Database, appId: number, status: RoutelyAppStatus): void;

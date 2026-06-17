@@ -15,6 +15,7 @@ import {
   recordRuntimeStop,
   reconcileStaleRuntimeInstances,
   syncWorkspaceConfig,
+  updateApp,
   updateAppStatus,
   upsertApp
 } from "@routely/db";
@@ -348,6 +349,18 @@ app.post("/apps", async (request, reply) => {
   try {
     const saved = upsertApp(db, request.body || {});
     return reply.code(201).send({ app: appToPublicDto(saved) });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid app payload." });
+  }
+});
+
+app.patch("/apps/:id", async (request, reply) => {
+  const existing = findAppOrReply(request, reply);
+  if (!existing) return;
+
+  try {
+    const saved = updateApp(db, existing.id, request.body || {});
+    return reply.code(200).send({ app: appToPublicDto(saved) });
   } catch (error) {
     return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid app payload." });
   }

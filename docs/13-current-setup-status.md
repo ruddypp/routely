@@ -57,7 +57,8 @@ Lokasi dokumentasi:
 - CLI workspace resolution now separates the Routely install root from the active user workspace root.
 - `ROUTELY_WORKSPACE_ROOT` can override the active workspace for tests and scripted runs.
 - Local runner v1 has started: logs, down, restart, doctor, port preflight checks, dependency ordering, and stale PID reconciliation are implemented for command apps.
-- Dashboard local controls have started: browser calls same-origin `/api/*` handlers for app start, stop, restart, open URL, and recent log access.
+- Dashboard local controls have started: browser calls same-origin `/api/*` handlers for app start, stop, restart, open URL, recent log access, and app registry create/edit.
+- The browser UI now uses a 9Router-inspired local runner shell: desktop sidebar, mobile bottom navigation, workspace/status header, dense app rows, app inspector, recent logs, and add/edit registry forms.
 
 ## Current Structure
 
@@ -169,7 +170,7 @@ routely doctor
 routely
 ```
 
-The dashboard app table can start, stop, and restart local command-driver apps through the daemon. The log panel reads recent content from `.routely/logs/<app>.log` through `GET /api/apps/:id/logs`; browser code does not call the daemon directly.
+The dashboard app surface can start, stop, and restart local command-driver apps through the daemon. The app inspector reads recent content from `.routely/logs/<app>.log` through `GET /api/apps/:id/logs`. Add/edit forms write registry entries through same-origin `/api/apps` and `/api/apps/:id` route handlers. Browser code does not call the daemon directly.
 
 Command apps declared in `routely.yml` can use `depends_on` to control local startup order. Routely rejects dependency cycles before starting apps. CLI commands and daemon boot reconcile stale runtime PIDs so apps are not left marked `running` after an old managed process exits outside Routely.
 
@@ -207,6 +208,9 @@ run command
 - A temp workspace smoke test created `routely.yml` and `.routely/routely.db` outside the Routely repo.
 - A daemon smoke test with `ROUTELY_WORKSPACE_ROOT` returned the temp workspace and database path from `/health`.
 - A timed `routely up` smoke test started daemon, dashboard, and `hello-command`, then shut them down without leaving listening ports behind.
+- Current dashboard shell verification passed with `npm run lint`, `npm run test --workspace apps/web`, web TypeScript, `node --check apps/daemon/src/server.js`, `npm run build --workspace apps/cli`, and `npm run test --workspace apps/cli`.
+- Browser smoke was run against local daemon/web dev servers with desktop, tablet, and mobile headless Chrome screenshots. `/api/apps` and `/api/apps/3/logs` returned through the same-origin web API.
+- `npm run build --workspace apps/web` still returns only the partial `Finished TypeScript...` progress line with no final exit marker and no remaining build process, matching the existing web build caveat.
 
 ## Environment Check
 
@@ -240,7 +244,6 @@ Recommended next implementation step after skeleton v1:
 
 ```text
 Routely dashboard local controls
-  - Add add/edit app form using the app registry schema.
   - Add broader dashboard smoke/responsive coverage.
   - Keep browser calls routed through same-origin /api/* handlers.
 ```

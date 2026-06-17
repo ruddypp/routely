@@ -139,11 +139,32 @@ Checkpoint 2 has started. Implemented and committed in `0daf3e3`:
 - Dashboard app table controls for start, stop, restart, open local URL, manual refresh, and recent logs.
 - Focused route-handler tests for happy-path start proxying and daemon-unreachable log access.
 
-Remaining Checkpoint 2 scope:
+Additional Checkpoint 2 / 2.5 work now implemented after `0daf3e3`:
 
-- Add app detail page or side panel beyond the log panel if desired.
-- Add add/edit app form using the app registry schema.
-- Add broader browser smoke and responsive checks.
+- Added daemon `PATCH /apps/:id` support for editing app registry entries by id.
+- Added same-origin Next.js `PATCH /api/apps/:id` proxying.
+- Reworked the browser UI into a dense local-first product shell with desktop sidebar, mobile bottom navigation, workspace/status header, local app control rows, app inspector, recent logs, and add/edit registry forms.
+- Add/edit forms cover the current app registry schema: name, type, preset, driver, path, command, port, enabled, and dependencies.
+- Future production sections are represented only as inert navigation placeholders; no production/VPS actions have been implemented.
+- Added focused route-handler tests for app create/edit proxying and daemon-unreachable edit failures.
+
+Verification for the current Checkpoint 2 / 2.5 work:
+
+- `npm run lint` passed.
+- `npm run test --workspace apps/web` passed: 3 files, 5 tests.
+- `npx tsc --noEmit --project apps/web/tsconfig.json` passed.
+- `node --check apps/daemon/src/server.js` passed.
+- `npm run build --workspace apps/cli` passed.
+- `npm run test --workspace apps/cli` passed: 4 files, 12 tests.
+- Browser/API smoke passed with daemon and web dev server running locally: `/api/apps` returned `hello-command`, `/api/apps/3/logs` returned an empty log payload, and desktop/tablet/mobile headless Chrome screenshots showed the responsive shell without obvious overlap.
+
+Web build caveat:
+
+- `npm run build --workspace apps/web` was attempted twice, including once with an explicit exit marker. The tool returned only `Finished TypeScript in ...` and no final exit marker, and no `next build`/Turbopack process remained afterward. This matches the known pre-existing build-reporting failure from the handoff rather than a new checkpoint-specific error.
+
+Remaining Checkpoint 2 / 2.5 scope before moving on:
+
+- Commit the checkpoint changes after verification passes.
 
 Checkpoint 2.5 has been added to `docs/14-implementation-plan.md` as the explicit frontend polish checkpoint:
 
@@ -190,6 +211,7 @@ Default ports:
 - Do not commit `apps/cli/node_modules/` if it appears.
 - Browser code should call same-origin `/api/*` routes, not the daemon directly.
 - Dashboard lifecycle controls currently call `/api/apps/:id/start`, `/api/apps/:id/stop`, `/api/apps/:id/restart`, and `/api/apps/:id/logs`; these are handled by a single Next dynamic action route and proxied to the daemon.
+- Dashboard app registry forms call same-origin `/api/apps` and `/api/apps/:id`; those route handlers proxy create/edit mutations to the daemon.
 - Frontend visual/product direction is now explicit: the whole UI should feel 9Router-inspired while following `DESIGN.md`. Do not build a generic admin dashboard or SaaS landing page.
 - For frontend work, read `DESIGN.md` before editing UI and keep the first screen as the actual app control surface.
 - Local daemon should bind to `127.0.0.1`.
