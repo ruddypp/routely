@@ -1,8 +1,8 @@
 # Routely End-to-End Implementation Plan
 
-Version: 0.2  
+Version: 0.3  
 Status: Execution checkpoint plan  
-Last updated: 2026-06-16
+Last updated: 2026-06-17
 
 ## 1. Purpose
 
@@ -66,6 +66,7 @@ Use these docs as the product and architecture source of truth:
 - `docs/13-current-setup-status.md` for current local setup notes.
 - `docs/feature-specs/*` for feature-level acceptance criteria.
 - `docs/adr/*` for architecture decisions.
+- `DESIGN.md` for visual taste, palette, density, component geometry, and responsive design rules.
 
 If code and docs disagree, prefer the docs for intent, but update docs if implementation needs to intentionally change the plan.
 
@@ -85,6 +86,8 @@ Keep these constraints throughout implementation:
 - Dashboard browser code must call same-origin `/api/*`; it must not call the daemon directly.
 - The daemon should bind to `127.0.0.1` in local mode.
 - Production mode requires authentication before infrastructure actions are exposed.
+- Frontend work should make the whole Routely app experience feel 9Router-inspired: local-first, dense, fast, app-runner oriented, and command/control focused. This applies to the full shell, navigation, local app controls, logs, forms, settings, and future production views, not just the dashboard home screen.
+- Visual execution must still respect `DESIGN.md`: near-black surfaces, compact typography, functional green accent, pill/circle controls, dense app layout, heavy dark elevation, and responsive sidebar/bottom-nav behavior. Do not introduce a generic SaaS marketing look.
 
 ## 5. Current Baseline
 
@@ -253,6 +256,96 @@ Goal: make the dashboard an actual local control surface, not only a status page
 - Dashboard component tests if a React test runner is added.
 - Playwright smoke test for dashboard load, app row render, and one lifecycle action.
 - Manual responsive check.
+
+## 9.5. Checkpoint 2.5: 9Router-Inspired Frontend Product Shell
+
+Goal: make the whole Routely frontend feel like a polished 9Router-inspired local app runner while preserving Routely's own `DESIGN.md` taste and preparing the shell for Dokploy-like production workflows later.
+
+This checkpoint exists because the frontend should not be treated as only a dashboard table. The entire browser app should feel like one cohesive local-to-production control surface: local workspaces first, production infrastructure second, automation third.
+
+### Design Direction
+
+- Use 9Router as the primary product-experience reference:
+  - local-first app runner mental model
+  - fast app switching
+  - visible app/service status
+  - prominent run/control actions
+  - logs close to the app row/detail
+  - minimal friction between terminal workflow and dashboard workflow
+- Use `DESIGN.md` as the visual taste source:
+  - near-black immersive background and surfaces
+  - compact, dense layout rather than marketing whitespace
+  - functional green accent only for active/primary controls
+  - pill and circular controls where appropriate
+  - heavy dark shadows/elevation
+  - app-like responsive behavior with sidebar on desktop and mobile-friendly navigation
+- Keep Dokploy-like backend concepts in the information architecture, but do not expose production/VPS actions before their checkpoints are implemented.
+- Do not make a landing page. The first screen should be the actual product surface.
+
+### Implementation
+
+- Build a cohesive application shell, not only a single dashboard view:
+  - desktop sidebar/navigation
+  - mobile navigation pattern
+  - top workspace/status area
+  - main content region
+  - detail/log panel region
+  - empty/loading/error states that match the shell
+- Refine the local apps view into a 9Router-like control surface:
+  - app/service rows or tiles optimized for scanning
+  - status, port, URL, driver, command, and dependency information
+  - start/stop/restart/open/log controls with clear enabled/disabled states
+  - selected app detail panel or route
+  - recent logs panel that feels native to the shell
+- Add app add/edit UI using the app registry schema:
+  - name
+  - type
+  - preset
+  - driver
+  - path
+  - command/dev command
+  - port
+  - enabled
+  - depends_on where practical
+  - validation and actionable errors
+- Establish reusable UI primitives aligned with `DESIGN.md`:
+  - app shell layout
+  - sidebar/nav item
+  - pill/circular button variants
+  - status badge
+  - app/service row or card
+  - dense form controls
+  - log viewer panel
+  - empty/error/loading states
+- Make future production sections visible only as inert navigation placeholders if helpful for information architecture; do not implement production actions yet.
+- Keep all browser data mutations behind same-origin `/api/*` route handlers.
+- Fix or document the existing web production build issue before marking this checkpoint complete.
+
+### Exit Criteria
+
+- The browser app looks and behaves like a cohesive 9Router-inspired product shell, not a generic dashboard page.
+- Local app control is usable from desktop and mobile widths.
+- A user can add or edit a local command app from the UI without using the terminal.
+- A user can inspect an app, its command, URL, status, and recent logs from the UI.
+- The shell has a clear place for future Dokploy-like production features without exposing nonfunctional production controls.
+- The UI follows `DESIGN.md` for palette, density, typography, component shape, and responsive behavior.
+- Browser code only calls same-origin `/api/*` routes.
+
+### Required Tests
+
+- Route-handler tests for add/edit behavior and daemon-unreachable failures.
+- Component or integration tests for form validation if a React test setup is available.
+- Playwright smoke test for:
+  - app shell load
+  - app list render
+  - add/edit form open and validation
+  - one lifecycle action
+  - logs panel
+- Manual responsive check at mobile, tablet, and desktop widths.
+- `npm run lint`.
+- `npm run test --workspace apps/web`.
+- Web TypeScript check.
+- Web production build when the existing build issue is resolved; otherwise document the exact blocker and confirm the failure also happens on the clean baseline.
 
 ## 10. Checkpoint 3: Config, Presets, and Compose Services
 

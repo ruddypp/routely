@@ -244,3 +244,13 @@ Routely dashboard local controls
   - Add broader dashboard smoke/responsive coverage.
   - Keep browser calls routed through same-origin /api/* handlers.
 ```
+
+After the remaining dashboard local controls are in place, execute `docs/14-implementation-plan.md` Checkpoint 2.5 before starting Checkpoint 3 or any production/VPS work:
+
+```text
+9Router-inspired frontend product shell
+  - Treat the whole browser UI as the product surface, not only the dashboard table.
+  - Make local app runner workflows feel 9Router-inspired: dense, fast, control-focused, and status/log oriented.
+  - Follow DESIGN.md for visual taste: near-black surfaces, compact typography, functional green accent, pill/circular controls, heavy dark elevation, and responsive sidebar/mobile navigation.
+  - Keep Dokploy-like production concepts in the future information architecture, but do not expose production actions before their checkpoints.
+```

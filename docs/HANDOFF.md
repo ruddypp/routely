@@ -27,6 +27,7 @@ Before implementing, read:
 7. `docs/07-config-spec.md`
 8. `docs/feature-specs/local-runner.md`
 9. `docs/feature-specs/dashboard.md`
+10. `DESIGN.md`
 
 For Next.js changes, follow `AGENTS.md`: read the relevant guide in `node_modules/next/dist/docs/` before editing Next.js code.
 
@@ -144,13 +145,21 @@ Remaining Checkpoint 2 scope:
 - Add add/edit app form using the app registry schema.
 - Add broader browser smoke and responsive checks.
 
+Checkpoint 2.5 has been added to `docs/14-implementation-plan.md` as the explicit frontend polish checkpoint:
+
+- Name: `9Router-Inspired Frontend Product Shell`.
+- Scope: the whole Routely browser app, not only the dashboard home/table.
+- Direction: make the UI/UX feel 9Router-inspired for local app runner workflows while respecting `DESIGN.md` for visual taste.
+- `DESIGN.md` currently defines near-black Spotify-inspired taste: compact/dense app UI, functional green accent, pill/circular controls, heavy dark elevation, responsive sidebar/mobile navigation, and no generic SaaS landing-page treatment.
+- Backend/product concept remains Dokploy-like for VPS deployment, domains, HTTPS, logs, metrics, databases, and backups, but production controls must wait for their checkpoints.
+
 Recommended next step:
 
 ```text
-Continue Checkpoint 2: Dashboard Local Controls.
+Continue Checkpoint 2, then execute Checkpoint 2.5 before starting Checkpoint 3 or production/VPS work.
 ```
 
-Do not start production/VPS work yet. Continue with the remaining dashboard local controls scope.
+Do not start production/VPS work yet. Continue with the remaining dashboard local controls scope, then polish the whole frontend product shell to the new Checkpoint 2.5 standard.
 
 ## Current Known Environment
 
@@ -181,6 +190,8 @@ Default ports:
 - Do not commit `apps/cli/node_modules/` if it appears.
 - Browser code should call same-origin `/api/*` routes, not the daemon directly.
 - Dashboard lifecycle controls currently call `/api/apps/:id/start`, `/api/apps/:id/stop`, `/api/apps/:id/restart`, and `/api/apps/:id/logs`; these are handled by a single Next dynamic action route and proxied to the daemon.
+- Frontend visual/product direction is now explicit: the whole UI should feel 9Router-inspired while following `DESIGN.md`. Do not build a generic admin dashboard or SaaS landing page.
+- For frontend work, read `DESIGN.md` before editing UI and keep the first screen as the actual app control surface.
 - Local daemon should bind to `127.0.0.1`.
 - Do not start production/VPS work until local runner and dashboard lifecycle primitives are reliable.
 
@@ -225,6 +236,7 @@ Current progress:
 - Checkpoint 0 is complete.
 - Checkpoint 1 local runner is complete and committed.
 - Checkpoint 2 Dashboard Local Controls has started.
+- Checkpoint 2.5 `9Router-Inspired Frontend Product Shell` has been added to docs/14-implementation-plan.md. This is the explicit checkpoint for making the entire Routely frontend feel 9Router-inspired while following DESIGN.md for visual taste.
 - Commit 0daf3e3 `feat: add dashboard local controls` is complete. It added daemon lifecycle/log endpoints, same-origin Next.js API proxying, dashboard start/stop/restart/open/log controls, loading/error/refresh states, focused route-handler tests, and docs updates.
 - Recent commits include:
   - 0daf3e3 feat: add dashboard local controls
@@ -235,20 +247,30 @@ Current progress:
   - bde6da9 feat: stabilize workspace root resolution
 
 Your next task:
-Continue Checkpoint 2 from docs/14-implementation-plan.md: Dashboard Local Controls.
+Continue Checkpoint 2 from docs/14-implementation-plan.md, then execute Checkpoint 2.5 before moving to Checkpoint 3 or production/VPS work.
 1. Read the relevant Next.js docs in node_modules/next/dist/docs/ before editing apps/web.
-2. Do not redo the already-completed lifecycle/log controls unless you are fixing a bug in them.
-3. Finish the remaining Checkpoint 2 scope where practical:
+2. Read DESIGN.md before editing any frontend UI. The whole Routely frontend should feel 9Router-inspired, but the visual taste must follow DESIGN.md: near-black dense app UI, functional green accent, pill/circular controls, heavy dark elevation, responsive sidebar/mobile navigation, and no generic SaaS landing page.
+3. Do not redo the already-completed lifecycle/log controls unless you are fixing a bug in them.
+4. Finish the remaining Checkpoint 2 scope where practical:
    - Add an app detail page or side panel beyond the current log panel if it improves the workflow.
    - Add an add/edit app form using the app registry schema.
    - Add broader browser smoke and responsive checks.
    - Investigate or document the existing `npm run build --workspace apps/web` failure if you touch web build behavior.
-4. Keep browser calls same-origin under `/api/*`; browser code must not call the daemon directly.
-5. Add useful loading, disabled, error, and refresh states for any new UI.
-6. Add or adjust tests where practical.
-7. Update docs if behavior changes.
-8. Run relevant verification commands. At minimum prefer `npm run lint`, `npm run test --workspace apps/web`, web TypeScript/build checks, and `npm run build --workspace apps/cli` if CLI is touched.
-9. Commit only the files changed for this checkpoint with a concise commit message.
+5. Then implement Checkpoint 2.5: build a cohesive 9Router-inspired frontend product shell for the whole browser app, not only the dashboard table:
+   - desktop sidebar/navigation
+   - mobile navigation behavior
+   - workspace/status header
+   - local apps/services control surface
+   - app detail/log region
+   - dense add/edit forms
+   - reusable UI primitives aligned with DESIGN.md
+   - inert placeholders for future production sections only if helpful; do not implement production actions yet.
+6. Keep browser calls same-origin under `/api/*`; browser code must not call the daemon directly.
+7. Add useful loading, disabled, error, empty, and refresh states for any new UI.
+8. Add or adjust tests where practical.
+9. Update docs if behavior changes.
+10. Run relevant verification commands. At minimum prefer `npm run lint`, `npm run test --workspace apps/web`, web TypeScript/build checks, and `npm run build --workspace apps/cli` if CLI is touched.
+11. Commit only the files changed for this checkpoint with a concise commit message.
 
 Known verification caveat:
 - `npm run build --workspace apps/web` fails on the clean pre-change baseline and after 0daf3e3 with the same hidden `Turbopack build failed with 2 errors` summary. Treat it as an existing web build issue unless your changes specifically address it. Previously passing checks for 0daf3e3: `npm run test --workspace apps/web`, web `tsc --noEmit`, `node --check apps/daemon/src/server.js`, `npm run lint`, and `npm run build --workspace apps/cli`.
@@ -270,6 +292,7 @@ Do not start production/VPS work. Preserve unrelated user changes in the worktre
 - [x] Update docs for the committed dashboard controls slice.
 - [x] Commit Checkpoint 2 dashboard controls slice only.
 - [ ] Continue remaining Checkpoint 2 scope: app detail/add-edit form/browser smoke-responsive checks.
+- [ ] Execute Checkpoint 2.5: 9Router-inspired frontend product shell across the whole browser app while following `DESIGN.md`.
 
 Verification note for the dashboard controls slice:
 
