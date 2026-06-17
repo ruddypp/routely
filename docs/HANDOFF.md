@@ -183,13 +183,23 @@ Checkpoint 2.5 has been added to `docs/14-implementation-plan.md` as the explici
 - `DESIGN.md` currently defines near-black Spotify-inspired taste: compact/dense app UI, functional green accent, pill/circular controls, heavy dark elevation, responsive sidebar/mobile navigation, and no generic SaaS landing-page treatment.
 - Backend/product concept remains Dokploy-like for VPS deployment, domains, HTTPS, logs, metrics, databases, and backups, but production controls must wait for their checkpoints.
 
-Recommended next step:
+Checkpoint 3 is now implemented as a comprehensive local resource slice:
+
+- Config normalization and SQLite persistence cover install/dev/build/start commands, env, dependencies, healthchecks, domains, source metadata, Compose metadata, internal flags, images, and volumes.
+- Preset detection/defaults exist for Next.js, Vite/React, Laravel, Express, NestJS, Django, FastAPI, Go, static HTML/CSS, and PHP custom projects.
+- `routely add <path>` detects presets where possible and writes editable generated config back to `routely.yml`.
+- `routely db add <postgres|mysql|mariadb|redis|mongodb>` registers Compose-backed local database services under `services:`.
+- The Compose driver generates local Compose files under `.routely/compose` and starts/stops services with Docker Compose.
+- Daemon lifecycle endpoints now support command and Compose resources; browser mutations remain behind same-origin `/api/*` route handlers.
+- The dashboard distinguishes apps from services/databases and exposes richer config/service metadata in rows, inspector, and add/edit forms.
+
+Recommended next step after Checkpoint 3 verification and commit:
 
 ```text
-Move to Checkpoint 3: Config, Presets, and Compose Services.
+Move to Checkpoint 4: Production Server Foundation.
 ```
 
-Checkpoint 3 should be implemented as a comprehensive product slice, not as frontend-only polish. It should include backend/domain work, CLI behavior, daemon/API support, SQLite/config synchronization, tests, and a Dokploy-inspired frontend surface for local apps/services. Do not start production/VPS deploy actions yet; keep production navigation inert until the production checkpoints.
+Do not start production/VPS deploy actions until Checkpoint 4 begins; production navigation remains inert placeholders.
 
 ## Current Progress Snapshot For Next Agent
 
@@ -212,11 +222,9 @@ Current state:
 
 Next execution direction:
 
-- Start Checkpoint 3 from `docs/14-implementation-plan.md`.
-- Implement real backend/domain progress first: config fields, preset detection, database/service templates, Compose driver behavior, DB persistence, daemon/API routes, CLI commands, and tests.
-- Enhance the frontend as part of that implementation so it feels more Dokploy-inspired operationally: resource/service cards or rows, environment/service metadata, compose/database service visibility, clearer app/service inspector sections, and dense operations-oriented forms.
-- Keep the local-first Routely identity: this is still a local runner and app registry workflow before production.
-- Do not implement production/VPS actions, deploy pipelines, domains, HTTPS, GitHub automation, auth, backups, or server setup until their checkpoints.
+- Start Checkpoint 4 from `docs/14-implementation-plan.md` only after Checkpoint 3 is committed.
+- Keep the local-first Routely identity while adding production foundation primitives.
+- Do not implement deploy pipelines, domains, HTTPS, GitHub automation, backups, or real VPS app actions before their checkpoints.
 
 ## Current Known Environment
 

@@ -60,6 +60,12 @@ Lokasi dokumentasi:
 - Dashboard local controls have started: browser calls same-origin `/api/*` handlers for app start, stop, restart, open URL, recent log access, and app registry create/edit.
 - The browser UI now uses a 9Router-inspired local runner shell: desktop sidebar, mobile bottom navigation, workspace/status header, dense app rows, app inspector, recent logs, and add/edit registry forms.
 - The latest frontend design pass refined the existing shell with tighter app row rhythm, safer desktop action wrapping, clearer inspector/log contrast, improved loading/empty states, and better add/edit form focus, disabled, and validation affordances.
+- Checkpoint 3 has expanded local resource support: `routely.yml` apps/services now carry install/dev/build/start commands, env, dependencies, healthchecks, domains, source metadata, Compose image/service/file metadata, internal service flags, and volumes.
+- `packages/presets` now detects common local stacks including Next.js, Vite/React, Laravel, Express, NestJS, Django, FastAPI, Go, static HTML/CSS, and PHP custom projects.
+- `routely add <path>` now detects a preset where possible, writes editable generated commands to `routely.yml`, and keeps the registry synced into SQLite.
+- `routely db add <postgres|mysql|mariadb|redis|mongodb>` registers a local Compose-backed database service and writes it to the `services:` section of `routely.yml`.
+- The local Compose driver generates per-service Compose files under `.routely/compose` and uses `docker compose` for service start/stop.
+- The dashboard now distinguishes apps from services/databases and exposes denser config metadata in rows, inspector sections, and add/edit forms while still routing browser mutations through same-origin `/api/*`.
 
 ## Current Structure
 
@@ -163,6 +169,8 @@ Initial skeleton commands:
 ```bash
 routely init
 routely add /path/to/app --name web --command "npm run dev" --port 3000
+routely add ./apps/web --name web
+routely db add postgres
 routely ps
 routely logs web --follow
 routely restart web
@@ -174,6 +182,8 @@ routely
 The dashboard app surface can start, stop, and restart local command-driver apps through the daemon. The app inspector reads recent content from `.routely/logs/<app>.log` through `GET /api/apps/:id/logs`. Add/edit forms write registry entries through same-origin `/api/apps` and `/api/apps/:id` route handlers. Browser code does not call the daemon directly.
 
 Command apps declared in `routely.yml` can use `depends_on` to control local startup order. Routely rejects dependency cycles before starting apps. CLI commands and daemon boot reconcile stale runtime PIDs so apps are not left marked `running` after an old managed process exits outside Routely.
+
+Local Compose services declared in `services:` use `driver: compose`. Generated Compose files are written under `.routely/compose` unless `compose_file` is supplied. Database templates are local-development defaults and are internal by default where practical.
 
 ## CLI Build And Global Reinstall Flow
 
@@ -210,6 +220,7 @@ run command
 - A daemon smoke test with `ROUTELY_WORKSPACE_ROOT` returned the temp workspace and database path from `/health`.
 - A timed `routely up` smoke test started daemon, dashboard, and `hello-command`, then shut them down without leaving listening ports behind.
 - Current dashboard shell verification passed with `npm run lint`, `npm run test --workspace apps/web`, web TypeScript, `node --check apps/daemon/src/server.js`, `npm run build --workspace apps/cli`, and `npm run test --workspace apps/cli`.
+- Checkpoint 3 verification added preset/config/Compose/database-template tests to the CLI suite and a temp workspace smoke for `init`, `db add postgres`, Next.js preset detection via `add`, config export, and `sync`.
 - Browser smoke was run against local daemon/web dev servers with desktop, tablet, and mobile headless Chrome screenshots. `/api/apps` and `/api/apps/3/logs` returned through the same-origin web API.
 - The latest frontend design pass passed `npm run lint`, `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, same-origin `/api/apps` smoke, and desktop/tablet/mobile headless Chrome screenshots. A desktop app-row overlap found in the first screenshot pass was fixed and rechecked.
 - `npm run build --workspace apps/web` still returns only the partial `Finished TypeScript...` progress line with no final exit marker and no remaining build process, matching the existing web build caveat.

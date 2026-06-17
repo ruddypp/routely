@@ -18,9 +18,21 @@ export interface RoutelyAppInput {
   driver?: RoutelyAppDriver;
   path?: string | null;
   command?: string | null;
+  install?: string | null;
   dev?: string | null;
+  build?: string | null;
+  start?: string | null;
+  env?: Record<string, string | number | boolean | null> | null;
   port?: number | string | null;
   depends_on?: string[] | string | null;
+  healthcheck?: { path?: string | null; expected_status?: number | string | null } | null;
+  domains?: string[] | string | null;
+  source?: { type?: string | null; repo?: string | null; branch?: string | null } | null;
+  image?: string | null;
+  internal?: boolean;
+  volumes?: string[] | string | null;
+  compose_file?: string | null;
+  compose_service?: string | null;
   enabled?: boolean;
   status?: RoutelyAppStatus;
 }
@@ -51,8 +63,21 @@ export interface NormalizedRoutelyAppInput {
   driver: RoutelyAppDriver;
   path: string | null;
   command: string | null;
+  install: string | null;
+  dev: string | null;
+  build: string | null;
+  start: string | null;
+  env: Record<string, string>;
   port: number | null;
   depends_on: string[];
+  healthcheck: { path: string | null; expected_status: number | null } | null;
+  domains: string[];
+  source: { type: string | null; repo: string | null; branch: string | null } | null;
+  image: string | null;
+  internal: boolean;
+  volumes: string[];
+  compose_file: string | null;
+  compose_service: string | null;
   enabled: boolean;
   status: RoutelyAppStatus;
 }
@@ -66,8 +91,21 @@ export interface RoutelyAppRecord {
   driver: RoutelyAppDriver;
   path: string | null;
   command: string | null;
+  install: string | null;
+  dev: string | null;
+  build: string | null;
+  start: string | null;
+  env: Record<string, string>;
   port: number | null;
   depends_on: string[];
+  healthcheck: { path: string | null; expected_status: number | null } | null;
+  domains: string[];
+  source: { type: string | null; repo: string | null; branch: string | null } | null;
+  image: string | null;
+  internal: 0 | 1 | boolean;
+  volumes: string[];
+  compose_file: string | null;
+  compose_service: string | null;
   enabled: 0 | 1 | boolean;
   status: RoutelyAppStatus;
   created_at: string;
@@ -83,8 +121,21 @@ export interface RoutelyAppDto {
   driver: RoutelyAppDriver;
   path: string | null;
   command: string | null;
+  install: string | null;
+  dev: string | null;
+  build: string | null;
+  start: string | null;
+  env: Record<string, string>;
   port: number | null;
   dependsOn: string[];
+  healthcheck: { path: string | null; expected_status: number | null } | null;
+  domains: string[];
+  source: { type: string | null; repo: string | null; branch: string | null } | null;
+  image: string | null;
+  internal: boolean;
+  volumes: string[];
+  composeFile: string | null;
+  composeService: string | null;
   enabled: boolean;
   status: RoutelyAppStatus;
   createdAt: string;
@@ -100,6 +151,8 @@ export const APP_STATUSES: RoutelyAppStatus[];
 export function normalizeWorkspaceConfig(input?: RoutelyWorkspaceConfigInput): RoutelyWorkspaceConfig;
 export function normalizeAppInput(input: RoutelyAppInput): NormalizedRoutelyAppInput;
 export function appToPublicDto(app: RoutelyAppRecord): RoutelyAppDto;
+export function appToConfigEntry(input: RoutelyAppInput): Record<string, unknown>;
+export function filterExportableEnv(env?: Record<string, string>): Record<string, string>;
 
 export const WORKSPACE_CONFIG_FILENAMES: string[];
 export function resolveWorkspaceConfigPath(root: string): string | null;
@@ -108,3 +161,9 @@ export interface LoadedWorkspaceConfig {
   configPath: string;
 }
 export function loadWorkspaceConfig(root: string): LoadedWorkspaceConfig | null;
+export function readRawWorkspaceConfig(root: string): { configPath: string; raw: Record<string, unknown> };
+export function upsertWorkspaceConfigEntry(
+  root: string,
+  input: RoutelyAppInput,
+  sectionName?: "apps" | "services"
+): { configPath: string; entry: Record<string, unknown>; section: string };

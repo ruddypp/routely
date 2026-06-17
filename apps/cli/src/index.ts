@@ -22,6 +22,8 @@ import {
   DEFAULT_DASHBOARD_PORT,
   appToPublicDto,
   loadWorkspaceConfig,
+  upsertWorkspaceConfigEntry,
+  type RoutelyAppInput,
   type RoutelyAppRecord
 } from "@routely/core";
 import {
@@ -36,7 +38,8 @@ import {
   updateAppStatus,
   upsertApp
 } from "@routely/db";
-import { startCommandApp } from "@routely/drivers";
+import { startCommandApp, startComposeService, stopComposeService } from "@routely/drivers";
+import { createDatabaseService, detectPreset, getAppPreset } from "@routely/presets";
 import { DependencyCycleError, sortByDependencies } from "./dependencies.js";
 import { resolveInstallRoot, resolveWorkspaceRoot } from "./paths.js";
 import { findUnavailablePorts } from "./ports.js";
@@ -114,7 +117,8 @@ Usage:
   routely logs [app]       Print app logs, optionally with --follow
   routely restart [app]    Restart one command app
   routely doctor           Check local Routely prerequisites and port availability
-  routely add [path] --name <name> --command <command> [--port <port>] [--preset <preset>]
+  routely add [path] --name <name> [--command <command>] [--port <port>] [--preset <preset>]
+  routely db add <type>    Register a local Compose database service
 
 Defaults:
   Dashboard: http://localhost:3030
@@ -279,7 +283,7 @@ function ensureStarterConfig(): string {
   if (!existsSync(configPath)) {
     writeFileSync(
       configPath,
-      `version: 1\nname: routely-local\n\ndashboard:\n  port: 3030\n\napps: []\n`,
+      `version: 1\nname: routely-local\n\ndashboard:\n  port: 3030\n\napps: []\nservices: []\n`,
       "utf8"
     );
   }
@@ -345,33 +349,89 @@ function psCommand(): void {
 function addCommand(args: string[]): void {
   const { positionals, flags } = parseFlags(args);
   const appPath = String(flags.path || positionals[0] || invocationCwd);
-  const name = String(flags.name || positionals[1] || "").trim();
-  const appCommand = String(flags.command || flags.dev || "").trim();
+  const resolvedPath = resolve(invocationCwd, appPath);
+  const detected = detectPreset(resolvedPath);
+  const explicitPreset = (typeof flags.preset === "string" ? getAppPreset(flags.preset) || { preset: flags.preset } : detected) as Record<string, unknown>;
+  const inferredName = resolvedPath.split(/[\\/]/).filter(Boolean).at(-1) || "app";
+  const name = String(flags.name || positionals[1] || inferredName).trim();
+  const appCommand = String(flags.command || flags.dev || explicitPreset.dev || "").trim();
 
   if (!name || !appCommand) {
-    console.error("Usage: routely add [path] --name <name> --command <command> [--port <port>] [--preset <preset>]");
+    console.error("Usage: routely add [path] --name <name> [--command <command>] [--port <port>] [--preset <preset>]");
     process.exit(1);
   }
 
   const { db } = initializeRoutely(workspaceRoot);
-  const saved = upsertApp(db, {
+  const payload: RoutelyAppInput = {
     name,
     type: "app",
-    preset: typeof flags.preset === "string" ? flags.preset : "custom",
+    preset: stringPresetValue(explicitPreset.preset, "custom") || "custom",
     driver: "command",
-    path: resolve(invocationCwd, appPath),
+    path: resolvedPath,
     command: appCommand,
-    port: typeof flags.port === "string" ? flags.port : null,
+    install: stringPresetValue(explicitPreset.install),
+    dev: appCommand,
+    build: stringPresetValue(explicitPreset.build),
+    start: stringPresetValue(explicitPreset.start),
+    port: typeof flags.port === "string" ? flags.port : numberPresetValue(explicitPreset.port),
+    healthcheck: objectPresetValue(explicitPreset.healthcheck),
     enabled: true,
     status: "stopped"
-  });
+  };
+  const saved = upsertApp(db, payload);
+  const configWrite = upsertWorkspaceConfigEntry(workspaceRoot, payload, "apps");
 
   console.log(`Registered ${saved.name}.`);
+  console.log(`Preset:  ${saved.preset}`);
   console.log(`Path:    ${saved.path}`);
   console.log(`Command: ${saved.command}`);
   if (saved.port) {
     console.log(`Port:    ${saved.port}`);
   }
+  console.log(`Config:  ${configWrite.configPath}`);
+  db.close();
+}
+
+function stringPresetValue(value: unknown, fallback: string | null = null): string | null {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function numberPresetValue(value: unknown): number | null {
+  return typeof value === "number" ? value : null;
+}
+
+function objectPresetValue(value: unknown): RoutelyAppInput["healthcheck"] {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as RoutelyAppInput["healthcheck"] : null;
+}
+
+function dbCommand(args: string[]): void {
+  const subcommand = args[0];
+  if (subcommand !== "add") {
+    console.error("Usage: routely db add <postgres|mysql|mariadb|redis|mongodb> [--name <name>] [--port <port>]");
+    process.exit(1);
+  }
+
+  const { positionals, flags } = parseFlags(args.slice(1));
+  const type = String(positionals[0] || "").trim();
+  if (!type) {
+    console.error("Usage: routely db add <postgres|mysql|mariadb|redis|mongodb> [--name <name>] [--port <port>]");
+    process.exit(1);
+  }
+
+  const payload = createDatabaseService(type, {
+    name: typeof flags.name === "string" ? flags.name : undefined,
+    port: typeof flags.port === "string" ? flags.port : undefined
+  }) as unknown as RoutelyAppInput;
+  const { db } = initializeRoutely(workspaceRoot);
+  const saved = upsertApp(db, payload);
+  const configWrite = upsertWorkspaceConfigEntry(workspaceRoot, payload, "services");
+
+  console.log(`Registered ${saved.name}.`);
+  console.log(`Type:    ${saved.preset}`);
+  console.log(`Driver:  ${saved.driver}`);
+  console.log(`Image:   ${saved.image}`);
+  console.log(`Port:    ${saved.port}`);
+  console.log(`Config:  ${configWrite.configPath}`);
   db.close();
 }
 
@@ -416,7 +476,7 @@ async function upCommand(): Promise<void> {
   let shuttingDown = false;
 
   try {
-    apps = sortByDependencies(listApps(db).filter((app) => app.enabled && app.driver === "command"));
+    apps = sortByDependencies(listApps(db).filter((app) => app.enabled && ["command", "compose"].includes(app.driver)));
   } catch (error) {
     if (error instanceof DependencyCycleError) {
       console.error(error.message);
@@ -436,7 +496,7 @@ async function upCommand(): Promise<void> {
   console.log(`Workspace: ${workspaceRoot}`);
   console.log(`Dashboard: http://localhost:${dashboardPort}`);
   console.log(`Daemon:    http://127.0.0.1:${daemonPort}`);
-  console.log(`Apps:      ${apps.length === 0 ? "none registered yet" : `${apps.length} command app(s)`}`);
+  console.log(`Apps:      ${apps.length === 0 ? "none registered yet" : `${apps.length} local resource(s)`}`);
   console.log("");
 
   const daemon = run("daemon", "npm", ["run", "dev", "--workspace", "apps/daemon"], {
@@ -450,6 +510,14 @@ async function upCommand(): Promise<void> {
   for (const app of apps) {
     try {
       updateAppStatus(db, app.id, "starting");
+      if (app.driver === "compose") {
+        writeLogHeader(app.name, `starting compose service ${app.image || app.name}`);
+        const child = startComposeService(app, workspaceRoot, { stdio: ["ignore", "pipe", "pipe"] });
+        attachForegroundLogs(child, app.name);
+        await waitForChild(child);
+        updateAppStatus(db, app.id, "running");
+        continue;
+      }
       const child = startLoggedCommandApp(app);
       runningApps.push({ app, child });
 
@@ -498,12 +566,33 @@ async function upCommand(): Promise<void> {
   process.on("SIGTERM", shutdown);
 }
 
+function waitForChild(child: ChildProcess): Promise<void> {
+  return new Promise((resolveWait, rejectWait) => {
+    child.on("error", rejectWait);
+    child.on("exit", (code) => {
+      if (code && code !== 0) {
+        rejectWait(new Error(`command exited with code ${code}`));
+      } else {
+        resolveWait();
+      }
+    });
+  });
+}
+
 async function downCommand(): Promise<void> {
   const { db } = initializeRoutely(workspaceRoot);
   reconcileRuntimeState(db);
+  const composeApps = listApps(db).filter((app) => app.driver === "compose" && app.status === "running");
+  for (const app of composeApps) {
+    writeLogHeader(app.name, "stopping compose service");
+    await waitForChild(stopComposeService(app, workspaceRoot, { stdio: ["ignore", "pipe", "pipe"] }));
+    updateAppStatus(db, app.id, "stopped");
+    console.log(`Stopped ${app.name}.`);
+  }
+
   const instances = listRunningRuntimeInstances(db);
 
-  if (instances.length === 0) {
+  if (instances.length === 0 && composeApps.length === 0) {
     console.log("No running managed app processes found.");
     db.close();
     return;
@@ -609,7 +698,7 @@ async function doctorCommand(): Promise<void> {
   const { db } = initializeRoutely(workspaceRoot);
   syncConfig(db);
   reconcileRuntimeState(db);
-  const apps = listApps(db).filter((app) => app.enabled && app.driver === "command");
+  const apps = listApps(db).filter((app) => app.enabled && ["command", "compose"].includes(app.driver));
   const unavailable = await findUnavailablePorts([
     { name: "dashboard", port: Number(process.env.ROUTELY_DASHBOARD_PORT || DEFAULT_DASHBOARD_PORT) },
     { name: "daemon", port: Number(process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT) },
@@ -665,6 +754,9 @@ switch (command) {
     break;
   case "add":
     addCommand(argv.slice(1));
+    break;
+  case "db":
+    dbCommand(argv.slice(1));
     break;
   case "up":
     await upCommand();

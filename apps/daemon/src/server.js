@@ -4,7 +4,7 @@ import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSyn
 import net from "node:net";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { DEFAULT_DAEMON_PORT, appToPublicDto, loadWorkspaceConfig } from "@routely/core";
+import { DEFAULT_DAEMON_PORT, appToPublicDto, loadWorkspaceConfig, upsertWorkspaceConfigEntry } from "@routely/core";
 import {
   deleteApp,
   getAppById,
@@ -19,7 +19,7 @@ import {
   updateAppStatus,
   upsertApp
 } from "@routely/db";
-import { startCommandApp } from "@routely/drivers";
+import { startCommandApp, startComposeService, stopComposeService } from "@routely/drivers";
 
 const port = Number(process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT);
 const host = process.env.ROUTELY_DAEMON_HOST || "127.0.0.1";
@@ -162,12 +162,16 @@ function validateStartableApp(appRecord) {
     return `${appRecord.name} is disabled.`;
   }
 
-  if (appRecord.driver !== "command") {
-    return `Start currently supports command apps only. ${appRecord.name} uses ${appRecord.driver}.`;
+  if (!["command", "compose"].includes(appRecord.driver)) {
+    return `Start currently supports command and Compose apps only. ${appRecord.name} uses ${appRecord.driver}.`;
   }
 
-  if (!appRecord.command) {
+  if (appRecord.driver === "command" && !appRecord.command) {
     return `${appRecord.name} does not have a command configured.`;
+  }
+
+  if (appRecord.driver === "compose" && !appRecord.image && !appRecord.compose_file) {
+    return `${appRecord.name} does not have a Compose image or compose_file configured.`;
   }
 
   return null;
@@ -195,7 +199,11 @@ async function startLocalApp(appRecord) {
     return { ok: false, status: 400, error: validationError };
   }
 
-  if (runningInstancesForApp(appRecord.id).length > 0) {
+  if (appRecord.driver === "command" && runningInstancesForApp(appRecord.id).length > 0) {
+    return { ok: false, status: 409, error: `${appRecord.name} is already running.` };
+  }
+
+  if (appRecord.driver === "compose" && appRecord.status === "running") {
     return { ok: false, status: 409, error: `${appRecord.name} is already running.` };
   }
 
@@ -204,9 +212,20 @@ async function startLocalApp(appRecord) {
   }
 
   updateAppStatus(db, appRecord.id, "starting");
-  writeLogHeader(appRecord.name, `starting ${appRecord.command}`);
+  writeLogHeader(appRecord.name, `starting ${appRecord.driver === "compose" ? appRecord.image || appRecord.name : appRecord.command}`);
 
   try {
+    if (appRecord.driver === "compose") {
+      const logPath = ensureLogPath(appRecord.name);
+      const fd = openSync(logPath, "a");
+      const child = startComposeService(appRecord, workspaceRoot, { stdio: ["ignore", fd, fd] });
+      await waitForChild(child);
+      closeSync(fd);
+      updateAppStatus(db, appRecord.id, "running");
+      writeLogHeader(appRecord.name, "compose service running");
+      return { ok: true, app: getAppById(db, appRecord.id), pid: null };
+    }
+
     const logPath = ensureLogPath(appRecord.name);
     const fd = openSync(logPath, "a");
     const child = startCommandApp(appRecord, { stdio: ["ignore", fd, fd] });
@@ -231,7 +250,42 @@ async function startLocalApp(appRecord) {
   }
 }
 
+function waitForChild(child) {
+  return new Promise((resolveWait, rejectWait) => {
+    child.on("error", rejectWait);
+    child.on("exit", (code) => {
+      if (code && code !== 0) {
+        rejectWait(new Error(`command exited with code ${code}`));
+      } else {
+        resolveWait();
+      }
+    });
+  });
+}
+
 async function stopLocalApp(appRecord, reason = "stop") {
+  if (appRecord.driver === "compose") {
+    if (appRecord.status !== "running") {
+      updateAppStatus(db, appRecord.id, "stopped");
+      writeLogHeader(appRecord.name, `compose service already stopped for ${reason}`);
+      return { ok: true, app: getAppById(db, appRecord.id), stopped: [] };
+    }
+
+    try {
+      writeLogHeader(appRecord.name, `stopping compose service for ${reason}`);
+      const logPath = ensureLogPath(appRecord.name);
+      const fd = openSync(logPath, "a");
+      const child = stopComposeService(appRecord, workspaceRoot, { stdio: ["ignore", fd, fd] });
+      await waitForChild(child);
+      closeSync(fd);
+      updateAppStatus(db, appRecord.id, "stopped");
+      return { ok: true, app: getAppById(db, appRecord.id), stopped: [] };
+    } catch (error) {
+      writeLogHeader(appRecord.name, `failed to stop compose service: ${error instanceof Error ? error.message : String(error)}`);
+      return { ok: false, status: 500, error: error instanceof Error ? error.message : "Failed to stop Compose service." };
+    }
+  }
+
   const instances = runningInstancesForApp(appRecord.id);
 
   if (instances.length === 0) {
@@ -308,6 +362,9 @@ app.post("/apps/:id/stop", async (request, reply) => {
   if (!record) return;
 
   const result = await stopLocalApp(record);
+  if (!result.ok) {
+    return reply.code(result.status).send({ error: result.error });
+  }
   return reply.code(200).send({ app: appToPublicDto(result.app), stopped: result.stopped });
 });
 
@@ -320,7 +377,10 @@ app.post("/apps/:id/restart", async (request, reply) => {
     return reply.code(400).send({ error: validationError });
   }
 
-  await stopLocalApp(record, "restart");
+  const stopResult = await stopLocalApp(record, "restart");
+  if (!stopResult.ok) {
+    return reply.code(stopResult.status).send({ error: stopResult.error });
+  }
   const refreshed = getAppById(db, record.id);
   const result = await startLocalApp(refreshed);
 
@@ -348,6 +408,7 @@ app.get("/apps/:id/logs", async (request, reply) => {
 app.post("/apps", async (request, reply) => {
   try {
     const saved = upsertApp(db, request.body || {});
+    upsertWorkspaceConfigEntry(workspaceRoot, saved, saved.type === "app" || saved.type === "worker" || saved.type === "static" ? "apps" : "services");
     return reply.code(201).send({ app: appToPublicDto(saved) });
   } catch (error) {
     return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid app payload." });
@@ -360,6 +421,7 @@ app.patch("/apps/:id", async (request, reply) => {
 
   try {
     const saved = updateApp(db, existing.id, request.body || {});
+    upsertWorkspaceConfigEntry(workspaceRoot, saved, saved.type === "app" || saved.type === "worker" || saved.type === "static" ? "apps" : "services");
     return reply.code(200).send({ app: appToPublicDto(saved) });
   } catch (error) {
     return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid app payload." });

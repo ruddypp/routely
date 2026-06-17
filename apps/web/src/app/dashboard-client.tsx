@@ -12,8 +12,21 @@ type DaemonApp = {
   driver: string;
   path: string | null;
   command: string | null;
+  install: string | null;
+  dev: string | null;
+  build: string | null;
+  start: string | null;
+  env: Record<string, string>;
   port: number | null;
   dependsOn?: string[];
+  healthcheck?: { path: string | null; expected_status: number | null } | null;
+  domains?: string[];
+  source?: { type: string | null; repo: string | null; branch: string | null } | null;
+  image?: string | null;
+  internal?: boolean;
+  volumes?: string[];
+  composeFile?: string | null;
+  composeService?: string | null;
   enabled: boolean;
   status: string;
   createdAt: string;
@@ -66,14 +79,30 @@ type AppFormState = {
   driver: string;
   path: string;
   command: string;
+  install: string;
+  dev: string;
+  build: string;
+  start: string;
+  env: string;
   port: string;
   enabled: boolean;
   dependsOn: string;
+  healthcheckPath: string;
+  healthcheckStatus: string;
+  domains: string;
+  sourceRepo: string;
+  sourceBranch: string;
+  image: string;
+  internal: boolean;
+  volumes: string;
+  composeFile: string;
+  composeService: string;
 };
 
 const POLL_INTERVAL_MS = 4000;
 const APP_TYPES = ["app", "database", "compose", "static", "worker"];
 const APP_DRIVERS = ["command", "compose", "dockerfile", "buildpack", "static"];
+const APP_PRESETS = ["custom", "nextjs", "vite", "laravel", "express", "nestjs", "django", "fastapi", "go", "static", "php", "postgres", "mysql", "mariadb", "redis", "mongodb"];
 const PANEL_SHADOW = "shadow-[rgba(0,0,0,0.5)_0px_8px_24px]";
 const INSET_RING = "shadow-[rgb(18,18,18)_0px_1px_0px,rgb(124,124,124)_0px_0px_0px_1px_inset]";
 const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
@@ -93,9 +122,24 @@ const blankForm: AppFormState = {
   driver: "command",
   path: "",
   command: "",
+  install: "",
+  dev: "",
+  build: "",
+  start: "",
+  env: "",
   port: "",
   enabled: true,
-  dependsOn: ""
+  dependsOn: "",
+  healthcheckPath: "",
+  healthcheckStatus: "",
+  domains: "",
+  sourceRepo: "",
+  sourceBranch: "",
+  image: "",
+  internal: false,
+  volumes: "",
+  composeFile: "",
+  composeService: ""
 };
 
 function formFromApp(app: DaemonApp): AppFormState {
@@ -106,9 +150,24 @@ function formFromApp(app: DaemonApp): AppFormState {
     driver: app.driver,
     path: app.path || "",
     command: app.command || "",
+    install: app.install || "",
+    dev: app.dev || "",
+    build: app.build || "",
+    start: app.start || "",
+    env: Object.entries(app.env || {}).map(([key, value]) => `${key}=${value}`).join("\n"),
     port: app.port == null ? "" : String(app.port),
     enabled: app.enabled,
-    dependsOn: (app.dependsOn || []).join(", ")
+    dependsOn: (app.dependsOn || []).join(", "),
+    healthcheckPath: app.healthcheck?.path || "",
+    healthcheckStatus: app.healthcheck?.expected_status == null ? "" : String(app.healthcheck.expected_status),
+    domains: (app.domains || []).join(", "),
+    sourceRepo: app.source?.repo || "",
+    sourceBranch: app.source?.branch || "",
+    image: app.image || "",
+    internal: Boolean(app.internal),
+    volumes: (app.volumes || []).join("\n"),
+    composeFile: app.composeFile || "",
+    composeService: app.composeService || ""
   };
 }
 
@@ -148,6 +207,18 @@ async function readError(response: Response): Promise<string> {
 }
 
 function formPayload(form: AppFormState) {
+  const env = Object.fromEntries(
+    form.env
+      .split("\n")
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const separator = line.indexOf("=");
+        return separator >= 0 ? [line.slice(0, separator).trim(), line.slice(separator + 1)] : [line, ""];
+      })
+      .filter(([key]) => key)
+  );
+
   return {
     name: form.name.trim(),
     type: form.type,
@@ -155,13 +226,44 @@ function formPayload(form: AppFormState) {
     driver: form.driver,
     path: form.path.trim() || null,
     command: form.command.trim() || null,
+    install: form.install.trim() || null,
+    dev: form.dev.trim() || form.command.trim() || null,
+    build: form.build.trim() || null,
+    start: form.start.trim() || null,
+    env,
     port: form.port.trim() === "" ? null : Number(form.port),
     enabled: form.enabled,
     depends_on: form.dependsOn
       .split(",")
       .map((item) => item.trim())
-      .filter(Boolean)
+      .filter(Boolean),
+    healthcheck: form.healthcheckPath.trim() || form.healthcheckStatus.trim()
+      ? {
+          path: form.healthcheckPath.trim() || null,
+          expected_status: form.healthcheckStatus.trim() ? Number(form.healthcheckStatus) : null
+        }
+      : null,
+    domains: splitList(form.domains),
+    source: form.sourceRepo.trim() || form.sourceBranch.trim()
+      ? { type: "github", repo: form.sourceRepo.trim() || null, branch: form.sourceBranch.trim() || null }
+      : null,
+    image: form.image.trim() || null,
+    internal: form.internal,
+    volumes: form.volumes.split("\n").map((item) => item.trim()).filter(Boolean),
+    compose_file: form.composeFile.trim() || null,
+    compose_service: form.composeService.trim() || null
   };
+}
+
+function splitList(value: string): string[] {
+  return value.split(",").map((item) => item.trim()).filter(Boolean);
+}
+
+function resourceLabel(app: DaemonApp): string {
+  if (app.type === "database") return "Database";
+  if (app.driver === "compose") return "Compose service";
+  if (app.type === "worker") return "Worker";
+  return "App";
 }
 
 function appInitials(name: string): string {
@@ -357,6 +459,8 @@ export default function DashboardClient() {
   const connected = Boolean(health?.connected);
   const runningCount = apps.filter((app) => app.status === "running").length;
   const disabledCount = apps.filter((app) => !app.enabled).length;
+  const appResources = apps.filter((app) => app.type === "app" || app.type === "worker" || app.type === "static");
+  const serviceResources = apps.filter((app) => !(app.type === "app" || app.type === "worker" || app.type === "static"));
   const workspace = health?.health?.workspace || "local workspace";
   const stoppedCount = Math.max(0, apps.length - runningCount);
 
@@ -385,10 +489,11 @@ export default function DashboardClient() {
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
                   <MetricPill label="running" value={`${runningCount}/${apps.length}`} accent />
+                  <MetricPill label="services" value={String(serviceResources.length)} />
                   <MetricPill label="stopped" value={String(stoppedCount)} />
                   <MetricPill label="disabled" value={String(disabledCount)} />
                   <PillButton onClick={openCreateForm} strong disabled={!connected}>
-                    Add app
+                    Add resource
                   </PillButton>
                 </div>
               </div>
@@ -415,19 +520,37 @@ export default function DashboardClient() {
                 ) : apps.length === 0 ? (
                   <EmptyState connected={connected} onAdd={openCreateForm} />
                 ) : (
-                  apps.map((app) => (
-                    <AppRow
-                      key={app.id}
-                      app={app}
-                      active={selectedAppId === app.id}
-                      connected={connected}
-                      currentAction={actionByAppId[app.id]}
-                      onSelect={() => setSelectedAppId(app.id)}
-                      onLogs={() => void loadLogs(app)}
-                      onEdit={() => openEditForm(app)}
-                      onAction={(action) => void runAction(app, action)}
-                    />
-                  ))
+                  <>
+                    <ResourceSection title="Apps" count={appResources.length} />
+                    {appResources.map((app) => (
+                      <AppRow
+                        key={app.id}
+                        app={app}
+                        active={selectedAppId === app.id}
+                        connected={connected}
+                        currentAction={actionByAppId[app.id]}
+                        onSelect={() => setSelectedAppId(app.id)}
+                        onLogs={() => void loadLogs(app)}
+                        onEdit={() => openEditForm(app)}
+                        onAction={(action) => void runAction(app, action)}
+                      />
+                    ))}
+                    <ResourceSection title="Services & databases" count={serviceResources.length} />
+                    {serviceResources.length === 0 ? <ServiceEmpty /> : null}
+                    {serviceResources.map((app) => (
+                      <AppRow
+                        key={app.id}
+                        app={app}
+                        active={selectedAppId === app.id}
+                        connected={connected}
+                        currentAction={actionByAppId[app.id]}
+                        onSelect={() => setSelectedAppId(app.id)}
+                        onLogs={() => void loadLogs(app)}
+                        onEdit={() => openEditForm(app)}
+                        onAction={(action) => void runAction(app, action)}
+                      />
+                    ))}
+                  </>
                 )}
               </div>
             </section>
@@ -555,6 +678,7 @@ function AppRow({
   const running = app.status === "running" || app.status === "starting";
   const localUrl = appUrl(app);
   const disabledReason = !app.enabled ? "Disabled" : !connected ? "Offline" : null;
+  const primaryMeta = app.driver === "compose" ? app.image || app.composeService || "compose service" : app.command || app.dev || "no command";
 
   return (
     <article className={`grid gap-3 border-b border-white/5 px-3 py-3 transition hover:bg-white/[0.035] sm:px-4 xl:grid-cols-[minmax(210px,1fr)_100px_68px_minmax(150px,0.85fr)] xl:items-center ${active ? "bg-white/[0.055] shadow-[3px_0_0_0_var(--accent)_inset]" : ""}`}>
@@ -569,6 +693,7 @@ function AppRow({
               {disabledReason ? <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{disabledReason}</span> : null}
             </span>
             <span className="block truncate font-mono text-[11px] text-muted">{shortPath(app.path)}</span>
+            <span className="mt-1 inline-flex rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{resourceLabel(app)}</span>
           </span>
         </div>
       </button>
@@ -577,7 +702,7 @@ function AppRow({
         <span className="font-mono text-xs text-muted xl:hidden">{app.port ? `:${app.port}` : "no port"}</span>
       </div>
       <div className="hidden font-mono text-xs text-muted xl:block">{app.port ? `:${app.port}` : "no port"}</div>
-      <div className="min-w-0 truncate rounded-full bg-black/20 px-3 py-1.5 font-mono text-xs text-muted xl:bg-transparent xl:px-0 xl:py-0">{app.command || "no command"}</div>
+      <div className="min-w-0 truncate rounded-full bg-black/20 px-3 py-1.5 font-mono text-xs text-muted xl:bg-transparent xl:px-0 xl:py-0">{primaryMeta}</div>
       <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end xl:col-span-4 xl:flex-nowrap">
         <RoundAction label="Start" onClick={() => onAction("start")} disabled={busy || !connected || !app.enabled || running} active={currentAction === "start"} />
         <RoundAction label="Stop" onClick={() => onAction("stop")} disabled={busy || !connected || !running} active={currentAction === "stop"} />
@@ -630,6 +755,7 @@ function DetailPanel({
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Inspector</p>
             <h2 className="truncate text-xl font-bold">{app.name}</h2>
+            <p className="mt-1 text-xs font-bold uppercase tracking-[0.12em] text-muted">{resourceLabel(app)}</p>
           </div>
           <StatusBadge status={app.status} />
         </div>
@@ -648,10 +774,20 @@ function DetailPanel({
         <Meta label="Preset" value={app.preset} />
         <Meta label="Port" value={app.port ? String(app.port) : "-"} mono />
         <Meta label="Enabled" value={app.enabled ? "yes" : "no"} />
+        <Meta label="Internal" value={app.internal ? "yes" : "no"} />
         <Meta label="Updated" value={timeAgo(app.updatedAt)} />
         <Meta label="Path" value={app.path || "-"} mono wide />
-        <Meta label="Command" value={app.command || "-"} mono wide />
+        <Meta label="Install" value={app.install || "-"} mono wide />
+        <Meta label="Dev" value={app.dev || app.command || "-"} mono wide />
+        <Meta label="Build" value={app.build || "-"} mono wide />
+        <Meta label="Start" value={app.start || "-"} mono wide />
+        <Meta label="Image" value={app.image || "-"} mono wide />
+        <Meta label="Compose" value={[app.composeFile, app.composeService].filter(Boolean).join(" / ") || "generated"} mono wide />
         <Meta label="Depends on" value={(app.dependsOn || []).join(", ") || "-"} wide />
+        <Meta label="Healthcheck" value={app.healthcheck?.path ? `${app.healthcheck.path} -> ${app.healthcheck.expected_status || 200}` : "-"} wide />
+        <Meta label="Domains" value={(app.domains || []).join(", ") || "-"} wide />
+        <Meta label="Volumes" value={(app.volumes || []).join(", ") || "-"} mono wide />
+        <Meta label="Env" value={Object.keys(app.env || {}).length > 0 ? Object.keys(app.env || {}).join(", ") : "-"} mono wide />
       </dl>
 
       <div className="border-t border-white/5">
@@ -696,7 +832,7 @@ function AppForm({
     <form onSubmit={onSubmit} className="border-b border-white/5 bg-black/25 px-4 py-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{mode === "create" ? "Add local app" : "Edit local app"}</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{mode === "create" ? "Add local resource" : "Edit local resource"}</p>
           <h2 className="text-base font-bold">Registry definition</h2>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex">
@@ -710,12 +846,26 @@ function AppForm({
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Field label="Name" value={form.name} onChange={(value) => update({ name: value })} required error={nameMissing && error ? "Required" : undefined} disabled={saving} />
         <SelectField label="Type" value={form.type} values={APP_TYPES} onChange={(value) => update({ type: value })} disabled={saving} />
-        <Field label="Preset" value={form.preset} onChange={(value) => update({ preset: value })} disabled={saving} placeholder="custom" />
+        <SelectField label="Preset" value={form.preset} values={APP_PRESETS} onChange={(value) => update({ preset: value })} disabled={saving} />
         <SelectField label="Driver" value={form.driver} values={APP_DRIVERS} onChange={(value) => update({ driver: value })} disabled={saving} />
         <Field label="Path" value={form.path} onChange={(value) => update({ path: value })} mono wide disabled={saving} placeholder="/path/to/app" />
-        <Field label="Command" value={form.command} onChange={(value) => update({ command: value })} mono wide disabled={saving} placeholder="npm run dev" />
+        <Field label="Command" value={form.command} onChange={(value) => update({ command: value, dev: value || form.dev })} mono wide disabled={saving} placeholder="npm run dev" />
+        <Field label="Install" value={form.install} onChange={(value) => update({ install: value })} mono disabled={saving} placeholder="npm install" />
+        <Field label="Dev" value={form.dev} onChange={(value) => update({ dev: value, command: form.command || value })} mono disabled={saving} placeholder="npm run dev" />
+        <Field label="Build" value={form.build} onChange={(value) => update({ build: value })} mono disabled={saving} placeholder="npm run build" />
+        <Field label="Start" value={form.start} onChange={(value) => update({ start: value })} mono disabled={saving} placeholder="npm run start" />
         <Field label="Port" value={form.port} onChange={(value) => update({ port: value })} type="number" error={portInvalid ? "Positive integer" : undefined} disabled={saving} placeholder="3000" />
         <Field label="Depends on" value={form.dependsOn} onChange={(value) => update({ dependsOn: value })} disabled={saving} placeholder="api, postgres" />
+        <Field label="Image" value={form.image} onChange={(value) => update({ image: value })} mono disabled={saving} placeholder="postgres:16" />
+        <Field label="Compose service" value={form.composeService} onChange={(value) => update({ composeService: value })} mono disabled={saving} placeholder="postgres" />
+        <Field label="Compose file" value={form.composeFile} onChange={(value) => update({ composeFile: value })} mono wide disabled={saving} placeholder="generated if empty" />
+        <Field label="Health path" value={form.healthcheckPath} onChange={(value) => update({ healthcheckPath: value })} disabled={saving} placeholder="/" />
+        <Field label="Health status" value={form.healthcheckStatus} onChange={(value) => update({ healthcheckStatus: value })} type="number" disabled={saving} placeholder="200" />
+        <Field label="Domains" value={form.domains} onChange={(value) => update({ domains: value })} disabled={saving} placeholder="local.test" />
+        <Field label="Source repo" value={form.sourceRepo} onChange={(value) => update({ sourceRepo: value })} disabled={saving} placeholder="owner/repo" />
+        <Field label="Source branch" value={form.sourceBranch} onChange={(value) => update({ sourceBranch: value })} disabled={saving} placeholder="main" />
+        <TextAreaField label="Env" value={form.env} onChange={(value) => update({ env: value })} mono disabled={saving} placeholder={"NODE_ENV=development"} />
+        <TextAreaField label="Volumes" value={form.volumes} onChange={(value) => update({ volumes: value })} mono disabled={saving} placeholder={"postgres_data:/var/lib/postgresql/data"} />
         <label className={`flex items-center justify-between rounded-md bg-surface-raised px-3 py-2 ${INSET_RING} ${saving ? "opacity-60" : ""}`}>
           <span>
             <span className="block text-xs font-bold">Enabled</span>
@@ -723,8 +873,31 @@ function AppForm({
           </span>
           <input checked={form.enabled} onChange={(event) => update({ enabled: event.target.checked })} disabled={saving} type="checkbox" className="h-4 w-4 accent-[var(--accent)]" />
         </label>
+        <label className={`flex items-center justify-between rounded-md bg-surface-raised px-3 py-2 ${INSET_RING} ${saving ? "opacity-60" : ""}`}>
+          <span>
+            <span className="block text-xs font-bold">Internal service</span>
+            <span className="text-[11px] text-muted">Do not expose host port in generated Compose</span>
+          </span>
+          <input checked={form.internal} onChange={(event) => update({ internal: event.target.checked })} disabled={saving} type="checkbox" className="h-4 w-4 accent-[var(--accent)]" />
+        </label>
       </div>
     </form>
+  );
+}
+
+function TextAreaField({ disabled, label, mono, onChange, placeholder, value }: { disabled?: boolean; label: string; mono?: boolean; onChange: (value: string) => void; placeholder?: string; value: string }) {
+  return (
+    <label className="md:col-span-2">
+      <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">{label}</span>
+      <textarea
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        disabled={disabled}
+        placeholder={placeholder}
+        rows={3}
+        className={`w-full resize-y rounded-xl bg-surface-raised px-3 py-2 text-sm text-foreground outline-none ${INSET_RING} transition focus:shadow-[rgb(18,18,18)_0px_1px_0px,rgb(30,215,96)_0px_0px_0px_1px_inset] disabled:opacity-55 ${mono ? "font-mono text-xs" : ""}`}
+      />
+    </label>
   );
 }
 
@@ -852,6 +1025,23 @@ function MetricPill({ accent, label, value }: { accent?: boolean; label: string;
     <div className={`rounded-full bg-surface-raised px-3 py-1.5 text-xs ${INSET_RING}`}>
       <span className={accent ? "font-bold text-accent" : "font-bold text-foreground"}>{value}</span>
       <span className="ml-1 text-muted">{label}</span>
+    </div>
+  );
+}
+
+function ResourceSection({ count, title }: { count: number; title: string }) {
+  return (
+    <div className="flex items-center justify-between border-b border-white/5 bg-black/20 px-4 py-2">
+      <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{title}</p>
+      <span className="rounded-full bg-surface-raised px-2 py-0.5 text-[10px] font-bold text-muted">{count}</span>
+    </div>
+  );
+}
+
+function ServiceEmpty() {
+  return (
+    <div className="border-b border-white/5 px-4 py-4 text-sm text-muted">
+      No local services registered.
     </div>
   );
 }

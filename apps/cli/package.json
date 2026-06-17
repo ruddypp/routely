@@ -13,12 +13,13 @@
     "dev": "tsx src/index.ts",
     "build": "tsc -p tsconfig.json && node scripts/write-dev-root.js",
     "start": "node dist/index.js",
-    "test": "vitest run src/paths.test.ts src/ports.test.ts src/dependencies.test.ts src/runtime.test.ts"
+    "test": "vitest run src/paths.test.ts src/ports.test.ts src/dependencies.test.ts src/runtime.test.ts src/checkpoint3.test.ts"
   },
   "dependencies": {
     "@routely/core": "^0.1.0",
     "@routely/db": "^0.1.0",
-    "@routely/drivers": "^0.1.0"
+    "@routely/drivers": "^0.1.0",
+    "@routely/presets": "^0.1.0"
   },
   "devDependencies": {
     "@types/node": "^20.19.25",

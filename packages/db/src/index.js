@@ -51,8 +51,21 @@ export function migrate(db) {
       driver TEXT NOT NULL DEFAULT 'command',
       path TEXT,
       command TEXT,
+      install TEXT,
+      dev TEXT,
+      build TEXT,
+      start TEXT,
+      env TEXT NOT NULL DEFAULT '{}',
       port INTEGER,
       depends_on TEXT NOT NULL DEFAULT '[]',
+      healthcheck TEXT,
+      domains TEXT NOT NULL DEFAULT '[]',
+      source TEXT,
+      image TEXT,
+      internal INTEGER NOT NULL DEFAULT 0,
+      volumes TEXT NOT NULL DEFAULT '[]',
+      compose_file TEXT,
+      compose_service TEXT,
       enabled INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'stopped',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -79,6 +92,19 @@ export function migrate(db) {
 
   addColumnIfMissing(db, "apps", "server_id", "INTEGER");
   addColumnIfMissing(db, "apps", "depends_on", "TEXT NOT NULL DEFAULT '[]'");
+  addColumnIfMissing(db, "apps", "install", "TEXT");
+  addColumnIfMissing(db, "apps", "dev", "TEXT");
+  addColumnIfMissing(db, "apps", "build", "TEXT");
+  addColumnIfMissing(db, "apps", "start", "TEXT");
+  addColumnIfMissing(db, "apps", "env", "TEXT NOT NULL DEFAULT '{}'");
+  addColumnIfMissing(db, "apps", "healthcheck", "TEXT");
+  addColumnIfMissing(db, "apps", "domains", "TEXT NOT NULL DEFAULT '[]'");
+  addColumnIfMissing(db, "apps", "source", "TEXT");
+  addColumnIfMissing(db, "apps", "image", "TEXT");
+  addColumnIfMissing(db, "apps", "internal", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "apps", "volumes", "TEXT NOT NULL DEFAULT '[]'");
+  addColumnIfMissing(db, "apps", "compose_file", "TEXT");
+  addColumnIfMissing(db, "apps", "compose_service", "TEXT");
 
   db.prepare(`
     INSERT OR IGNORE INTO servers (id, name, kind, status)
@@ -169,11 +195,21 @@ function defaultIsPidAlive(pid) {
 function parseAppRecord(row) {
   return {
     ...row,
-    depends_on: parseDependsOn(row.depends_on)
+    env: parseJsonObject(row.env),
+    depends_on: parseJsonArray(row.depends_on),
+    healthcheck: parseJsonObject(row.healthcheck) || null,
+    domains: parseJsonArray(row.domains),
+    source: parseJsonObject(row.source) || null,
+    internal: Boolean(row.internal),
+    volumes: parseJsonArray(row.volumes)
   };
 }
 
 function parseDependsOn(value) {
+  return parseJsonArray(value);
+}
+
+function parseJsonArray(value) {
   if (Array.isArray(value)) {
     return value;
   }
@@ -190,8 +226,33 @@ function parseDependsOn(value) {
   }
 }
 
+function parseJsonObject(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+
+  if (!value) {
+    return {};
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
 function serializeDependsOn(value) {
   return JSON.stringify(Array.isArray(value) ? value : []);
+}
+
+function serializeJsonArray(value) {
+  return JSON.stringify(Array.isArray(value) ? value : []);
+}
+
+function serializeJsonObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? JSON.stringify(value) : null;
 }
 
 export function upsertApp(db, input) {
@@ -201,7 +262,7 @@ export function upsertApp(db, input) {
   if (existing) {
     db.prepare(`
       UPDATE apps
-      SET server_id = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, port = ?, depends_on = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+      SET server_id = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, install = ?, dev = ?, build = ?, start = ?, env = ?, port = ?, depends_on = ?, healthcheck = ?, domains = ?, source = ?, image = ?, internal = ?, volumes = ?, compose_file = ?, compose_service = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE name = ?
     `).run(
       app.server_id,
@@ -210,16 +271,29 @@ export function upsertApp(db, input) {
       app.driver,
       app.path,
       app.command,
+      app.install,
+      app.dev,
+      app.build,
+      app.start,
+      serializeJsonObject(app.env) || "{}",
       app.port,
       serializeDependsOn(app.depends_on),
+      serializeJsonObject(app.healthcheck),
+      serializeJsonArray(app.domains),
+      serializeJsonObject(app.source),
+      app.image,
+      app.internal ? 1 : 0,
+      serializeJsonArray(app.volumes),
+      app.compose_file,
+      app.compose_service,
       app.enabled ? 1 : 0,
       app.status,
       app.name
     );
   } else {
     db.prepare(`
-      INSERT INTO apps (server_id, name, type, preset, driver, path, command, port, depends_on, enabled, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO apps (server_id, name, type, preset, driver, path, command, install, dev, build, start, env, port, depends_on, healthcheck, domains, source, image, internal, volumes, compose_file, compose_service, enabled, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       app.server_id,
       app.name,
@@ -228,8 +302,21 @@ export function upsertApp(db, input) {
       app.driver,
       app.path,
       app.command,
+      app.install,
+      app.dev,
+      app.build,
+      app.start,
+      serializeJsonObject(app.env) || "{}",
       app.port,
       serializeDependsOn(app.depends_on),
+      serializeJsonObject(app.healthcheck),
+      serializeJsonArray(app.domains),
+      serializeJsonObject(app.source),
+      app.image,
+      app.internal ? 1 : 0,
+      serializeJsonArray(app.volumes),
+      app.compose_file,
+      app.compose_service,
       app.enabled ? 1 : 0,
       app.status
     );
@@ -255,7 +342,7 @@ export function updateApp(db, appId, input) {
 
   db.prepare(`
     UPDATE apps
-    SET server_id = ?, name = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, port = ?, depends_on = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+    SET server_id = ?, name = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, install = ?, dev = ?, build = ?, start = ?, env = ?, port = ?, depends_on = ?, healthcheck = ?, domains = ?, source = ?, image = ?, internal = ?, volumes = ?, compose_file = ?, compose_service = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
     app.server_id,
@@ -265,8 +352,21 @@ export function updateApp(db, appId, input) {
     app.driver,
     app.path,
     app.command,
+    app.install,
+    app.dev,
+    app.build,
+    app.start,
+    serializeJsonObject(app.env) || "{}",
     app.port,
     serializeDependsOn(app.depends_on),
+    serializeJsonObject(app.healthcheck),
+    serializeJsonArray(app.domains),
+    serializeJsonObject(app.source),
+    app.image,
+    app.internal ? 1 : 0,
+    serializeJsonArray(app.volumes),
+    app.compose_file,
+    app.compose_service,
     app.enabled ? 1 : 0,
     app.status,
     appId

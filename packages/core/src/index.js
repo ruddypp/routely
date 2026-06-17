@@ -7,6 +7,8 @@ export const APP_TYPES = ["app", "database", "compose", "static", "worker"];
 export const APP_DRIVERS = ["command", "compose", "dockerfile", "buildpack", "static"];
 export const APP_STATUSES = ["stopped", "running", "starting", "crashed", "unknown"];
 
+const SECRET_ENV_PATTERN = /(SECRET|TOKEN|PASSWORD|PRIVATE|KEY)/i;
+
 function enumValue(value, allowed, fallback, label) {
   const normalized = value || fallback;
 
@@ -46,12 +48,86 @@ export function normalizeAppInput(input) {
     preset: input.preset || "custom",
     driver: enumValue(input.driver, APP_DRIVERS, "command", "app driver"),
     path: input.path || null,
-    command: input.command || input.dev || null,
+    command: input.command || input.dev || input.start || null,
+    install: stringOrNull(input.install),
+    dev: stringOrNull(input.dev || input.command),
+    build: stringOrNull(input.build),
+    start: stringOrNull(input.start),
+    env: normalizeStringMap(input.env),
     port: input.port == null || input.port === "" ? null : Number(input.port),
     depends_on: normalizeDependsOn(input.depends_on),
+    healthcheck: normalizeHealthcheck(input.healthcheck),
+    domains: normalizeStringArray(input.domains),
+    source: normalizeSource(input.source),
+    image: stringOrNull(input.image),
+    internal: input.internal == null ? false : Boolean(input.internal),
+    volumes: normalizeStringArray(input.volumes),
+    compose_file: stringOrNull(input.compose_file || input.composeFile),
+    compose_service: stringOrNull(input.compose_service || input.composeService),
     enabled: input.enabled == null ? true : Boolean(input.enabled),
     status: input.status || "stopped"
   };
+}
+
+function stringOrNull(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+
+  return String(value);
+}
+
+function normalizeStringMap(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => String(key).trim())
+      .map(([key, mapValue]) => [String(key).trim(), mapValue == null ? "" : String(mapValue)])
+  );
+}
+
+function normalizeHealthcheck(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  const normalized = {
+    path: stringOrNull(value.path),
+    expected_status:
+      value.expected_status == null || value.expected_status === "" ? null : Number(value.expected_status)
+  };
+
+  return normalized.path || normalized.expected_status ? normalized : null;
+}
+
+function normalizeSource(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return null;
+  }
+
+  return {
+    type: stringOrNull(value.type),
+    repo: stringOrNull(value.repo),
+    branch: stringOrNull(value.branch)
+  };
+}
+
+function normalizeStringArray(value) {
+  if (value == null || value === "") {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  return String(value)
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 }
 
 function normalizeDependsOn(value) {
@@ -76,8 +152,21 @@ export function appToPublicDto(app) {
     driver: app.driver,
     path: app.path,
     command: app.command,
+    install: app.install,
+    dev: app.dev,
+    build: app.build,
+    start: app.start,
+    env: app.env || {},
     port: app.port,
     dependsOn: Array.isArray(app.depends_on) ? app.depends_on : [],
+    healthcheck: app.healthcheck || null,
+    domains: app.domains || [],
+    source: app.source || null,
+    image: app.image || null,
+    internal: Boolean(app.internal),
+    volumes: app.volumes || [],
+    composeFile: app.compose_file || null,
+    composeService: app.compose_service || null,
     enabled: Boolean(app.enabled),
     status: app.status,
     createdAt: app.created_at,
@@ -85,8 +174,57 @@ export function appToPublicDto(app) {
   };
 }
 
+export function appToConfigEntry(input) {
+  const app = normalizeAppInput(input);
+  const entry = {
+    name: app.name,
+    type: app.type,
+    preset: app.preset,
+    driver: app.driver
+  };
+
+  setIfPresent(entry, "path", app.path);
+  setIfPresent(entry, "install", app.install);
+  setIfPresent(entry, "dev", app.dev);
+  setIfPresent(entry, "build", app.build);
+  setIfPresent(entry, "start", app.start);
+  setIfPresent(entry, "command", app.command && app.command !== app.dev ? app.command : null);
+  setIfPresent(entry, "port", app.port);
+  if (Object.keys(app.env).length > 0) {
+    entry.env = filterExportableEnv(app.env);
+  }
+  if (app.depends_on.length > 0) entry.depends_on = app.depends_on;
+  setIfPresent(entry, "healthcheck", app.healthcheck);
+  if (app.domains.length > 0) entry.domains = app.domains;
+  setIfPresent(entry, "source", app.source);
+  setIfPresent(entry, "image", app.image);
+  if (app.internal) entry.internal = true;
+  if (app.volumes.length > 0) entry.volumes = app.volumes;
+  setIfPresent(entry, "compose_file", app.compose_file);
+  setIfPresent(entry, "compose_service", app.compose_service);
+  if (!app.enabled) entry.enabled = false;
+
+  return entry;
+}
+
+function setIfPresent(target, key, value) {
+  if (value == null || value === "" || (Array.isArray(value) && value.length === 0)) {
+    return;
+  }
+
+  target[key] = value;
+}
+
+export function filterExportableEnv(env = {}) {
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => !SECRET_ENV_PATTERN.test(key))
+  );
+}
+
 export {
   WORKSPACE_CONFIG_FILENAMES,
   resolveWorkspaceConfigPath,
-  loadWorkspaceConfig
+  loadWorkspaceConfig,
+  readRawWorkspaceConfig,
+  upsertWorkspaceConfigEntry
 } from "./config.js";
