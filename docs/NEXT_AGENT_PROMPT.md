@@ -21,9 +21,18 @@ Before planning implementation, also read the current public reference products 
 
 Do not clone either product mechanically. Use them to understand product feel and operational shape.
 
+You must read enough of those repositories/docs to understand the product model before planning. Routely is inspired by:
+- 9Router's local-first command/control workflow, one-command local runner, local app registry, and quick dashboard status loop.
+- Dokploy's dense single-VPS production operations: app pages, deployments, domains, HTTPS/proxy, logs, metrics, databases, backups, readable inspectors, and safe daily controls.
+- Routely's own identity: bridge local development and single-VPS production through the same app registry and dashboard mental model.
+
 Product/design execution rule:
 - Do not make this a frontend-only redesign. Make real backend/storage/API/CLI progress first, with tests.
 - After the backend slice exists, enhance the production dashboard so it remains dense, readable, status-rich, tabbed, safe, and backed by real daemon/API/storage data.
+- Make the frontend more Dokploy-like in information architecture and usability: dense operational panels, readable rows, clear status cards, inspector tabs, and safe actions.
+- Do not keep filling the dashboard home with every feature. The dashboard home should be overview only: fleet status, server readiness, recent deploys, health failures, backup status, and urgent next actions.
+- Put feature-by-feature workflows in the sidebar/navigation: Apps, Deployments, Domains, GitHub, Env, Logs, Health, Metrics, Databases, Backups, Settings. Build or enhance those pages/panels only when backed by real backend/API/storage data.
+- Keep future or unsafe features inert and labeled as later checkpoint work.
 - Preserve DESIGN.md: dark functional surfaces, compact typography, restrained green accent, rounded controls, and no generic SaaS landing page.
 
 Current progress:
@@ -47,7 +56,8 @@ Implement Checkpoint 10 from docs/14-implementation-plan.md comprehensively: Dat
 Execution bar:
 - Backend first: schema/DB helpers for production database and backup state, daemon endpoints, auth enforcement, safe command/runtime behavior, secret redaction, and tests.
 - CLI/API where useful: add database/backup workflows only if backed by real daemon/storage data.
-- Frontend after backend exists: add database/backup sections to the production dashboard only around real data. Future/unsafe actions must be inert and labeled as later scope.
+- Frontend after backend exists: add database/backup surfaces around real data, preferably as sidebar feature pages/panels rather than more content crammed into the dashboard overview. Future/unsafe actions must be inert and labeled as later scope.
+- Improve the existing frontend structure while implementing the backend slice: make daily operations more readable and comfortable, with less dashboard clutter and clearer sidebar hierarchy.
 - Keep database services and backups narrow. Do not build broad VPS management.
 - Do not implement notifications, full rollback, marketplace templates, destructive restore automation, or broad VPS operations during Checkpoint 10.
 - Preserve manual Dockerfile deploy, domain/proxy/HTTPS, GitHub webhook behavior, stored env injection, health/metrics/log state, restart/redeploy-needed state, and same-origin Next.js API proxy behavior.

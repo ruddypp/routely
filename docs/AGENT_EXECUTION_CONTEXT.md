@@ -23,6 +23,14 @@ Before major production/dashboard/backend work, read:
 - `https://docs.dokploy.com/`
 - `https://docs.dokploy.com/docs/core/applications/going-production`
 
+Future agents must treat those references as required product context, not optional inspiration. Read the repositories and docs enough to understand:
+
+- 9Router's local-first command/control flow, local registry mental model, fast status visibility, and one-command daily workflow.
+- Dokploy's dense single-VPS operations model: app/project pages, deployments, domains, HTTPS/proxy, logs, metrics, databases, backups, settings, readable status panels, and safe operational controls.
+- Routely's differentiator: one app registry and one dashboard mental model that bridge local development and single-VPS production.
+
+Do not copy either product mechanically. Use them to calibrate product shape, information architecture, and operational density.
+
 ## Current Progress
 
 Implemented checkpoints:
@@ -72,6 +80,15 @@ Do not do a frontend-only redesign. For every checkpoint:
 5. Every visible production/env/deploy/domain/proxy/GitHub/log/health/metrics/database/backup panel should be backed by real data where practical. If a feature is future scope, keep it disabled and label it as a later checkpoint.
 6. Preserve Routely's local-first identity and the same app registry/dashboard mental model.
 
+Frontend/information architecture direction for upcoming work:
+
+- The dashboard home should become an overview only: server status, app counts, recent deploy/health/backup status, urgent failures, and next actions.
+- Do not keep expanding the main dashboard into a single overloaded page.
+- Put feature-by-feature operational surfaces in the sidebar/navigation: Apps, Deployments, Domains, GitHub, Env, Logs, Health, Metrics, Databases, Backups, Settings.
+- Each feature page/panel should be dense, readable, comfortable, and Dokploy-like: compact rows, clear hierarchy, status badges, safe actions, inspector tabs, and no horizontal overflow.
+- Frontend enhancement is required, but only after backend/API/storage behavior exists. Do not ship mock-only panels as if they are implemented.
+- If a feature is not implemented yet, show it as disabled or future-checkpoint scope instead of making unsafe controls.
+
 Next task:
 
 Implement Checkpoint 10 from `docs/14-implementation-plan.md`: Database Services and Backups.
@@ -80,6 +97,7 @@ Checkpoint 10 should be conservative:
 
 - Build production database service records/templates only when backed by real daemon/storage/runtime behavior.
 - Add backup job/run persistence and a safe manual backup path.
+- Add sidebar/navigation structure for Databases and Backups when real data exists, while keeping the dashboard home as a high-level overview.
 - Keep restore/destructive operations explicit and deferred unless the plan requires a narrow inert placeholder.
 - Do not implement notifications, full rollback, marketplace templates, broad VPS operations, or unsafe restore automation.
 - Reuse secret redaction and never leak database credentials in logs/API/UI.

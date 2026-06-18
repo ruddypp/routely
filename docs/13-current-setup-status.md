@@ -45,6 +45,7 @@ Product references for future work:
 - Future implementation agents should read `https://github.com/decolua/9router`, `https://github.com/Dokploy/dokploy`, and `https://docs.dokploy.com/` before major product/backend/frontend changes.
 - Frontend improvements should make the production panel more Dokploy-like: readable, operational, dense, status-rich, comfortable for daily VPS operations, and responsive.
 - Frontend work must not be frontend-only. New panels and controls should be backed by daemon/API/storage data where practical, with backend/schema/API/CLI/tests/docs progress leading each checkpoint.
+- Future frontend structure should keep the dashboard home as an overview only. Feature-specific workflows belong in the sidebar/navigation: Apps, Deployments, Domains, GitHub, Env, Logs, Health, Metrics, Databases, Backups, and Settings. Enhance the frontend to feel closer to Dokploy only after the relevant backend/API/storage behavior exists.
 
 - Next.js dashboard/API scaffold exists in `apps/web`.
 - CLI package exists in `apps/cli`.

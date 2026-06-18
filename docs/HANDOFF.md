@@ -23,7 +23,16 @@ Reference products future agents should inspect before major product/backend/fro
 - Dokploy docs: `https://docs.dokploy.com/`
 - Dokploy Going Production guide: `https://docs.dokploy.com/docs/core/applications/going-production`
 
-Use these as product references, not templates to clone. 9Router should inform the local-first one-command runner and fast dashboard control loop. Dokploy should inform the VPS production surface: dense panels, deployment history, domains, HTTPS/proxy, logs, resource status, readable inspector panels, and safe operational controls. Routely's product identity remains the bridge between local development and single-server production using one registry and one dashboard mental model.
+Use these as product references, not templates to clone. 9Router should inform the local-first one-command runner and fast dashboard control loop. Dokploy should inform the VPS production surface: dense app pages, deployment history, domains, HTTPS/proxy, logs, metrics, databases, backups, resource status, readable inspector panels, and safe operational controls. Routely's product identity remains the bridge between local development and single-server production using one registry and one dashboard mental model.
+
+Future product/frontend architecture direction:
+
+- The dashboard home should be an overview only: server readiness, fleet/app counts, recent deployments, health failures, backup status, and urgent next actions.
+- Do not keep adding every feature panel to the dashboard home until it becomes a long mixed page.
+- Put feature-by-feature workflows in the sidebar/navigation: Apps, Deployments, Domains, GitHub, Env, Logs, Health, Metrics, Databases, Backups, Settings.
+- Every feature page/panel should be backed by real daemon/API/storage data where practical.
+- Frontend should become more Dokploy-like: dense, readable, status-rich, clear hierarchy, comfortable for daily operations, inspector tabs, safe disabled states, and no horizontal overflow.
+- This must not become frontend-only work. Backend/schema/API/CLI/tests/docs progress must lead each implementation checkpoint.
 
 ## Read First
 
@@ -47,6 +56,7 @@ Execution standard for future checkpoints:
 - Do not deliver frontend-only redesigns for implementation checkpoints.
 - Make real backend/storage/API/CLI progress first, with focused tests.
 - Then improve the frontend around the new real data so the production panel becomes more Dokploy-like: dense, readable, status-rich, easy to operate daily, and comfortable for VPS work.
+- Keep dashboard home as overview. Move feature-specific workflows into sidebar sections/pages/panels instead of stuffing them all into the dashboard.
 - Keep the app identity clear: Routely is inspired by 9Router's local command/control loop and Dokploy's single-VPS production operations, but it should remain a bridge between local development and production using one app registry and dashboard mental model.
 - Any visible future feature must be inert and clearly labeled as a later checkpoint.
 
@@ -458,6 +468,7 @@ Do not use older embedded checkpoint prompts from previous handoffs. Checkpoint 
 - [ ] Inspect CLI, daemon, core config, DB, drivers, proxy package, presets, and current dashboard/API implementation.
 - [ ] Implement Checkpoint 10 as a comprehensive backend/CLI/API/frontend slice, not a frontend-only redesign.
 - [ ] Reuse existing app/deploy/domain/GitHub/env/logs/health/metrics metadata and avoid leaking secret values in config, logs, backups, or UI.
+- [ ] Keep dashboard home as overview and put feature workflows in sidebar navigation; make frontend more Dokploy-like only after real backend/API/storage behavior exists.
 - [ ] Keep notifications, full rollback, destructive restore operations, and broad VPS operations deferred unless explicitly in scope.
 - [ ] Add/adjust focused tests for changed backend/domain/proxy/API/CLI behavior.
 - [ ] Run lint, touched workspace tests/builds, web TypeScript when web is touched, and browser smoke/responsive checks when frontend UI is changed.
