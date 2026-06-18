@@ -7,6 +7,8 @@ export const APP_TYPES = ["app", "database", "compose", "static", "worker"];
 export const APP_DRIVERS = ["command", "compose", "dockerfile", "buildpack", "static"];
 export const APP_STATUSES = ["stopped", "running", "starting", "crashed", "unknown"];
 export const DEPLOYMENT_STATUSES = ["queued", "preparing", "building", "starting", "healthchecking", "succeeded", "failed"];
+export const DATABASE_TYPES = ["postgres", "mysql", "mariadb", "redis", "mongodb"];
+export const BACKUP_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "pruned"];
 
 const SECRET_ENV_PATTERN = /(SECRET|TOKEN|PASSWORD|PRIVATE|KEY)/i;
 const REDACTED_VALUE = "[redacted]";
@@ -259,6 +261,145 @@ export function metricSampleToPublicDto(row) {
     message: row.message || null,
     sampledAt: row.sampled_at
   };
+}
+
+export function databaseToPublicDto(row) {
+  const env = row.env && typeof row.env === "object" ? row.env : {};
+  return {
+    id: row.id,
+    appId: row.app_id,
+    appName: row.app_name || null,
+    name: row.name,
+    type: row.type,
+    status: row.status || "stopped",
+    internal: Boolean(row.internal),
+    image: row.image || null,
+    port: row.port == null ? null : Number(row.port),
+    composeService: row.compose_service || null,
+    composeFile: row.compose_file || null,
+    volumeName: row.volume_name || null,
+    envKeys: Object.keys(env).sort(),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export function backupJobToPublicDto(row) {
+  return {
+    id: row.id,
+    databaseId: row.database_id,
+    databaseName: row.database_name || null,
+    databaseType: row.database_type || null,
+    enabled: Boolean(row.enabled),
+    schedule: row.schedule || null,
+    retentionDays: Number(row.retention_days || 7),
+    localDir: row.local_dir || null,
+    lastRunStatus: row.last_run_status || null,
+    lastRunAt: row.last_run_at || null,
+    lastRunMessage: row.last_run_message || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export function backupRunToPublicDto(row) {
+  return {
+    id: row.id,
+    backupJobId: row.backup_job_id,
+    databaseId: row.database_id,
+    databaseName: row.database_name || null,
+    databaseType: row.database_type || null,
+    status: row.status,
+    trigger: row.trigger || "manual",
+    filePath: row.file_path || null,
+    sizeBytes: row.size_bytes == null ? null : Number(row.size_bytes),
+    message: row.message || null,
+    startedAt: row.started_at || null,
+    finishedAt: row.finished_at || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export function normalizeDatabaseType(type) {
+  const normalized = String(type || "").trim().toLowerCase();
+  if (!DATABASE_TYPES.includes(normalized)) {
+    throw new Error(`Unsupported database type: ${normalized || "missing"}.`);
+  }
+  return normalized;
+}
+
+export function normalizeBackupSchedule(schedule) {
+  const value = String(schedule || "").trim();
+  if (!value) return null;
+  if (value === "@hourly" || value === "@daily") return value;
+  const parts = value.split(/\s+/);
+  if (parts.length !== 5) {
+    throw new Error("Backup schedule must be @hourly, @daily, or a five-field cron expression.");
+  }
+  const ranges = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]];
+  parts.forEach((part, index) => validateCronField(part, ranges[index][0], ranges[index][1]));
+  return parts.join(" ");
+}
+
+function validateCronField(value, min, max) {
+  for (const item of String(value).split(",")) {
+    const atom = item.includes("/") ? item.split("/")[0] : item;
+    const step = item.includes("/") ? Number(item.split("/")[1]) : null;
+    if (step != null && (!Number.isInteger(step) || step <= 0)) {
+      throw new Error(`Invalid cron step: ${item}.`);
+    }
+    if (atom === "*") continue;
+    if (/^\d+$/.test(atom)) {
+      const number = Number(atom);
+      if (number < min || number > max) throw new Error(`Cron value ${number} is outside ${min}-${max}.`);
+      continue;
+    }
+    const range = atom.match(/^(\d+)-(\d+)$/);
+    if (range) {
+      const start = Number(range[1]);
+      const end = Number(range[2]);
+      if (start > end || start < min || end > max) throw new Error(`Invalid cron range: ${atom}.`);
+      continue;
+    }
+    throw new Error(`Invalid cron field: ${item}.`);
+  }
+}
+
+export function backupScheduleDue(schedule, now = new Date(), lastRunAt = null) {
+  const normalized = normalizeBackupSchedule(schedule);
+  if (!normalized) return false;
+  if (lastRunAt && now.getTime() - new Date(lastRunAt).getTime() < 55_000) return false;
+  if (normalized === "@hourly") return now.getUTCMinutes() === 0;
+  if (normalized === "@daily") return now.getUTCHours() === 2 && now.getUTCMinutes() === 0;
+  const [minute, hour, day, month, weekday] = normalized.split(" ");
+  const cronWeekday = now.getUTCDay();
+  return cronFieldMatches(minute, now.getUTCMinutes())
+    && cronFieldMatches(hour, now.getUTCHours())
+    && cronFieldMatches(day, now.getUTCDate())
+    && cronFieldMatches(month, now.getUTCMonth() + 1)
+    && (cronFieldMatches(weekday, cronWeekday) || (cronWeekday === 0 && cronFieldMatches(weekday, 7)));
+}
+
+function cronFieldMatches(field, value) {
+  return String(field).split(",").some((item) => {
+    const [atom, stepValue] = item.split("/");
+    const step = stepValue ? Number(stepValue) : null;
+    if (step && value % step !== 0) return false;
+    if (atom === "*") return true;
+    if (/^\d+$/.test(atom)) return Number(atom) === value;
+    const range = atom.match(/^(\d+)-(\d+)$/);
+    return range ? value >= Number(range[1]) && value <= Number(range[2]) : false;
+  });
+}
+
+export function selectBackupRunsForRetention(runs = [], retentionDays = 7, now = new Date()) {
+  const cutoff = now.getTime() - Math.max(1, Number(retentionDays || 7)) * 24 * 60 * 60 * 1000;
+  return (runs || []).filter((run) => {
+    if (run.status !== "succeeded" || !run.file_path) return false;
+    const finishedAt = run.finished_at || run.finishedAt || run.updated_at || run.updatedAt;
+    return finishedAt ? new Date(finishedAt).getTime() < cutoff : false;
+  });
 }
 
 export function evaluateHttpHealthcheck(input = {}) {

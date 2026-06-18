@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { normalizeAppEnvInput, normalizeAppInput } from "@routely/core";
+import { normalizeAppEnvInput, normalizeAppInput, normalizeBackupSchedule, normalizeDatabaseType } from "@routely/core";
 
 export const routelyDbVersion = "0.1.0";
 
@@ -143,6 +143,50 @@ export function migrate(db) {
       network_tx_bytes INTEGER,
       message TEXT,
       sampled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS databases (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER REFERENCES apps(id) ON DELETE SET NULL,
+      name TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'stopped',
+      internal INTEGER NOT NULL DEFAULT 1,
+      image TEXT,
+      port INTEGER,
+      compose_service TEXT,
+      compose_file TEXT,
+      volume_name TEXT,
+      env TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS backup_jobs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      database_id INTEGER NOT NULL REFERENCES databases(id) ON DELETE CASCADE,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      schedule TEXT,
+      retention_days INTEGER NOT NULL DEFAULT 7,
+      local_dir TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(database_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS backup_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      backup_job_id INTEGER NOT NULL REFERENCES backup_jobs(id) ON DELETE CASCADE,
+      database_id INTEGER NOT NULL REFERENCES databases(id) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'queued',
+      trigger TEXT NOT NULL DEFAULT 'manual',
+      file_path TEXT,
+      size_bytes INTEGER,
+      message TEXT,
+      started_at TEXT,
+      finished_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS deployments (
@@ -310,6 +354,17 @@ export function migrate(db) {
   addColumnIfMissing(db, "healthchecks", "last_http_status", "INTEGER");
   addColumnIfMissing(db, "healthchecks", "last_response_time_ms", "INTEGER");
   addColumnIfMissing(db, "healthchecks", "last_message", "TEXT");
+  addColumnIfMissing(db, "databases", "app_id", "INTEGER REFERENCES apps(id) ON DELETE SET NULL");
+  addColumnIfMissing(db, "databases", "status", "TEXT NOT NULL DEFAULT 'stopped'");
+  addColumnIfMissing(db, "databases", "internal", "INTEGER NOT NULL DEFAULT 1");
+  addColumnIfMissing(db, "databases", "image", "TEXT");
+  addColumnIfMissing(db, "databases", "port", "INTEGER");
+  addColumnIfMissing(db, "databases", "compose_service", "TEXT");
+  addColumnIfMissing(db, "databases", "compose_file", "TEXT");
+  addColumnIfMissing(db, "databases", "volume_name", "TEXT");
+  addColumnIfMissing(db, "databases", "env", "TEXT NOT NULL DEFAULT '{}'");
+  addColumnIfMissing(db, "backup_jobs", "local_dir", "TEXT");
+  addColumnIfMissing(db, "backup_runs", "trigger", "TEXT NOT NULL DEFAULT 'manual'");
   try {
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_healthchecks_app_target ON healthchecks(app_id, target)");
   } catch {

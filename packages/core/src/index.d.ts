@@ -2,6 +2,8 @@ export type RoutelyAppType = "app" | "database" | "compose" | "static" | "worker
 export type RoutelyAppDriver = "command" | "compose" | "dockerfile" | "buildpack" | "static";
 export type RoutelyAppStatus = "stopped" | "running" | "starting" | "crashed" | "unknown";
 export type RoutelyDeploymentStatus = "queued" | "preparing" | "building" | "starting" | "healthchecking" | "succeeded" | "failed";
+export type RoutelyDatabaseType = "postgres" | "mysql" | "mariadb" | "redis" | "mongodb";
+export type RoutelyBackupRunStatus = "queued" | "running" | "succeeded" | "failed" | "pruned";
 
 export interface RoutelyDashboardConfig {
   port?: number;
@@ -282,6 +284,116 @@ export interface RoutelyMetricSampleDto {
   message: string | null;
   sampledAt: string;
 }
+
+export interface RoutelyDatabaseRecord {
+  id: number;
+  app_id: number | null;
+  app_name?: string | null;
+  name: string;
+  type: RoutelyDatabaseType | string;
+  status: string;
+  internal: 0 | 1 | boolean;
+  image: string | null;
+  port: number | null;
+  compose_service: string | null;
+  compose_file: string | null;
+  volume_name: string | null;
+  env: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoutelyDatabaseDto {
+  id: number;
+  appId: number | null;
+  appName: string | null;
+  name: string;
+  type: string;
+  status: string;
+  internal: boolean;
+  image: string | null;
+  port: number | null;
+  composeService: string | null;
+  composeFile: string | null;
+  volumeName: string | null;
+  envKeys: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoutelyBackupJobRecord {
+  id: number;
+  database_id: number;
+  database_name?: string | null;
+  database_type?: string | null;
+  enabled: 0 | 1 | boolean;
+  schedule: string | null;
+  retention_days: number;
+  local_dir: string | null;
+  last_run_status?: string | null;
+  last_run_at?: string | null;
+  last_run_message?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoutelyBackupRunRecord {
+  id: number;
+  backup_job_id: number;
+  database_id: number;
+  database_name?: string | null;
+  database_type?: string | null;
+  status: RoutelyBackupRunStatus | string;
+  trigger: string;
+  file_path: string | null;
+  size_bytes: number | null;
+  message: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoutelyBackupJobDto {
+  id: number;
+  databaseId: number;
+  databaseName: string | null;
+  databaseType: string | null;
+  enabled: boolean;
+  schedule: string | null;
+  retentionDays: number;
+  localDir: string | null;
+  lastRunStatus: string | null;
+  lastRunAt: string | null;
+  lastRunMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoutelyBackupRunDto {
+  id: number;
+  backupJobId: number;
+  databaseId: number;
+  databaseName: string | null;
+  databaseType: string | null;
+  status: string;
+  trigger: string;
+  filePath: string | null;
+  sizeBytes: number | null;
+  message: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export function databaseToPublicDto(row: RoutelyDatabaseRecord): RoutelyDatabaseDto;
+export function backupJobToPublicDto(row: RoutelyBackupJobRecord): RoutelyBackupJobDto;
+export function backupRunToPublicDto(row: RoutelyBackupRunRecord): RoutelyBackupRunDto;
+export function normalizeDatabaseType(type: unknown): RoutelyDatabaseType;
+export function normalizeBackupSchedule(schedule: unknown): string | null;
+export function backupScheduleDue(schedule: unknown, now?: Date, lastRunAt?: string | null): boolean;
+export function selectBackupRunsForRetention<T extends { status: string; file_path?: string | null; filePath?: string | null; finished_at?: string | null; finishedAt?: string | null; updated_at?: string | null; updatedAt?: string | null }>(runs: T[], retentionDays?: number, now?: Date): T[];
 
 export interface RoutelyAppEnvVarRecord {
   id: number;
