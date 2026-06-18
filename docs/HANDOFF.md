@@ -360,6 +360,7 @@ Current state:
 - Checkpoint 6 proxy, domains, and HTTPS is implemented.
 - Checkpoint 7 GitHub integration and auto deploy is implemented.
 - Checkpoint 8 environment, secrets, and app settings is implemented.
+- Checkpoint 9 logs, metrics, and health is implemented.
 - Browser calls remain same-origin under `/api/*`.
 - The shell currently has desktop sidebar navigation, mobile bottom navigation, workspace/status header, local app/service separation, dense resource rows, app/service inspector, recent logs, and add/edit registry forms.
 - The latest frontend pass improved row rhythm, inspector/log hierarchy, form validation/focus/disabled states, loading/empty states, responsive action wrapping, and the server foundation readiness panel.
@@ -368,13 +369,16 @@ Current state:
 - Checkpoint 6 added domain/proxy tables, Traefik-compatible proxy helpers, daemon domain/proxy endpoints, CLI domain commands, same-origin Next.js domain/proxy routes, and a dashboard domain/proxy/HTTPS panel backed by daemon/API/storage state.
 - Checkpoint 7 added GitHub tables/helpers, signed webhook ingestion/deduplication, repo/branch source metadata, push-to-deploy integration with the existing Dockerfile deployment path, CLI GitHub commands, same-origin Next.js GitHub routes, and dashboard GitHub/repository/delivery panels backed by daemon/API/storage state.
 - Checkpoint 8 added `app_env_vars`, secret/redaction/env merge helpers, daemon env CRUD endpoints, CLI `routely env` commands, local command and Dockerfile deployment env injection, restart/redeploy-needed state for env/settings changes, same-origin Next.js env proxy routes, and a real dashboard Env inspector tab with masked secrets and pending state.
-- Known web build caveat remains: `npm run build --workspace apps/web` may return incomplete Turbopack output; during Checkpoint 8 it emitted only the `Finished TypeScript...` progress line with no final exit marker. Lint, web TypeScript, and tests passed.
+- Checkpoint 9 added persisted `healthchecks` and `metrics_samples`, shared health/SSE/metric DTO helpers, authenticated daemon app health/metrics endpoints, host metrics endpoint, deployment log SSE framing, `routely health <app>`, same-origin Next.js health/metrics/log-stream routes, and a real dashboard Health inspector tab backed by daemon/storage data.
+- Checkpoint 9 verification passed `npm run lint`, `npm run test --workspace apps/cli`, `npm run build --workspace apps/cli`, `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, and `node --check apps/daemon/src/server.js`.
+- Checkpoint 9 tests cover HTTP/runtime health evaluation, SSE event framing, health/metric persistence, same-origin health/metrics route handlers, and deployment log stream daemon-unreachable handling.
+- Known web build caveat remains: `npm run build --workspace apps/web` may return incomplete Turbopack output; during Checkpoint 9 it emitted only the `Finished TypeScript...` progress line with no final exit marker and no remaining build process. Lint, web TypeScript, and tests passed.
 
 Next execution direction:
 
-- Start Checkpoint 9 from `docs/14-implementation-plan.md` only after Checkpoint 8 is committed.
-- Reuse existing app/deploy/domain/GitHub/env metadata and preserve signed webhook push-to-deploy behavior.
-- Keep backups, notifications, production database templates, full rollback, metrics collection, and broader VPS operations deferred until their checkpoints.
+- Start Checkpoint 10 from `docs/14-implementation-plan.md` only after Checkpoint 9 is committed.
+- Reuse existing app/deploy/domain/GitHub/env/logs/health/metrics metadata and preserve signed webhook push-to-deploy behavior.
+- Keep notifications, full rollback, restore/destructive operations, and broader VPS operations deferred unless the checkpoint explicitly includes them.
 
 ## Current Known Environment
 
@@ -439,11 +443,11 @@ node /home/ruddypp/Documents/work/routely/apps/cli/dist/index.js down
 
 ## Prompt For Next Agent
 
-Copy `docs/NEXT_AGENT_PROMPT.md` into the next agent. That file is now the canonical next prompt and targets Checkpoint 9: Logs, Metrics, and Health.
+Copy `docs/NEXT_AGENT_PROMPT.md` into the next agent. That file is now the canonical next prompt and targets Checkpoint 10: Database Services and Backups.
 
-The next checkpoint should improve logs, health, and metric visibility while preserving the completed deploy/domain/GitHub/env behavior.
+The next checkpoint should add production database and backup workflows conservatively while preserving completed deploy/domain/GitHub/env/logs/health/metrics behavior.
 
-Do not use older embedded checkpoint prompts from previous handoffs. Checkpoint 0 through Checkpoint 8 are complete; the next implementation should start at Checkpoint 9 unless the user asks for a repair/audit.
+Do not use older embedded checkpoint prompts from previous handoffs. Checkpoint 0 through Checkpoint 9 are complete; the next implementation should start at Checkpoint 10 unless the user asks for a repair/audit.
 
 ## Immediate Next Checklist
 
@@ -452,11 +456,11 @@ Do not use older embedded checkpoint prompts from previous handoffs. Checkpoint 
 - [ ] Read relevant Next.js docs from `node_modules/next/dist/docs/` before editing `apps/web`.
 - [ ] Copy and follow `docs/NEXT_AGENT_PROMPT.md`.
 - [ ] Inspect CLI, daemon, core config, DB, drivers, proxy package, presets, and current dashboard/API implementation.
-- [ ] Implement Checkpoint 9 as a comprehensive backend/CLI/API/frontend slice, not a frontend-only redesign.
-- [ ] Reuse existing app/deploy/domain/GitHub/env metadata and avoid leaking secret values in config, logs, or UI.
-- [ ] Keep backups, notifications, production database templates, full rollback, metrics collection, and broad VPS operations deferred.
+- [ ] Implement Checkpoint 10 as a comprehensive backend/CLI/API/frontend slice, not a frontend-only redesign.
+- [ ] Reuse existing app/deploy/domain/GitHub/env/logs/health/metrics metadata and avoid leaking secret values in config, logs, backups, or UI.
+- [ ] Keep notifications, full rollback, destructive restore operations, and broad VPS operations deferred unless explicitly in scope.
 - [ ] Add/adjust focused tests for changed backend/domain/proxy/API/CLI behavior.
 - [ ] Run lint, touched workspace tests/builds, web TypeScript when web is touched, and browser smoke/responsive checks when frontend UI is changed.
 - [ ] Attempt/document the known web build caveat.
 - [ ] Update docs for behavior and verification changes.
-- [ ] Commit only this Checkpoint 9 slice.
+- [ ] Commit only this Checkpoint 10 slice.

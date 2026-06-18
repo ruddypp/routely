@@ -114,6 +114,50 @@ export type DaemonDeploymentLogsResponse = {
   logs: DaemonDeploymentLog[];
 };
 
+export type DaemonHealthcheck = {
+  id: number;
+  appId: number;
+  deploymentId: number | null;
+  target: string;
+  path: string | null;
+  expectedStatus: number | null;
+  status: string;
+  httpStatus: number | null;
+  responseTimeMs: number | null;
+  message: string | null;
+  checkedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DaemonMetricSample = {
+  id: number;
+  appId: number | null;
+  deploymentId: number | null;
+  scope: string;
+  cpuPercent: number | null;
+  memoryBytes: number | null;
+  memoryLimitBytes: number | null;
+  diskUsedBytes: number | null;
+  diskTotalBytes: number | null;
+  networkRxBytes: number | null;
+  networkTxBytes: number | null;
+  message: string | null;
+  sampledAt: string;
+};
+
+export type DaemonAppHealthResponse = {
+  app: DaemonApp;
+  latestDeployment: DaemonDeployment | null;
+  health: { status: string; checks: DaemonHealthcheck[] };
+  healthcheck?: DaemonHealthcheck;
+};
+
+export type DaemonAppMetricsResponse = {
+  app: DaemonApp;
+  metrics: DaemonMetricSample[];
+};
+
 export type DaemonDomain = {
   id: number;
   appId: number;

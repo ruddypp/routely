@@ -1,8 +1,9 @@
 import Fastify from "fastify";
 import "dotenv/config";
 import { config as loadDotenv } from "dotenv";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, statfsSync } from "node:fs";
 import net from "node:net";
+import os from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
@@ -12,8 +13,13 @@ import {
   defaultProductionDataDir,
   deploymentLogToPublicDto,
   deploymentToPublicDto,
+  evaluateHttpHealthcheck,
+  evaluateRuntimeHealth,
+  formatSseEvent,
+  healthcheckToPublicDto,
   loadWorkspaceConfig,
   mergeAppEnv,
+  metricSampleToPublicDto,
   redactSecrets,
   runServerDoctorChecks,
   upsertWorkspaceConfigEntry,
@@ -37,6 +43,9 @@ import {
   getLatestSuccessfulDeploymentForApp,
   getServerFoundationState,
   getSetting,
+  listHealthchecksForApp,
+  listHostMetricSamples,
+  listMetricSamplesForApp,
   initializeRoutely,
   listAppEnvVars,
   listGithubConnectedAppsForPush,
@@ -52,6 +61,7 @@ import {
   listRunningRuntimeInstances,
   listSecretValuesForApp,
   listApps,
+  recordMetricSample,
   recordRuntimeStart,
   recordRuntimeStop,
   reconcileStaleRuntimeInstances,
@@ -64,6 +74,7 @@ import {
   updateAppStatus,
   updateDomainVerification,
   updateGithubWebhookDelivery,
+  upsertHealthcheckResult,
   upsertAppEnvVar,
   upsertGithubInstallation,
   upsertGithubRepository,
@@ -721,6 +732,15 @@ async function removeContainerIfPresent(containerName, deploymentId, phase = "st
 async function markDeploymentFailed(appRecord, deploymentId, phase, error, containerName) {
   const message = error instanceof Error ? error.message : String(error);
   appendDeploymentLogForApp(appRecord, deploymentId, { phase, stream: "stderr", message });
+  upsertHealthcheckResult(db, {
+    appId: appRecord.id,
+    deploymentId,
+    target: containerName ? "container" : "runtime",
+    path: appRecord.healthcheck?.path || null,
+    expectedStatus: appRecord.healthcheck?.expected_status || 200,
+    status: "unhealthy",
+    message: `${phase} failed: ${message}`
+  });
   updateDeployment(db, deploymentId, {
     status: "failed",
     phase,
@@ -784,6 +804,7 @@ async function runDockerfileDeployment(appRecord, deploymentId) {
       finishedAt: new Date().toISOString()
     });
     updateAppStatus(db, appRecord.id, "running");
+    await evaluateAppHealth(appRecord);
     clearAppEnvPendingFlags(db, appRecord.id, { redeploy: true });
     const routes = materializeProxyRoutesForApp(appRecord.id);
     if (routes.length > 0) {
@@ -852,6 +873,176 @@ function readRecentLogs(appRecord) {
   const content = redactForApp(appRecord, readFileSync(logPath).subarray(start).toString("utf8"));
 
   return { path: logPath, content, bytes: stats.size, truncated: start > 0 };
+}
+
+function readDeploymentLogsRedacted(appRecord, deploymentId, options = {}) {
+  return listDeploymentLogs(db, deploymentId, options).map((log) =>
+    deploymentLogToPublicDto({ ...log, message: redactForApp(appRecord, log.message) })
+  );
+}
+
+async function captureChild(child) {
+  let stdout = "";
+  let stderr = "";
+  child.stdout?.on("data", (chunk) => {
+    stdout += chunk.toString("utf8");
+  });
+  child.stderr?.on("data", (chunk) => {
+    stderr += chunk.toString("utf8");
+  });
+
+  await new Promise((resolveWait, rejectWait) => {
+    child.on("error", rejectWait);
+    child.on("exit", (code) => {
+      if (code && code !== 0) {
+        rejectWait(new Error(stderr.trim() || stdout.trim() || `command exited with code ${code}`));
+      } else {
+        resolveWait();
+      }
+    });
+  });
+
+  return { stdout, stderr };
+}
+
+async function inspectContainerRunning(containerName) {
+  if (!containerName) return { running: false, message: "no deployment container" };
+  try {
+    const result = await captureChild(spawnDocker(dockerInspectRunningArgs(containerName), { cwd: workspaceRoot, stdio: ["ignore", "pipe", "pipe"] }));
+    const running = result.stdout.trim() === "true";
+    return { running, message: running ? `${containerName} is running` : `${containerName} is not running` };
+  } catch (error) {
+    return { running: false, message: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+async function evaluateAppHealth(appRecord) {
+  reconcileRuntimeState();
+  const latestDeployment = getLatestSuccessfulDeploymentForApp(db, appRecord.id);
+  const healthPath = appRecord.healthcheck?.path || null;
+  const expectedStatus = Number(appRecord.healthcheck?.expected_status || 200);
+  const target = latestDeployment?.container_name ? "container" : "runtime";
+  let result;
+
+  if (healthPath && (latestDeployment?.host_port || appRecord.port)) {
+    const base = latestDeployment?.host_port ? deploymentUrl(latestDeployment) : `http://127.0.0.1:${appRecord.port}`;
+    const url = `${base}${healthPath.startsWith("/") ? healthPath : `/${healthPath}`}`;
+    const started = Date.now();
+    try {
+      const response = await fetch(url, { signal: AbortSignal.timeout(2500) });
+      result = evaluateHttpHealthcheck({ expectedStatus, httpStatus: response.status, responseTimeMs: Date.now() - started });
+    } catch (error) {
+      result = evaluateHttpHealthcheck({ expectedStatus, responseTimeMs: Date.now() - started, error: error instanceof Error ? error.message : String(error) });
+    }
+    return upsertHealthcheckResult(db, {
+      appId: appRecord.id,
+      deploymentId: latestDeployment?.id || null,
+      target,
+      path: healthPath,
+      expectedStatus,
+      status: result.status,
+      httpStatus: result.httpStatus,
+      responseTimeMs: result.responseTimeMs,
+      message: result.message
+    });
+  }
+
+  if (latestDeployment?.container_name) {
+    const inspected = await inspectContainerRunning(latestDeployment.container_name);
+    result = evaluateRuntimeHealth(inspected);
+    return upsertHealthcheckResult(db, {
+      appId: appRecord.id,
+      deploymentId: latestDeployment.id,
+      target,
+      expectedStatus,
+      status: result.status,
+      message: result.message
+    });
+  }
+
+  const running = appRecord.driver === "compose" ? appRecord.status === "running" : runningInstancesForApp(appRecord.id).length > 0;
+  result = evaluateRuntimeHealth({ running, message: running ? `${appRecord.name} is running` : `${appRecord.name} has no active runtime` });
+  return upsertHealthcheckResult(db, {
+    appId: appRecord.id,
+    target,
+    path: healthPath,
+    expectedStatus,
+    status: result.status,
+    message: result.message
+  });
+}
+
+function hostMetrics() {
+  const memoryLimitBytes = os.totalmem();
+  const memoryBytes = memoryLimitBytes - os.freemem();
+  let disk = { used: null, total: null };
+  try {
+    const stats = statfsSync(workspaceRoot);
+    const total = Number(stats.blocks) * Number(stats.bsize);
+    const free = Number(stats.bavail) * Number(stats.bsize);
+    disk = { used: total - free, total };
+  } catch {
+    disk = { used: null, total: null };
+  }
+  const interfaces = os.networkInterfaces();
+  const networkCount = Object.values(interfaces).flat().filter(Boolean).length;
+  return {
+    scope: "host",
+    cpuPercent: Math.round(os.loadavg()[0] * 100) / Math.max(1, os.cpus().length),
+    memoryBytes,
+    memoryLimitBytes,
+    diskUsedBytes: disk.used,
+    diskTotalBytes: disk.total,
+    networkRxBytes: null,
+    networkTxBytes: null,
+    message: `host sample from ${os.hostname()} with ${networkCount} network address(es)`
+  };
+}
+
+function parseDockerSize(value) {
+  const match = String(value || "").trim().match(/^([0-9.]+)\s*([KMGT]?i?B)?$/i);
+  if (!match) return null;
+  const amount = Number(match[1]);
+  const unit = (match[2] || "B").toLowerCase();
+  const multipliers = { b: 1, kb: 1000, kib: 1024, mb: 1000 ** 2, mib: 1024 ** 2, gb: 1000 ** 3, gib: 1024 ** 3, tb: 1000 ** 4, tib: 1024 ** 4 };
+  return Math.round(amount * (multipliers[unit] || 1));
+}
+
+async function dockerContainerMetric(appRecord, deployment) {
+  if (!deployment?.container_name) return null;
+  try {
+    const result = await captureChild(spawnDocker(["stats", "--no-stream", "--format", "{{json .}}", deployment.container_name], { cwd: workspaceRoot, stdio: ["ignore", "pipe", "pipe"] }));
+    const stats = JSON.parse(result.stdout.trim().split("\n").filter(Boolean).at(-1) || "{}");
+    const [memUsage, memLimit] = String(stats.MemUsage || "").split("/").map((item) => parseDockerSize(item));
+    const [netRx, netTx] = String(stats.NetIO || "").split("/").map((item) => parseDockerSize(item));
+    return {
+      appId: appRecord.id,
+      deploymentId: deployment.id,
+      scope: "container",
+      cpuPercent: Number(String(stats.CPUPerc || "").replace("%", "")) || null,
+      memoryBytes: memUsage,
+      memoryLimitBytes: memLimit,
+      networkRxBytes: netRx,
+      networkTxBytes: netTx,
+      message: `docker stats for ${deployment.container_name}`
+    };
+  } catch (error) {
+    return {
+      appId: appRecord.id,
+      deploymentId: deployment.id,
+      scope: "container",
+      message: error instanceof Error ? error.message : String(error)
+    };
+  }
+}
+
+async function collectMetricsForApp(appRecord) {
+  const host = recordMetricSample(db, hostMetrics());
+  const latestDeployment = getLatestSuccessfulDeploymentForApp(db, appRecord.id);
+  const container = await dockerContainerMetric(appRecord, latestDeployment);
+  const rows = [host];
+  if (container) rows.push(recordMetricSample(db, container));
+  return rows;
 }
 
 app.get("/health", async (request) => {
@@ -1109,6 +1300,55 @@ app.get("/apps/:id/logs", async (request, reply) => {
   };
 });
 
+app.get("/apps/:id/health", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+
+  const shouldRefresh = request.query?.refresh !== "false";
+  const latestDeployment = getLatestSuccessfulDeploymentForApp(db, record.id);
+  if (shouldRefresh) {
+    await evaluateAppHealth(record);
+  }
+  const checks = listHealthchecksForApp(db, record.id).map(healthcheckToPublicDto);
+  const latest = checks[0] || null;
+  return {
+    app: appToPublicDto(getAppById(db, record.id) || record),
+    latestDeployment: latestDeployment ? deploymentToPublicDto(latestDeployment) : null,
+    health: {
+      status: latest?.status || "unknown",
+      checks
+    }
+  };
+});
+
+app.post("/apps/:id/health", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+
+  const check = await evaluateAppHealth(record);
+  return reply.code(200).send({ app: appToPublicDto(getAppById(db, record.id) || record), healthcheck: healthcheckToPublicDto(check), health: { status: check.last_status || "unknown", checks: listHealthchecksForApp(db, record.id).map(healthcheckToPublicDto) } });
+});
+
+app.get("/apps/:id/metrics", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+
+  if (request.query?.refresh !== "false") {
+    await collectMetricsForApp(record);
+  }
+  return {
+    app: appToPublicDto(record),
+    metrics: listMetricSamplesForApp(db, record.id).map(metricSampleToPublicDto)
+  };
+});
+
+app.get("/metrics", async (request) => {
+  if (request.query?.refresh !== "false") {
+    recordMetricSample(db, hostMetrics());
+  }
+  return { metrics: listHostMetricSamples(db).map(metricSampleToPublicDto) };
+});
+
 app.get("/deployments", async (request) => {
   const appId = Number(request.query?.appId);
   const deployments = Number.isInteger(appId)
@@ -1306,11 +1546,32 @@ app.get("/deployments/:id/logs", async (request, reply) => {
   if (!deployment) {
     return reply.code(404).send({ error: `Deployment ${request.params.id} not found.` });
   }
+  const appRecord = getAppById(db, deployment.app_id);
   const afterSequence = Number(request.query?.after || request.query?.afterSequence || 0);
   return {
     deployment: deploymentToPublicDto(deployment),
-    logs: listDeploymentLogs(db, deployment.id, { afterSequence }).map(deploymentLogToPublicDto)
+    logs: appRecord
+      ? readDeploymentLogsRedacted(appRecord, deployment.id, { afterSequence })
+      : listDeploymentLogs(db, deployment.id, { afterSequence }).map(deploymentLogToPublicDto)
   };
+});
+
+app.get("/deployments/:id/logs/stream", async (request, reply) => {
+  const id = Number(request.params.id);
+  const deployment = Number.isInteger(id) ? getDeploymentById(db, id) : null;
+  if (!deployment) {
+    return reply.code(404).send({ error: `Deployment ${request.params.id} not found.` });
+  }
+  const appRecord = getAppById(db, deployment.app_id);
+  const afterSequence = Number(request.query?.after || request.query?.afterSequence || 0);
+  const logs = appRecord
+    ? readDeploymentLogsRedacted(appRecord, deployment.id, { afterSequence })
+    : listDeploymentLogs(db, deployment.id, { afterSequence }).map(deploymentLogToPublicDto);
+  const body = logs.map((log) => formatSseEvent("deployment-log", log, { id: log.sequence })).join("") + formatSseEvent("deployment", deploymentToPublicDto(deployment), { id: `deployment-${deployment.id}` });
+  reply.header("content-type", "text/event-stream; charset=utf-8");
+  reply.header("cache-control", "no-cache, no-transform");
+  reply.header("connection", "keep-alive");
+  return reply.send(body);
 });
 
 app.post("/apps", async (request, reply) => {

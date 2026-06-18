@@ -109,7 +109,16 @@ Product references for future work:
 - CLI env commands now exist: `routely env <app> list`, `routely env <app> set KEY=value [--secret] [--scope all|local|production]`, and `routely env <app> unset KEY`.
 - Next.js same-origin route handlers proxy env endpoints under `/api/*`; browser code still does not call the daemon directly.
 - The dashboard inspector now has an Env tab backed by real daemon/API/storage data, including masked secrets, scope, restart/redeploy-needed state, set/unset controls, and row/overview pending indicators.
-- Backups, notifications, production database templates, full rollback, metrics collection, and broad VPS operations remain deferred.
+- Checkpoint 9 has added the first logs, metrics, and health slice.
+- SQLite now stores app/container health state in `healthchecks` and narrow host/container metric samples in `metrics_samples`.
+- Shared helpers evaluate HTTP response-time healthchecks, runtime/container health, public health/metric DTOs, and server-sent event framing for deployment logs.
+- The daemon exposes authenticated operational endpoints at `/apps/:id/health`, `/apps/:id/metrics`, `/metrics`, and `/deployments/:id/logs/stream` while preserving existing `/apps/:id/logs` and `/deployments/:id/logs` behavior.
+- App health refreshes use configured HTTP healthchecks where available, otherwise container-running state for successful Dockerfile deployments, otherwise local runtime/Compose state. Deployment failures persist unhealthy state with the failing phase summary.
+- Runtime and deployment logs returned by daemon/API continue to redact stored app secret values where practical.
+- CLI now includes `routely health <app>` to show app health, latest deploy state, and recent metric samples from real daemon/storage data.
+- Next.js same-origin route handlers proxy health, metrics, and deployment log stream endpoints under `/api/*`; browser code still does not call the daemon directly.
+- The dashboard inspector now has a Health tab with health checks, HTTP timing, latest host/container metric samples, and overview health/CPU/RAM cards backed by daemon data.
+- Backups, notifications, production database templates, full rollback, alerts, and broad VPS operations remain deferred.
 
 ## Current Structure
 
@@ -226,6 +235,7 @@ routely deploy web --watch
 routely env web list
 routely env web set DATABASE_URL=postgres://user:pass@db/app --secret --scope production
 routely env web unset DATABASE_URL
+routely health web
 routely domain root example.com
 routely domain add web web.example.com
 routely domain verify web.example.com
@@ -243,7 +253,7 @@ Command apps declared in `routely.yml` can use `depends_on` to control local sta
 
 Local Compose services declared in `services:` use `driver: compose`. Generated Compose files are written under `.routely/compose` unless `compose_file` is supplied. Database templates are local-development defaults and are internal by default where practical.
 
-Production server foundation now supports Dockerfile deployments, domain/proxy/HTTPS state, signed GitHub push-to-deploy for apps connected to a GitHub repository/branch, and stored env/secrets injection. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API and CLI processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Dockerfile deployments are available through `routely deploy <app> [--watch]` and the dashboard deploy panel. Domain commands and the dashboard can add hostnames, verify DNS against `ROUTELY_SERVER_PUBLIC_IP`, and generate Traefik-compatible HTTPS routes for the latest successful deployment. Env commands and the dashboard Env inspector store secret values in SQLite, hide them after save, and mark apps as needing restart/redeploy after env/settings changes. GitHub App env can be configured with `ROUTELY_GITHUB_APP_ID`, `ROUTELY_GITHUB_WEBHOOK_SECRET`, `ROUTELY_GITHUB_PRIVATE_KEY`, `ROUTELY_GITHUB_CLIENT_ID`, and `ROUTELY_GITHUB_CLIENT_SECRET`. Backups, static deploys, full rollback, metrics, notifications, and broad VPS operations remain deferred to later checkpoints.
+Production server foundation now supports Dockerfile deployments, domain/proxy/HTTPS state, signed GitHub push-to-deploy for apps connected to a GitHub repository/branch, stored env/secrets injection, app health state, runtime/deployment log inspection, and narrow host/container metric sampling. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API and CLI processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Dockerfile deployments are available through `routely deploy <app> [--watch]` and the dashboard deploy panel. Domain commands and the dashboard can add hostnames, verify DNS against `ROUTELY_SERVER_PUBLIC_IP`, and generate Traefik-compatible HTTPS routes for the latest successful deployment. Env commands and the dashboard Env inspector store secret values in SQLite, hide them after save, and mark apps as needing restart/redeploy after env/settings changes. GitHub App env can be configured with `ROUTELY_GITHUB_APP_ID`, `ROUTELY_GITHUB_WEBHOOK_SECRET`, `ROUTELY_GITHUB_PRIVATE_KEY`, `ROUTELY_GITHUB_CLIENT_ID`, and `ROUTELY_GITHUB_CLIENT_SECRET`. Backups, static deploys, full rollback, alerts, notifications, production database templates, and broad VPS operations remain deferred to later checkpoints.
 
 ## CLI Build And Global Reinstall Flow
 
@@ -326,12 +336,12 @@ Ports checked as free during the latest setup audit:
 
 ## Next Development Target
 
-Recommended next implementation step after Checkpoint 8:
+Recommended next implementation step after Checkpoint 9:
 
 ```text
-Checkpoint 9: Logs, Metrics, and Health
-  - Add richer healthcheck behavior, runtime/container health state, and log/metric surfaces.
-  - Separate runtime logs from deployment logs where practical.
-  - Add failure summaries for build, start, proxy, and healthcheck phases.
+Checkpoint 10: Database Services and Backups
+  - Add production database service templates only where they can be backed by real daemon/storage/runtime data.
+  - Add safe backup job/run state and manual backup workflow.
+  - Keep restore/destructive operations explicit and conservative.
   - Keep browser calls routed through same-origin /api/* handlers.
 ```

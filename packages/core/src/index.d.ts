@@ -219,6 +219,70 @@ export interface RoutelyDeploymentLogDto {
   createdAt: string;
 }
 
+export interface RoutelyHealthcheckRecord {
+  id: number;
+  app_id: number;
+  deployment_id: number | null;
+  target: string;
+  path: string | null;
+  expected_status: number | null;
+  last_status: string | null;
+  last_http_status: number | null;
+  last_response_time_ms: number | null;
+  last_message: string | null;
+  last_checked_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoutelyHealthcheckDto {
+  id: number;
+  appId: number;
+  deploymentId: number | null;
+  target: string;
+  path: string | null;
+  expectedStatus: number | null;
+  status: string;
+  httpStatus: number | null;
+  responseTimeMs: number | null;
+  message: string | null;
+  checkedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoutelyMetricSampleRecord {
+  id: number;
+  app_id: number | null;
+  deployment_id: number | null;
+  scope: string;
+  cpu_percent: number | null;
+  memory_bytes: number | null;
+  memory_limit_bytes: number | null;
+  disk_used_bytes: number | null;
+  disk_total_bytes: number | null;
+  network_rx_bytes: number | null;
+  network_tx_bytes: number | null;
+  message: string | null;
+  sampled_at: string;
+}
+
+export interface RoutelyMetricSampleDto {
+  id: number;
+  appId: number | null;
+  deploymentId: number | null;
+  scope: string;
+  cpuPercent: number | null;
+  memoryBytes: number | null;
+  memoryLimitBytes: number | null;
+  diskUsedBytes: number | null;
+  diskTotalBytes: number | null;
+  networkRxBytes: number | null;
+  networkTxBytes: number | null;
+  message: string | null;
+  sampledAt: string;
+}
+
 export interface RoutelyAppEnvVarRecord {
   id: number;
   app_id: number;
@@ -258,6 +322,16 @@ export function normalizeAppInput(input: RoutelyAppInput): NormalizedRoutelyAppI
 export function appToPublicDto(app: RoutelyAppRecord): RoutelyAppDto;
 export function deploymentToPublicDto(deployment: RoutelyDeploymentRecord): RoutelyDeploymentDto;
 export function deploymentLogToPublicDto(log: RoutelyDeploymentLogRecord): RoutelyDeploymentLogDto;
+export function healthcheckToPublicDto(row: RoutelyHealthcheckRecord): RoutelyHealthcheckDto;
+export function metricSampleToPublicDto(row: RoutelyMetricSampleRecord): RoutelyMetricSampleDto;
+export function evaluateHttpHealthcheck(input?: {
+  expectedStatus?: number | null;
+  httpStatus?: number | null;
+  responseTimeMs?: number | null;
+  error?: unknown;
+}): { status: string; httpStatus: number | null; responseTimeMs: number | null; message: string };
+export function evaluateRuntimeHealth(input?: { running?: boolean; message?: string }): { status: string; message: string };
+export function formatSseEvent(event: string, data: unknown, options?: { id?: string | number | null }): string;
 export function isSecretEnvKey(key: string): boolean;
 export function normalizeEnvKey(key: string): string;
 export function normalizeAppEnvInput(input?: { key?: string; value?: unknown; isSecret?: boolean; scope?: string }): {

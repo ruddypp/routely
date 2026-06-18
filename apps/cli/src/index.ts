@@ -127,6 +127,7 @@ Usage:
   routely ps               List registered apps
   routely logs [app]       Print app logs, optionally with --follow
   routely restart [app]    Restart one command app
+  routely health <app>     Show app health and latest metric samples
   routely deploy <app>     Trigger a Dockerfile production deployment, optionally with --watch
   routely env <app> list
   routely env <app> set KEY=value [--secret] [--scope all|local|production]
@@ -234,6 +235,47 @@ type RoutelyAppEnvResponse = {
     pending: { count: number; needsRestart: boolean; needsRedeploy: boolean };
   };
   envVar?: RoutelyAppEnvVarDto;
+};
+
+type RoutelyHealthcheckDto = {
+  id: number;
+  appId: number;
+  deploymentId: number | null;
+  target: string;
+  path: string | null;
+  expectedStatus: number | null;
+  status: string;
+  httpStatus: number | null;
+  responseTimeMs: number | null;
+  message: string | null;
+  checkedAt: string | null;
+};
+
+type RoutelyMetricSampleDto = {
+  id: number;
+  appId: number | null;
+  deploymentId: number | null;
+  scope: string;
+  cpuPercent: number | null;
+  memoryBytes: number | null;
+  memoryLimitBytes: number | null;
+  diskUsedBytes: number | null;
+  diskTotalBytes: number | null;
+  networkRxBytes: number | null;
+  networkTxBytes: number | null;
+  message: string | null;
+  sampledAt: string;
+};
+
+type RoutelyAppHealthResponse = {
+  app: RoutelyAppDtoLike;
+  latestDeployment: RoutelyDeploymentDto | null;
+  health: { status: string; checks: RoutelyHealthcheckDto[] };
+};
+
+type RoutelyAppMetricsResponse = {
+  app: RoutelyAppDtoLike;
+  metrics: RoutelyMetricSampleDto[];
 };
 
 async function daemonRequest<T>(path: string, init: RequestInit = {}): Promise<DaemonResult<T>> {
@@ -923,6 +965,69 @@ async function envCommand(args: string[]): Promise<void> {
   console.log(`Unset ${key} for ${app.name}.`);
 }
 
+function formatBytes(value: number | null): string {
+  if (value == null || Number.isNaN(value)) return "-";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let amount = value;
+  let index = 0;
+  while (amount >= 1024 && index < units.length - 1) {
+    amount /= 1024;
+    index += 1;
+  }
+  return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)}${units[index]}`;
+}
+
+async function healthCommand(args: string[]): Promise<void> {
+  const appName = String(args[0] || "").trim();
+
+  if (!appName) {
+    console.error("Usage: routely health <app>");
+    process.exit(1);
+  }
+
+  const { db } = initializeRoutely(workspaceRoot);
+  syncConfig(db);
+  const app = getAppByName(db, appName);
+  db.close();
+  if (!app) {
+    console.error(`App not found: ${appName}`);
+    process.exit(1);
+  }
+
+  const [healthResult, metricsResult] = await Promise.all([
+    daemonRequest<RoutelyAppHealthResponse>(`/apps/${app.id}/health`),
+    daemonRequest<RoutelyAppMetricsResponse>(`/apps/${app.id}/metrics`)
+  ]);
+
+  if (!healthResult.ok) {
+    console.error(`Could not read health: ${healthResult.error}`);
+    process.exit(1);
+  }
+
+  console.log(`${healthResult.data.app.name}\t${healthResult.data.health.status}`);
+  if (healthResult.data.latestDeployment) {
+    const deployment = healthResult.data.latestDeployment;
+    console.log(`Latest deploy: #${deployment.id}\t${deployment.status}\t${deployment.phase}`);
+  }
+  for (const check of healthResult.data.health.checks) {
+    const timing = check.responseTimeMs == null ? "" : `\t${check.responseTimeMs}ms`;
+    const http = check.httpStatus == null ? "" : `\tHTTP ${check.httpStatus}`;
+    console.log(`Health ${check.target}: ${check.status}${http}${timing}\t${check.message || "-"}`);
+  }
+
+  if (!metricsResult.ok) {
+    console.error(`Could not read metrics: ${metricsResult.error}`);
+    return;
+  }
+
+  for (const sample of metricsResult.data.metrics.slice(0, 3)) {
+    const cpu = sample.cpuPercent == null ? "-" : `${sample.cpuPercent.toFixed(1)}%`;
+    const mem = `${formatBytes(sample.memoryBytes)}/${formatBytes(sample.memoryLimitBytes)}`;
+    const disk = sample.diskTotalBytes == null ? "-" : `${formatBytes(sample.diskUsedBytes)}/${formatBytes(sample.diskTotalBytes)}`;
+    console.log(`Metric ${sample.scope}: cpu ${cpu}\tmem ${mem}\tdisk ${disk}\t${sample.message || sample.sampledAt}`);
+  }
+}
+
 async function deployCommand(args: string[]): Promise<void> {
   const { positionals, flags } = parseFlags(args);
   const appName = String(positionals[0] || "").trim();
@@ -1347,6 +1452,9 @@ switch (command) {
     break;
   case "restart":
     await restartCommand(argv.slice(1));
+    break;
+  case "health":
+    await healthCommand(argv.slice(1));
     break;
   case "deploy":
     await deployCommand(argv.slice(1));

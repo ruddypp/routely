@@ -125,6 +125,52 @@ type DeploymentLogsResponse = {
   logs: DaemonDeploymentLog[];
 };
 
+type DaemonHealthcheck = {
+  id: number;
+  appId: number;
+  deploymentId: number | null;
+  target: string;
+  path: string | null;
+  expectedStatus: number | null;
+  status: string;
+  httpStatus: number | null;
+  responseTimeMs: number | null;
+  message: string | null;
+  checkedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type DaemonMetricSample = {
+  id: number;
+  appId: number | null;
+  deploymentId: number | null;
+  scope: string;
+  cpuPercent: number | null;
+  memoryBytes: number | null;
+  memoryLimitBytes: number | null;
+  diskUsedBytes: number | null;
+  diskTotalBytes: number | null;
+  networkRxBytes: number | null;
+  networkTxBytes: number | null;
+  message: string | null;
+  sampledAt: string;
+};
+
+type AppHealthResponse = {
+  app: DaemonApp;
+  latestDeployment: DaemonDeployment | null;
+  health: { status: string; checks: DaemonHealthcheck[] };
+  healthcheck?: DaemonHealthcheck;
+  error?: string | null;
+};
+
+type AppMetricsResponse = {
+  app: DaemonApp;
+  metrics: DaemonMetricSample[];
+  error?: string | null;
+};
+
 type DaemonAppEnvVar = {
   id: number;
   appId: number;
@@ -415,6 +461,18 @@ function shortPath(path: string | null): string {
   if (!path) return "-";
   const parts = path.split("/").filter(Boolean);
   return parts.length > 3 ? `.../${parts.slice(-3).join("/")}` : path;
+}
+
+function formatBytes(value: number | null): string {
+  if (value == null || Number.isNaN(value)) return "-";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let amount = value;
+  let index = 0;
+  while (amount >= 1024 && index < units.length - 1) {
+    amount /= 1024;
+    index += 1;
+  }
+  return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)}${units[index]}`;
 }
 
 async function readError(response: Response): Promise<string> {
@@ -1631,8 +1689,14 @@ function DetailPanel({
   onEdit?: () => void;
   onReload?: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "deployments" | "domains" | "proxy" | "github" | "env" | "logs" | "config">("overview");
+  const [tab, setTab] = useState<"overview" | "health" | "deployments" | "domains" | "proxy" | "github" | "env" | "logs" | "config">("overview");
   const [appEnv, setAppEnv] = useState<AppEnvResponse["env"] | null>(null);
+  const [appHealth, setAppHealth] = useState<AppHealthResponse["health"] | null>(null);
+  const [healthError, setHealthError] = useState<string | null>(null);
+  const [healthLoading, setHealthLoading] = useState(false);
+  const [appMetrics, setAppMetrics] = useState<DaemonMetricSample[]>([]);
+  const [metricsError, setMetricsError] = useState<string | null>(null);
+  const [metricsLoading, setMetricsLoading] = useState(false);
   const [envError, setEnvError] = useState<string | null>(null);
   const [envLoading, setEnvLoading] = useState(false);
   const [envSaving, setEnvSaving] = useState(false);
@@ -1653,13 +1717,42 @@ function DetailPanel({
     }
   }, []);
 
+  const loadHealthAndMetrics = useCallback(async (target: DaemonApp) => {
+    setHealthLoading(true);
+    setMetricsLoading(true);
+    setHealthError(null);
+    setMetricsError(null);
+    try {
+      const [healthResponse, metricsResponse] = await Promise.all([
+        fetch(`/api/apps/${target.id}/health`, { cache: "no-store" }),
+        fetch(`/api/apps/${target.id}/metrics`, { cache: "no-store" })
+      ]);
+      if (!healthResponse.ok) throw new Error(await readError(healthResponse));
+      const healthData = (await healthResponse.json()) as AppHealthResponse;
+      setAppHealth(healthData.health);
+      if (!metricsResponse.ok) throw new Error(await readError(metricsResponse));
+      const metricsData = (await metricsResponse.json()) as AppMetricsResponse;
+      setAppMetrics(metricsData.metrics || []);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not load health and metrics.";
+      setHealthError(message);
+      setMetricsError(message);
+    } finally {
+      setHealthLoading(false);
+      setMetricsLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     if (!app) {
       return;
     }
-    const timer = window.setTimeout(() => void loadEnv(app), 0);
+    const timer = window.setTimeout(() => {
+      void loadEnv(app);
+      void loadHealthAndMetrics(app);
+    }, 0);
     return () => window.clearTimeout(timer);
-  }, [app, loadEnv]);
+  }, [app, loadEnv, loadHealthAndMetrics]);
 
   async function saveEnv(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1716,6 +1809,8 @@ function DetailPanel({
   const localUrl = appUrl(app);
   const latestDeployment = deployments[0] || null;
   const canDeploy = app.driver === "dockerfile" && Boolean(app.path) && app.enabled && connected;
+  const healthStatus = appHealth?.status || "unknown";
+  const latestMetric = appMetrics[0] || null;
 
   return (
     <aside className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:sticky lg:top-[84px]`}>
@@ -1738,14 +1833,20 @@ function DetailPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-1 border-b border-white/5 bg-black/20 px-2 py-2">
-        {(["overview", "deployments", "domains", "proxy", "github", "env", "logs", "config"] as const).map((item) => (
+      <div className="grid grid-cols-3 gap-1 border-b border-white/5 bg-black/20 px-2 py-2 sm:grid-cols-4">
+        {(["overview", "health", "deployments", "domains", "proxy", "github", "env", "logs", "config"] as const).map((item) => (
           <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-full px-2 py-1.5 text-[11px] font-bold capitalize ${FOCUS_RING} ${tab === item ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground"}`}>{item}</button>
         ))}
       </div>
 
       {tab === "overview" ? (
-        <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
+        <div className="px-4 py-4">
+          <div className="mb-4 grid grid-cols-3 gap-2">
+            <ReadinessCard label="Health" value={healthStatus} status={healthStatus === "healthy" ? "ok" : healthStatus === "unknown" ? "warn" : "error"} />
+            <ReadinessCard label="CPU" value={latestMetric?.cpuPercent == null ? "-" : `${latestMetric.cpuPercent.toFixed(1)}%`} status="ok" />
+            <ReadinessCard label="Memory" value={latestMetric ? formatBytes(latestMetric.memoryBytes) : "-"} status="ok" />
+          </div>
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-3 text-xs">
           <Meta label="Type" value={app.type} />
           <Meta label="Driver" value={app.driver} />
           <Meta label="Preset" value={app.preset} />
@@ -1758,6 +1859,65 @@ function DetailPanel({
           <Meta label="Path" value={app.path || "-"} mono wide />
           <Meta label="Healthcheck" value={app.healthcheck?.path ? `${app.healthcheck.path} -> ${app.healthcheck.expected_status || 200}` : "container state"} wide />
         </dl>
+        </div>
+      ) : null}
+
+      {tab === "health" ? (
+        <div>
+          <div className="border-b border-white/5 px-4 py-3">
+            <div className="grid grid-cols-3 gap-2">
+              <ReadinessCard label="State" value={healthStatus} status={healthStatus === "healthy" ? "ok" : healthStatus === "unknown" ? "warn" : "error"} />
+              <ReadinessCard label="Response" value={appHealth?.checks[0]?.responseTimeMs == null ? "-" : `${appHealth.checks[0].responseTimeMs}ms`} status="ok" />
+              <ReadinessCard label="Samples" value={String(appMetrics.length)} status={appMetrics.length ? "ok" : "warn"} />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <PillButton onClick={() => void loadHealthAndMetrics(app)} disabled={!connected || healthLoading || metricsLoading}>{healthLoading || metricsLoading ? "Refreshing" : "Refresh health"}</PillButton>
+              {healthError ? <span className="text-xs text-negative">{healthError}</span> : null}
+              {metricsError && metricsError !== healthError ? <span className="text-xs text-negative">{metricsError}</span> : null}
+            </div>
+          </div>
+
+          {appHealth?.checks.length === 0 && !healthLoading ? <div className="px-4 py-5 text-sm text-muted">No health sample recorded yet. Refresh health to evaluate the configured endpoint or runtime state.</div> : null}
+          {appHealth?.checks.map((check) => (
+            <div key={check.id} className="border-b border-white/5 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold capitalize">{check.target} health</p>
+                  <p className="mt-1 truncate text-[11px] text-muted">{check.message || "No message"}</p>
+                </div>
+                <StatusBadge status={check.status} />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-muted">
+                <Meta label="Path" value={check.path || "runtime state"} mono />
+                <Meta label="HTTP" value={check.httpStatus == null ? "-" : String(check.httpStatus)} mono />
+                <Meta label="Response" value={check.responseTimeMs == null ? "-" : `${check.responseTimeMs}ms`} mono />
+                <Meta label="Checked" value={timeAgo(check.checkedAt)} />
+              </div>
+            </div>
+          ))}
+
+          <div className="border-b border-white/5 px-4 py-3">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Metrics samples</p>
+            <div className="mt-3 grid gap-2">
+              {appMetrics.length === 0 ? <p className="text-sm text-muted">No metrics sampled yet.</p> : null}
+              {appMetrics.slice(0, 6).map((sample) => (
+                <div key={sample.id} className="rounded-md bg-black/25 px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.045)_inset]">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-xs font-bold capitalize">{sample.scope}</p>
+                    <p className="text-[11px] text-muted">{timeAgo(sample.sampledAt)}</p>
+                  </div>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-muted">
+                    <span>CPU <strong className="text-foreground">{sample.cpuPercent == null ? "-" : `${sample.cpuPercent.toFixed(1)}%`}</strong></span>
+                    <span>RAM <strong className="text-foreground">{formatBytes(sample.memoryBytes)} / {formatBytes(sample.memoryLimitBytes)}</strong></span>
+                    <span>Disk <strong className="text-foreground">{formatBytes(sample.diskUsedBytes)} / {formatBytes(sample.diskTotalBytes)}</strong></span>
+                    <span>Net <strong className="text-foreground">{formatBytes(sample.networkRxBytes)} / {formatBytes(sample.networkTxBytes)}</strong></span>
+                  </div>
+                  {sample.message ? <p className="mt-2 truncate text-[11px] text-muted">{sample.message}</p> : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {tab === "deployments" ? (

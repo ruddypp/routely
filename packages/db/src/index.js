@@ -115,12 +115,34 @@ export function migrate(db) {
     CREATE TABLE IF NOT EXISTS healthchecks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+      deployment_id INTEGER REFERENCES deployments(id) ON DELETE SET NULL,
+      target TEXT NOT NULL DEFAULT 'runtime',
       path TEXT,
       expected_status INTEGER NOT NULL DEFAULT 200,
       last_status TEXT,
+      last_http_status INTEGER,
+      last_response_time_ms INTEGER,
+      last_message TEXT,
       last_checked_at TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(app_id, target)
+    );
+
+    CREATE TABLE IF NOT EXISTS metrics_samples (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER REFERENCES apps(id) ON DELETE CASCADE,
+      deployment_id INTEGER REFERENCES deployments(id) ON DELETE SET NULL,
+      scope TEXT NOT NULL DEFAULT 'host',
+      cpu_percent REAL,
+      memory_bytes INTEGER,
+      memory_limit_bytes INTEGER,
+      disk_used_bytes INTEGER,
+      disk_total_bytes INTEGER,
+      network_rx_bytes INTEGER,
+      network_tx_bytes INTEGER,
+      message TEXT,
+      sampled_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
     CREATE TABLE IF NOT EXISTS deployments (
@@ -282,6 +304,17 @@ export function migrate(db) {
   addColumnIfMissing(db, "github_webhook_deliveries", "app_id", "INTEGER REFERENCES apps(id) ON DELETE SET NULL");
   addColumnIfMissing(db, "github_webhook_deliveries", "deployment_id", "INTEGER REFERENCES deployments(id) ON DELETE SET NULL");
   addColumnIfMissing(db, "github_webhook_deliveries", "message", "TEXT");
+
+  addColumnIfMissing(db, "healthchecks", "deployment_id", "INTEGER REFERENCES deployments(id) ON DELETE SET NULL");
+  addColumnIfMissing(db, "healthchecks", "target", "TEXT NOT NULL DEFAULT 'runtime'");
+  addColumnIfMissing(db, "healthchecks", "last_http_status", "INTEGER");
+  addColumnIfMissing(db, "healthchecks", "last_response_time_ms", "INTEGER");
+  addColumnIfMissing(db, "healthchecks", "last_message", "TEXT");
+  try {
+    db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_healthchecks_app_target ON healthchecks(app_id, target)");
+  } catch {
+    // Existing pre-index duplicate rows are harmless for the MVP queries.
+  }
 
   db.prepare(`
     INSERT OR IGNORE INTO servers (id, name, kind, status)
@@ -868,6 +901,116 @@ export function listDeploymentLogs(db, deploymentId, options = {}) {
     ORDER BY sequence ASC
     LIMIT ?
   `).all(deploymentId, afterSequence, limit);
+}
+
+export function upsertHealthcheckResult(db, input) {
+  const appId = Number(input.appId || input.app_id);
+  if (!Number.isInteger(appId)) {
+    throw new Error("Healthcheck appId is required.");
+  }
+  const target = String(input.target || "runtime");
+
+  db.prepare(`
+    INSERT INTO healthchecks (app_id, deployment_id, target, path, expected_status, last_status, last_http_status, last_response_time_ms, last_message, last_checked_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(app_id, target) DO UPDATE SET
+      deployment_id = excluded.deployment_id,
+      path = excluded.path,
+      expected_status = excluded.expected_status,
+      last_status = excluded.last_status,
+      last_http_status = excluded.last_http_status,
+      last_response_time_ms = excluded.last_response_time_ms,
+      last_message = excluded.last_message,
+      last_checked_at = CURRENT_TIMESTAMP,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    appId,
+    input.deploymentId || input.deployment_id || null,
+    target,
+    input.path || null,
+    input.expectedStatus || input.expected_status || 200,
+    input.status || "unknown",
+    input.httpStatus == null ? null : Number(input.httpStatus),
+    input.responseTimeMs == null ? null : Number(input.responseTimeMs),
+    input.message || null
+  );
+
+  return getHealthcheckForApp(db, appId, target);
+}
+
+export function getHealthcheckForApp(db, appId, target = "runtime") {
+  const row = db.prepare("SELECT * FROM healthchecks WHERE app_id = ? AND target = ?").get(appId, target) || null;
+  return row ? parseHealthcheckRecord(row) : null;
+}
+
+export function listHealthchecksForApp(db, appId) {
+  return db.prepare("SELECT * FROM healthchecks WHERE app_id = ? ORDER BY updated_at DESC, id DESC").all(appId).map(parseHealthcheckRecord);
+}
+
+export function recordMetricSample(db, input = {}) {
+  const result = db.prepare(`
+    INSERT INTO metrics_samples (app_id, deployment_id, scope, cpu_percent, memory_bytes, memory_limit_bytes, disk_used_bytes, disk_total_bytes, network_rx_bytes, network_tx_bytes, message)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.appId || input.app_id || null,
+    input.deploymentId || input.deployment_id || null,
+    input.scope || "host",
+    input.cpuPercent == null ? null : Number(input.cpuPercent),
+    input.memoryBytes == null ? null : Number(input.memoryBytes),
+    input.memoryLimitBytes == null ? null : Number(input.memoryLimitBytes),
+    input.diskUsedBytes == null ? null : Number(input.diskUsedBytes),
+    input.diskTotalBytes == null ? null : Number(input.diskTotalBytes),
+    input.networkRxBytes == null ? null : Number(input.networkRxBytes),
+    input.networkTxBytes == null ? null : Number(input.networkTxBytes),
+    input.message || null
+  );
+
+  return db.prepare("SELECT * FROM metrics_samples WHERE id = ?").get(Number(result.lastInsertRowid));
+}
+
+export function listMetricSamplesForApp(db, appId, options = {}) {
+  const limit = Number.isInteger(options.limit) ? options.limit : 30;
+  return db.prepare(`
+    SELECT * FROM metrics_samples
+    WHERE app_id = ? OR (app_id IS NULL AND scope = 'host')
+    ORDER BY sampled_at DESC, id DESC
+    LIMIT ?
+  `).all(appId, limit).map(parseMetricSampleRecord);
+}
+
+export function listHostMetricSamples(db, options = {}) {
+  const limit = Number.isInteger(options.limit) ? options.limit : 30;
+  return db.prepare(`
+    SELECT * FROM metrics_samples
+    WHERE app_id IS NULL AND scope = 'host'
+    ORDER BY sampled_at DESC, id DESC
+    LIMIT ?
+  `).all(limit).map(parseMetricSampleRecord);
+}
+
+function parseHealthcheckRecord(row) {
+  return {
+    ...row,
+    deployment_id: row.deployment_id == null ? null : Number(row.deployment_id),
+    expected_status: row.expected_status == null ? null : Number(row.expected_status),
+    last_http_status: row.last_http_status == null ? null : Number(row.last_http_status),
+    last_response_time_ms: row.last_response_time_ms == null ? null : Number(row.last_response_time_ms)
+  };
+}
+
+function parseMetricSampleRecord(row) {
+  return {
+    ...row,
+    app_id: row.app_id == null ? null : Number(row.app_id),
+    deployment_id: row.deployment_id == null ? null : Number(row.deployment_id),
+    cpu_percent: row.cpu_percent == null ? null : Number(row.cpu_percent),
+    memory_bytes: row.memory_bytes == null ? null : Number(row.memory_bytes),
+    memory_limit_bytes: row.memory_limit_bytes == null ? null : Number(row.memory_limit_bytes),
+    disk_used_bytes: row.disk_used_bytes == null ? null : Number(row.disk_used_bytes),
+    disk_total_bytes: row.disk_total_bytes == null ? null : Number(row.disk_total_bytes),
+    network_rx_bytes: row.network_rx_bytes == null ? null : Number(row.network_rx_bytes),
+    network_tx_bytes: row.network_tx_bytes == null ? null : Number(row.network_tx_bytes)
+  };
 }
 
 function parseDeploymentRecord(row) {

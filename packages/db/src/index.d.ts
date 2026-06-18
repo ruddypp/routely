@@ -7,6 +7,8 @@ import type {
   RoutelyAppStatus,
   RoutelyDeploymentLogRecord,
   RoutelyDeploymentRecord,
+  RoutelyHealthcheckRecord,
+  RoutelyMetricSampleRecord,
   RoutelyDeploymentStatus
 } from "@routely/core";
 
@@ -96,6 +98,45 @@ export function listDeploymentLogs(
   deploymentId: number,
   options?: { afterSequence?: number; limit?: number }
 ): RoutelyDeploymentLogRecord[];
+export function upsertHealthcheckResult(
+  db: Database.Database,
+  input: {
+    appId?: number;
+    app_id?: number;
+    deploymentId?: number | null;
+    deployment_id?: number | null;
+    target?: string;
+    path?: string | null;
+    expectedStatus?: number | null;
+    expected_status?: number | null;
+    status?: string;
+    httpStatus?: number | null;
+    responseTimeMs?: number | null;
+    message?: string | null;
+  }
+): RoutelyHealthcheckRecord;
+export function getHealthcheckForApp(db: Database.Database, appId: number, target?: string): RoutelyHealthcheckRecord | null;
+export function listHealthchecksForApp(db: Database.Database, appId: number): RoutelyHealthcheckRecord[];
+export function recordMetricSample(
+  db: Database.Database,
+  input?: {
+    appId?: number | null;
+    app_id?: number | null;
+    deploymentId?: number | null;
+    deployment_id?: number | null;
+    scope?: string;
+    cpuPercent?: number | null;
+    memoryBytes?: number | null;
+    memoryLimitBytes?: number | null;
+    diskUsedBytes?: number | null;
+    diskTotalBytes?: number | null;
+    networkRxBytes?: number | null;
+    networkTxBytes?: number | null;
+    message?: string | null;
+  }
+): RoutelyMetricSampleRecord;
+export function listMetricSamplesForApp(db: Database.Database, appId: number, options?: { limit?: number }): RoutelyMetricSampleRecord[];
+export function listHostMetricSamples(db: Database.Database, options?: { limit?: number }): RoutelyMetricSampleRecord[];
 export interface RoutelyDomainRecord {
   id: number;
   app_id: number;

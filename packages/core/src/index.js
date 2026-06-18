@@ -225,6 +225,93 @@ export function deploymentLogToPublicDto(log) {
   };
 }
 
+export function healthcheckToPublicDto(row) {
+  return {
+    id: row.id,
+    appId: row.app_id,
+    deploymentId: row.deployment_id == null ? null : Number(row.deployment_id),
+    target: row.target || "runtime",
+    path: row.path || null,
+    expectedStatus: row.expected_status == null ? null : Number(row.expected_status),
+    status: row.last_status || "unknown",
+    httpStatus: row.last_http_status == null ? null : Number(row.last_http_status),
+    responseTimeMs: row.last_response_time_ms == null ? null : Number(row.last_response_time_ms),
+    message: row.last_message || null,
+    checkedAt: row.last_checked_at || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export function metricSampleToPublicDto(row) {
+  return {
+    id: row.id,
+    appId: row.app_id == null ? null : Number(row.app_id),
+    deploymentId: row.deployment_id == null ? null : Number(row.deployment_id),
+    scope: row.scope || "host",
+    cpuPercent: row.cpu_percent == null ? null : Number(row.cpu_percent),
+    memoryBytes: row.memory_bytes == null ? null : Number(row.memory_bytes),
+    memoryLimitBytes: row.memory_limit_bytes == null ? null : Number(row.memory_limit_bytes),
+    diskUsedBytes: row.disk_used_bytes == null ? null : Number(row.disk_used_bytes),
+    diskTotalBytes: row.disk_total_bytes == null ? null : Number(row.disk_total_bytes),
+    networkRxBytes: row.network_rx_bytes == null ? null : Number(row.network_rx_bytes),
+    networkTxBytes: row.network_tx_bytes == null ? null : Number(row.network_tx_bytes),
+    message: row.message || null,
+    sampledAt: row.sampled_at
+  };
+}
+
+export function evaluateHttpHealthcheck(input = {}) {
+  const expectedStatus = input.expectedStatus == null ? 200 : Number(input.expectedStatus);
+  const httpStatus = input.httpStatus == null ? null : Number(input.httpStatus);
+  const responseTimeMs = input.responseTimeMs == null ? null : Number(input.responseTimeMs);
+
+  if (input.error) {
+    return {
+      status: "unhealthy",
+      httpStatus,
+      responseTimeMs,
+      message: String(input.error)
+    };
+  }
+
+  if (httpStatus === expectedStatus) {
+    return {
+      status: "healthy",
+      httpStatus,
+      responseTimeMs,
+      message: `HTTP ${httpStatus} in ${responseTimeMs ?? 0}ms`
+    };
+  }
+
+  return {
+    status: "unhealthy",
+    httpStatus,
+    responseTimeMs,
+    message: `HTTP ${httpStatus ?? "unreachable"}, expected ${expectedStatus}`
+  };
+}
+
+export function evaluateRuntimeHealth(input = {}) {
+  if (input.running) {
+    return { status: "healthy", message: input.message || "runtime is running" };
+  }
+
+  return { status: "unhealthy", message: input.message || "runtime is not running" };
+}
+
+export function formatSseEvent(event, data, options = {}) {
+  const lines = [];
+  if (options.id != null) lines.push(`id: ${String(options.id)}`);
+  if (event) lines.push(`event: ${String(event)}`);
+  const payload = typeof data === "string" ? data : JSON.stringify(data ?? {});
+  for (const line of payload.split(/\r?\n/)) {
+    lines.push(`data: ${line}`);
+  }
+  lines.push("", "");
+  return lines.join("\n");
+}
+
 export function isSecretEnvKey(key) {
   return SECRET_ENV_PATTERN.test(String(key || ""));
 }
