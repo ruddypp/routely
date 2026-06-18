@@ -1,6 +1,6 @@
 # Routely Agent Handoff
 
-Last updated: 2026-06-18
+Last updated: 2026-06-19
 
 This file preserves the current implementation context so another agent can continue without relying on chat history.
 
@@ -31,7 +31,8 @@ Future product/frontend architecture direction:
 - Do not keep adding every feature panel to the dashboard home until it becomes a long mixed page.
 - Put feature-by-feature workflows in the sidebar/navigation: Apps, Deployments, Domains, GitHub, Env, Logs, Health, Metrics, Databases, Backups, Settings.
 - Every feature page/panel should be backed by real daemon/API/storage data where practical.
-- Frontend should become more Dokploy-like: dense, readable, status-rich, clear hierarchy, comfortable for daily operations, inspector tabs, safe disabled states, and no horizontal overflow.
+- Frontend should become more Dokploy-like: dense, readable, status-rich, clear hierarchy, comfortable for daily operations, inspector tabs, timelines, safe disabled states, readable logs, and no horizontal overflow.
+- Improve font and typography during future frontend work: compact but legible UI text, smaller panel headings, clear labels, readable monospace blocks for commands/logs/env, no text clipping, and comfortable row rhythm.
 - This must not become frontend-only work. Backend/schema/API/CLI/tests/docs progress must lead each implementation checkpoint.
 
 ## Read First
@@ -55,6 +56,7 @@ Execution standard for future checkpoints:
 
 - Do not deliver frontend-only redesigns for implementation checkpoints.
 - Make real backend/storage/API/CLI progress first, with focused tests.
+- Treat every checkpoint as a full product slice where practical: schema/DB helpers, daemon endpoints, production auth, safe runtime/outbound behavior, secret redaction, CLI/API workflows, tests, docs, and then frontend.
 - Then improve the frontend around the new real data so the production panel becomes more Dokploy-like: dense, readable, status-rich, easy to operate daily, and comfortable for VPS work.
 - Keep dashboard home as overview. Move feature-specific workflows into sidebar sections/pages/panels instead of stuffing them all into the dashboard.
 - Keep the app identity clear: Routely is inspired by 9Router's local command/control loop and Dokploy's single-VPS production operations, but it should remain a bridge between local development and production using one app registry and dashboard mental model.

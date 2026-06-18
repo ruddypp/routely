@@ -1,6 +1,6 @@
 # Routely Agent Execution Context
 
-Last updated: 2026-06-18  
+Last updated: 2026-06-19  
 Current completed checkpoint: Checkpoint 10, Database Services and Backups  
 Next checkpoint: Checkpoint 11, Notifications and Release Polish
 
@@ -22,6 +22,12 @@ Before major production/dashboard/backend work, read:
 - `https://dokploy.com/`
 - `https://docs.dokploy.com/`
 - `https://docs.dokploy.com/docs/core/applications/going-production`
+
+This reading is mandatory for the next agent. The agent should inspect enough of both repositories and public docs to understand the product model before planning, especially:
+
+- How 9Router structures a local-first command/control workflow, one-command local runner, local registry, and quick status loop.
+- How Dokploy structures production operations across app pages, deployments, domains, HTTPS/proxy, logs, metrics, databases, backups, settings, inspectors, and safe controls.
+- How Routely should differ: one local-to-production registry and dashboard mental model for solo developers managing many apps on one VPS.
 
 Future agents must treat those references as required product context, not optional inspiration. Read the repositories and docs enough to understand:
 
@@ -91,12 +97,20 @@ Do not do a frontend-only redesign. For every checkpoint:
 
 Frontend/information architecture direction for upcoming work:
 
-- The dashboard home should become an overview only: server status, app counts, recent deploy/health/backup status, urgent failures, and next actions.
-- Do not keep expanding the main dashboard into a single overloaded page.
+- The dashboard home must become overview-only: server readiness, fleet/app counts, recent deployments, health failures, backup status, urgent next actions, and nothing that belongs to a feature workflow.
+- Do not keep expanding the main dashboard into a single overloaded page. New feature workflows must move into sidebar/navigation sections.
 - Put feature-by-feature operational surfaces in the sidebar/navigation: Apps, Deployments, Domains, GitHub, Env, Logs, Health, Metrics, Databases, Backups, Settings.
-- Each feature page/panel should be dense, readable, comfortable, and Dokploy-like: compact rows, clear hierarchy, status badges, safe actions, inspector tabs, and no horizontal overflow.
+- Each feature page/panel should be dense, readable, comfortable, and Dokploy-like: compact rows, clear hierarchy, status badges, safe actions, inspector tabs, timelines, readable logs, and no horizontal overflow.
+- Improve typography as part of frontend work: use compact, readable app UI type; tighten oversized headings inside panels; keep labels legible; avoid cramped long strings; make code/log/env text easy to scan.
+- Panels should feel like daily operations tools, not decorative marketing sections: clear resource rows, status cards, filters/tabs where useful, direct safe actions, obvious disabled states, and comfortable spacing.
 - Frontend enhancement is required, but only after backend/API/storage behavior exists. Do not ship mock-only panels as if they are implemented.
 - If a feature is not implemented yet, show it as disabled or future-checkpoint scope instead of making unsafe controls.
+
+Implementation bar for all future checkpoints:
+
+- Do not stop at frontend polish. Make comprehensive progress across storage/schema, DB helpers, daemon endpoints, production auth, safe runtime/command behavior, CLI/API workflows where useful, tests, docs, and then frontend.
+- The frontend should get better during each product slice, but it must be backed by real daemon/API/storage data.
+- Keep feature surfaces readable and comfortable: a solo developer should be able to inspect status, logs, settings, and next actions quickly without hunting through a long dashboard home.
 
 Next task:
 

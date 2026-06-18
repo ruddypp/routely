@@ -1,6 +1,6 @@
 # Next Agent Prompt
 
-Last updated: 2026-06-18  
+Last updated: 2026-06-19  
 Latest completed checkpoint: Checkpoint 10, Database Services and Backups  
 Expected commit: `feat: add database backups`
 
@@ -21,17 +21,22 @@ Before planning implementation, also read the current public reference products 
 
 Do not clone either product mechanically. Use them to understand product feel and operational shape.
 
-You must read enough of those repositories/docs to understand the product model before planning. Routely is inspired by:
+You must read enough of those repositories/docs to understand the product model before planning. Treat this as required context, not optional inspiration. Routely is inspired by:
 - 9Router's local-first command/control workflow, one-command local runner, local app registry, and quick dashboard status loop.
 - Dokploy's dense single-VPS production operations: app pages, deployments, domains, HTTPS/proxy, logs, metrics, databases, backups, readable inspectors, and safe daily controls.
 - Routely's own identity: bridge local development and single-VPS production through the same app registry and dashboard mental model.
 
+After reading those references, plan the next checkpoint around Routely's product identity, not as a clone. Keep the local-first runner visible and fast, then make production operations feel like a compact single-VPS control plane.
+
 Product/design execution rule:
-- Do not make this a frontend-only redesign. Make real backend/storage/API/CLI progress first, with tests.
+- Do not make this a frontend-only redesign. Make real backend/storage/API/CLI progress first, with focused tests.
+- Implementation must be comprehensive: schema/DB helpers, daemon endpoints, auth enforcement, safe runtime/outbound behavior, redaction, CLI/API workflows where useful, tests, docs, and then frontend.
 - After the backend slice exists, enhance the production dashboard so it remains dense, readable, status-rich, tabbed, safe, and backed by real daemon/API/storage data.
-- Make the frontend more Dokploy-like in information architecture and usability: dense operational panels, readable rows, clear status cards, inspector tabs, and safe actions.
-- Do not keep filling the dashboard home with every feature. The dashboard home should be overview only: fleet status, server readiness, recent deploys, health failures, backup status, and urgent next actions.
+- Make the frontend more Dokploy-like in information architecture and usability: dense operational panels, readable rows, clear status cards, inspector tabs, timelines, log/health/status panels, and safe actions.
+- Do not keep filling the dashboard home with every feature. The dashboard home must be overview only: fleet status, server readiness, recent deploys, health failures, backup status, urgent next actions, and links into feature pages.
 - Put feature-by-feature workflows in the sidebar/navigation: Apps, Deployments, Domains, GitHub, Env, Logs, Health, Metrics, Databases, Backups, Settings. Build or enhance those pages/panels only when backed by real backend/API/storage data.
+- Improve typography and readability while touching the frontend: compact but legible app UI fonts, smaller headings inside panels, readable labels, no text overflow, no cramped command/log/env values, clear scan paths, and comfortable row rhythm.
+- Panels should be easy to use daily: visible state, last event, next action, safe disabled states, confirmations for dangerous/future actions, and readable empty/loading/error states.
 - Keep future or unsafe features inert and labeled as later checkpoint work.
 - Preserve DESIGN.md: dark functional surfaces, compact typography, restrained green accent, rounded controls, and no generic SaaS landing page.
 
