@@ -4,7 +4,7 @@ Last updated: 2026-06-18
 Latest completed checkpoint: Checkpoint 7, GitHub Integration and Auto Deploy
 Expected commit: `feat: add github auto deploy slice`
 
-Use this prompt for the next implementation agent. It asks for the next full product/backend/frontend slice, not a frontend-only redesign.
+Use this prompt for the next implementation agent. It asks for the next full product/backend/frontend slice, not a frontend-only redesign. The agent should make significant backend/API/storage/CLI/test progress first, then improve the production dashboard with real data so the UX feels closer to Dokploy while preserving Routely's local-first identity.
 
 ```text
 You are working in /home/ruddypp/Documents/work/routely.
@@ -23,6 +23,12 @@ Do not clone either product mechanically. Use them to understand product feel an
 - 9Router inspiration: local-first command/control experience, single local dashboard, fast status visibility, local data directory, practical one-command flow, and low-friction daily developer use.
 - Dokploy inspiration: dense production control panel, projects/apps/databases mental model, deployment history, domain/HTTPS/proxy operations, logs, server readiness, readable status cards, and comfortable VPS operations.
 - Routely's identity: bridge local development and single-VPS production through the same app registry and dashboard mental model.
+
+Product/design execution rule:
+- Do not make this a frontend-only redesign. Make real backend/storage/API/CLI progress first, with tests.
+- After the backend slice exists, enhance the production dashboard so it feels more like a comfortable Dokploy-style VPS operations surface: dense, readable, status-rich, tabbed inspector, clear app/project hierarchy, deployment/domain/GitHub/env state, safe disabled states, and no horizontal overflow.
+- Every visible production panel should be backed by real daemon/API/storage data where practical. If a future feature is shown, keep it inert and label it as a future checkpoint.
+- The frontend should be better designed, but it must be a product surface for real operations, not decoration. Preserve `DESIGN.md`: dark functional surfaces, compact typography, restrained green accent, rounded controls, and no generic SaaS landing page.
 
 Current progress:
 - Checkpoint 0 through Checkpoint 7 are implemented.
@@ -52,6 +58,8 @@ Important execution bar:
 - Backend first: add app env/secret tables or extend existing schema safely, persistence helpers, redaction helpers, daemon endpoints, auth enforcement, deployment/runtime integration where practical, and tests.
 - CLI/API where useful: implement commands such as `routely env <app> list`, `routely env <app> set KEY=value`, and `routely env <app> unset KEY` if practical.
 - Frontend after backend exists: add env/settings sections to the app inspector and production panel backed by real daemon/API/storage data.
+- Make meaningful progress across the whole system: schema, DB helpers, daemon endpoints, Next.js same-origin route handlers, CLI workflows, dashboard UI, tests, and docs.
+- Improve the production panel as one cohesive operational workspace, not a pile of disconnected cards. It should be readable, easy to use, comfortable for daily VPS operations, and closer to Dokploy's dense app management feel.
 - Hide secret values after creation. Do not export secrets into `routely.yml` by default.
 - Redact configured secrets from logs where practical.
 - Mark apps as needing restart/redeploy after env/settings changes.

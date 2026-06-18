@@ -42,6 +42,14 @@ Before implementing, read:
 
 For production/dashboard work, also read the current 9Router and Dokploy repositories/docs listed above before planning implementation. The implementation should be comprehensive across backend, daemon/API, CLI where useful, persistence, tests, docs, and frontend. Frontend polish should make the panel more Dokploy-like, readable, and comfortable, but it must be backed by real daemon/API/storage data rather than mock-only UI.
 
+Execution standard for future checkpoints:
+
+- Do not deliver frontend-only redesigns for implementation checkpoints.
+- Make real backend/storage/API/CLI progress first, with focused tests.
+- Then improve the frontend around the new real data so the production panel becomes more Dokploy-like: dense, readable, status-rich, easy to operate daily, and comfortable for VPS work.
+- Keep the app identity clear: Routely is inspired by 9Router's local command/control loop and Dokploy's single-VPS production operations, but it should remain a bridge between local development and production using one app registry and dashboard mental model.
+- Any visible future feature must be inert and clearly labeled as a later checkpoint.
+
 For Next.js changes, follow `AGENTS.md`: read the relevant guide in `node_modules/next/dist/docs/` before editing Next.js code.
 
 ## Recent Commits
