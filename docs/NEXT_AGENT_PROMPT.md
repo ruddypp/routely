@@ -9,7 +9,7 @@ Use this prompt for the next implementation agent. It asks for the next full pro
 ```text
 You are working in /home/ruddypp/Documents/work/routely.
 
-Read AGENTS.md, docs/HANDOFF.md, docs/14-implementation-plan.md, docs/13-current-setup-status.md, DESIGN.md, and the relevant feature/spec docs before editing. Follow AGENTS.md strictly, including the Next.js docs rule and the auto-commit rule.
+Read AGENTS.md, docs/HANDOFF.md, docs/AGENT_EXECUTION_CONTEXT.md, docs/14-implementation-plan.md, docs/13-current-setup-status.md, DESIGN.md, and the relevant feature/spec docs before editing. Follow AGENTS.md strictly, including the Next.js docs rule and the auto-commit rule.
 
 Before planning implementation, also read the current public reference products that inspired Routely:
 - 9Router repository: https://github.com/decolua/9router
@@ -101,7 +101,7 @@ Testing and verification:
 
 Documentation and commit:
 - Update docs if behavior, commands, config fields, verification status, known caveats, or deferred boundaries change.
-- Update docs/HANDOFF.md and docs/13-current-setup-status.md at the end.
+- Update docs/HANDOFF.md, docs/13-current-setup-status.md, and docs/AGENT_EXECUTION_CONTEXT.md at the end if behavior or next checkpoint direction changes.
 - Update docs/NEXT_AGENT_PROMPT.md at the end if the next checkpoint changes.
 - Preserve unrelated user changes. Do not use destructive git commands.
 - After verification, commit only files changed for Checkpoint 9 with a concise commit message such as feat: add app health logs.
