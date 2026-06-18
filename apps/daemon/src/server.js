@@ -8,21 +8,27 @@ import { fileURLToPath } from "node:url";
 import {
   DEFAULT_DAEMON_PORT,
   appToPublicDto,
+  appEnvVarToPublicDto,
   defaultProductionDataDir,
   deploymentLogToPublicDto,
   deploymentToPublicDto,
   loadWorkspaceConfig,
+  mergeAppEnv,
+  redactSecrets,
   runServerDoctorChecks,
   upsertWorkspaceConfigEntry,
   verifyAdminToken
 } from "@routely/core";
 import {
   appendDeploymentLog,
+  appEnvPendingState,
+  clearAppEnvPendingFlags,
   connectAppToGithubRepository,
   createDeployment,
   createDomain,
   deleteApp,
   deleteDomain,
+  deleteAppEnvVar,
   deleteProxyRouteForDomain,
   getDeploymentById,
   getDomainByHostname,
@@ -32,6 +38,7 @@ import {
   getServerFoundationState,
   getSetting,
   initializeRoutely,
+  listAppEnvVars,
   listGithubConnectedAppsForPush,
   listGithubInstallations,
   listGithubRepositories,
@@ -43,6 +50,7 @@ import {
   listDomainsForApp,
   listProxyRoutes,
   listRunningRuntimeInstances,
+  listSecretValuesForApp,
   listApps,
   recordRuntimeStart,
   recordRuntimeStop,
@@ -56,6 +64,7 @@ import {
   updateAppStatus,
   updateDomainVerification,
   updateGithubWebhookDelivery,
+  upsertAppEnvVar,
   upsertGithubInstallation,
   upsertGithubRepository,
   upsertProxyRoute,
@@ -392,13 +401,14 @@ async function startLocalApp(appRecord) {
 
     const logPath = ensureLogPath(appRecord.name);
     const fd = openSync(logPath, "a");
-    const child = startCommandApp(appRecord, { stdio: ["ignore", fd, fd] });
+    const child = startCommandApp(appRecord, { stdio: ["ignore", fd, fd], env: runtimeEnvForApp(appRecord, "local") });
     child.unref();
     closeSync(fd);
 
     if (child.pid) {
       recordRuntimeStart(db, appRecord.id, child.pid);
     }
+    clearAppEnvPendingFlags(db, appRecord.id, { restart: true });
 
     child.on("exit", (code) => {
       const status = code === 0 ? "stopped" : "crashed";
@@ -577,6 +587,33 @@ function publicGithubStatus() {
   };
 }
 
+function appEnvSummary(appId) {
+  const env = listAppEnvVars(db, appId);
+  return {
+    vars: env.map(appEnvVarToPublicDto),
+    pending: appEnvPendingState(db, appId)
+  };
+}
+
+function runtimeEnvForApp(appRecord, scope) {
+  return mergeAppEnv(appRecord.env || {}, listAppEnvVars(db, appRecord.id), { scope });
+}
+
+function secretValuesForApp(appRecord) {
+  return listSecretValuesForApp(db, appRecord.id);
+}
+
+function redactForApp(appRecord, value) {
+  return redactSecrets(value, secretValuesForApp(appRecord));
+}
+
+function appendDeploymentLogForApp(appRecord, deploymentId, input) {
+  return appendDeploymentLog(db, deploymentId, {
+    ...input,
+    message: redactForApp(appRecord, input.message)
+  });
+}
+
 function queueDeploymentForApp(appRecord, source = {}) {
   const latest = getLatestSuccessfulDeploymentForApp(db, appRecord.id);
   const deployment = createDeployment(db, {
@@ -592,7 +629,7 @@ function queueDeploymentForApp(appRecord, source = {}) {
       : {},
     containerPort: appRecord.port || 3000
   });
-  appendDeploymentLog(db, deployment.id, {
+  appendDeploymentLogForApp(appRecord, deployment.id, {
     phase: "queued",
     message: source.commitSha
       ? `queued GitHub deployment for ${appRecord.name} at ${source.commitSha}`
@@ -654,14 +691,14 @@ async function runHealthcheck(appRecord, deployment) {
     for (let attempt = 0; attempt < 8; attempt += 1) {
       try {
         const response = await fetch(url);
-        appendDeploymentLog(db, deployment.id, { phase: "healthchecking", message: `healthcheck ${url} -> ${response.status}` });
+        appendDeploymentLogForApp(appRecord, deployment.id, { phase: "healthchecking", message: `healthcheck ${url} -> ${response.status}` });
         if (response.status === expected) {
           return;
         }
         lastError = new Error(`healthcheck returned ${response.status}, expected ${expected}`);
       } catch (error) {
         lastError = error;
-        appendDeploymentLog(db, deployment.id, { phase: "healthchecking", stream: "stderr", message: error instanceof Error ? error.message : String(error) });
+        appendDeploymentLogForApp(appRecord, deployment.id, { phase: "healthchecking", stream: "stderr", message: error instanceof Error ? error.message : String(error) });
       }
       await sleep(750);
     }
@@ -681,9 +718,9 @@ async function removeContainerIfPresent(containerName, deploymentId, phase = "st
   }
 }
 
-async function markDeploymentFailed(deploymentId, phase, error, containerName) {
+async function markDeploymentFailed(appRecord, deploymentId, phase, error, containerName) {
   const message = error instanceof Error ? error.message : String(error);
-  appendDeploymentLog(db, deploymentId, { phase, stream: "stderr", message });
+  appendDeploymentLogForApp(appRecord, deploymentId, { phase, stream: "stderr", message });
   updateDeployment(db, deploymentId, {
     status: "failed",
     phase,
@@ -701,7 +738,7 @@ async function runDockerfileDeployment(appRecord, deploymentId) {
 
   try {
     updateDeployment(db, deploymentId, { status: "preparing", phase: "preparing" });
-    appendDeploymentLog(db, deploymentId, { phase: "preparing", message: `preparing Dockerfile deployment for ${appRecord.name}` });
+    appendDeploymentLogForApp(appRecord, deploymentId, { phase: "preparing", message: `preparing Dockerfile deployment for ${appRecord.name}` });
 
     if (appRecord.driver !== "dockerfile") {
       throw new Error(`${appRecord.name} uses driver ${appRecord.driver}. Checkpoint 5 deploy supports dockerfile apps only.`);
@@ -723,21 +760,21 @@ async function runDockerfileDeployment(appRecord, deploymentId) {
     deployment = updateDeployment(db, deploymentId, { imageTag, containerName, hostPort, containerPort });
 
     updateDeployment(db, deploymentId, { status: "building", phase: "building" });
-    appendDeploymentLog(db, deploymentId, { phase: "building", message: `docker ${dockerBuildArgs({ context, dockerfile, imageTag }).join(" ")}` });
+    appendDeploymentLogForApp(appRecord, deploymentId, { phase: "building", message: `docker ${dockerBuildArgs({ context, dockerfile, imageTag }).join(" ")}` });
     await waitForLoggedChild(spawnDocker(dockerBuildArgs({ context, dockerfile, imageTag }), { cwd: context }), deploymentId, "building");
 
     updateDeployment(db, deploymentId, { status: "starting", phase: "starting" });
     await removeContainerIfPresent(containerName, deploymentId, "starting");
-    appendDeploymentLog(db, deploymentId, { phase: "starting", message: `starting ${containerName} on temporary port ${hostPort}` });
+    appendDeploymentLogForApp(appRecord, deploymentId, { phase: "starting", message: `starting ${containerName} on temporary port ${hostPort}` });
     await waitForLoggedChild(
-      spawnDocker(dockerRunArgs({ containerName, imageTag, hostPort, containerPort, env: appRecord.env || {} }), { cwd: context }),
+      spawnDocker(dockerRunArgs({ containerName, imageTag, hostPort, containerPort, env: runtimeEnvForApp(appRecord, "production") }), { cwd: context }),
       deploymentId,
       "starting"
     );
 
     deployment = getDeploymentById(db, deploymentId);
     updateDeployment(db, deploymentId, { status: "healthchecking", phase: "healthchecking" });
-    appendDeploymentLog(db, deploymentId, { phase: "healthchecking", message: appRecord.healthcheck?.path ? "running HTTP healthcheck" : "checking container state" });
+    appendDeploymentLogForApp(appRecord, deploymentId, { phase: "healthchecking", message: appRecord.healthcheck?.path ? "running HTTP healthcheck" : "checking container state" });
     await runHealthcheck(appRecord, deployment);
 
     updateDeployment(db, deploymentId, {
@@ -747,13 +784,14 @@ async function runDockerfileDeployment(appRecord, deploymentId) {
       finishedAt: new Date().toISOString()
     });
     updateAppStatus(db, appRecord.id, "running");
+    clearAppEnvPendingFlags(db, appRecord.id, { redeploy: true });
     const routes = materializeProxyRoutesForApp(appRecord.id);
     if (routes.length > 0) {
-      appendDeploymentLog(db, deploymentId, { phase: "succeeded", message: `refreshed ${routes.length} proxy route(s)` });
+      appendDeploymentLogForApp(appRecord, deploymentId, { phase: "succeeded", message: `refreshed ${routes.length} proxy route(s)` });
     }
-    appendDeploymentLog(db, deploymentId, { phase: "succeeded", message: `deployment succeeded at ${deploymentUrl(getDeploymentById(db, deploymentId))}` });
+    appendDeploymentLogForApp(appRecord, deploymentId, { phase: "succeeded", message: `deployment succeeded at ${deploymentUrl(getDeploymentById(db, deploymentId))}` });
   } catch (error) {
-    await markDeploymentFailed(deploymentId, getDeploymentById(db, deploymentId)?.phase || "failed", error, containerName);
+    await markDeploymentFailed(appRecord, deploymentId, getDeploymentById(db, deploymentId)?.phase || "failed", error, containerName);
   }
 }
 
@@ -811,7 +849,7 @@ function readRecentLogs(appRecord) {
 
   const stats = statSync(logPath);
   const start = Math.max(0, stats.size - LOG_TAIL_BYTES);
-  const content = readFileSync(logPath).subarray(start).toString("utf8");
+  const content = redactForApp(appRecord, readFileSync(logPath).subarray(start).toString("utf8"));
 
   return { path: logPath, content, bytes: stats.size, truncated: start > 0 };
 }
@@ -1013,6 +1051,48 @@ app.post("/apps/:id/restart", async (request, reply) => {
   }
 
   return reply.code(200).send({ app: appToPublicDto(result.app), pid: result.pid });
+});
+
+app.get("/apps/:id/env", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+
+  return { app: appToPublicDto(record), env: appEnvSummary(record.id) };
+});
+
+app.post("/apps/:id/env", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+
+  try {
+    const saved = upsertAppEnvVar(db, record.id, request.body || {});
+    return reply.code(201).send({ app: appToPublicDto(record), envVar: appEnvVarToPublicDto(saved), env: appEnvSummary(record.id) });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid environment variable payload." });
+  }
+});
+
+app.patch("/apps/:id/env/:key", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+
+  try {
+    const saved = upsertAppEnvVar(db, record.id, { ...(request.body || {}), key: request.params.key });
+    return reply.code(200).send({ app: appToPublicDto(record), envVar: appEnvVarToPublicDto(saved), env: appEnvSummary(record.id) });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid environment variable payload." });
+  }
+});
+
+app.delete("/apps/:id/env/:key", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+
+  const deleted = deleteAppEnvVar(db, record.id, request.params.key);
+  if (!deleted) {
+    return reply.code(404).send({ error: `Environment variable ${request.params.key} was not found for ${record.name}.` });
+  }
+  return reply.code(200).send({ ok: true, app: appToPublicDto(record), env: appEnvSummary(record.id) });
 });
 
 app.get("/apps/:id/logs", async (request, reply) => {

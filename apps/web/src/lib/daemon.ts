@@ -53,6 +53,29 @@ export type DaemonAppLogsResponse = {
   truncated: boolean;
 };
 
+export type DaemonAppEnvVar = {
+  id: number;
+  appId: number;
+  key: string;
+  value: string | null;
+  displayValue: string;
+  isSecret: boolean;
+  scope: string;
+  needsRestart: boolean;
+  needsRedeploy: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DaemonAppEnvResponse = {
+  app: DaemonApp;
+  env: {
+    vars: DaemonAppEnvVar[];
+    pending: { count: number; needsRestart: boolean; needsRedeploy: boolean };
+  };
+  envVar?: DaemonAppEnvVar;
+};
+
 export type DaemonDeployment = {
   id: number;
   appId: number;

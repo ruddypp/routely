@@ -102,6 +102,14 @@ Product references for future work:
 - Next.js same-origin route handlers proxy GitHub management endpoints under `/api/*`, and `/api/github/webhook` forwards the raw signed body to the daemon.
 - The dashboard production panel and app inspector now show GitHub configured/unconfigured state, repository/branch connection, auto-deploy state, recent webhook delivery status, and GitHub inspector data from real daemon/API/storage state.
 - GitHub App OAuth install callback, live GitHub API repo/branch fetching, commit status updates, backups, static deploys, production database templates, full rollback, metrics collection, notifications, and broader VPS operations remain deferred.
+- Checkpoint 8 has added the first environment, secrets, and app settings slice.
+- SQLite now stores secret-aware runtime env in `app_env_vars`, plus app-level `needs_restart` and `needs_redeploy` flags so pending state survives env deletion and settings edits.
+- Shared helpers validate env keys, infer likely secret keys, merge portable `routely.yml` env with stored env by scope, hide secret values in API DTOs, and redact configured secret values from returned app/deployment logs where practical.
+- The daemon exposes authenticated env endpoints at `/apps/:id/env` and `/apps/:id/env/:key`, injects merged env into local command starts and Dockerfile production containers, clears restart-needed after successful local starts, and clears redeploy-needed after successful Dockerfile deploys.
+- CLI env commands now exist: `routely env <app> list`, `routely env <app> set KEY=value [--secret] [--scope all|local|production]`, and `routely env <app> unset KEY`.
+- Next.js same-origin route handlers proxy env endpoints under `/api/*`; browser code still does not call the daemon directly.
+- The dashboard inspector now has an Env tab backed by real daemon/API/storage data, including masked secrets, scope, restart/redeploy-needed state, set/unset controls, and row/overview pending indicators.
+- Backups, notifications, production database templates, full rollback, metrics collection, and broad VPS operations remain deferred.
 
 ## Current Structure
 
@@ -215,6 +223,9 @@ routely doctor
 routely server init --data-dir /var/lib/routely
 routely server doctor
 routely deploy web --watch
+routely env web list
+routely env web set DATABASE_URL=postgres://user:pass@db/app --secret --scope production
+routely env web unset DATABASE_URL
 routely domain root example.com
 routely domain add web web.example.com
 routely domain verify web.example.com
@@ -232,7 +243,7 @@ Command apps declared in `routely.yml` can use `depends_on` to control local sta
 
 Local Compose services declared in `services:` use `driver: compose`. Generated Compose files are written under `.routely/compose` unless `compose_file` is supplied. Database templates are local-development defaults and are internal by default where practical.
 
-Production server foundation now supports Dockerfile deployments, domain/proxy/HTTPS state, and signed GitHub push-to-deploy for apps connected to a GitHub repository/branch. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API and CLI processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Dockerfile deployments are available through `routely deploy <app> [--watch]` and the dashboard deploy panel. Domain commands and the dashboard can add hostnames, verify DNS against `ROUTELY_SERVER_PUBLIC_IP`, and generate Traefik-compatible HTTPS routes for the latest successful deployment. GitHub App env can be configured with `ROUTELY_GITHUB_APP_ID`, `ROUTELY_GITHUB_WEBHOOK_SECRET`, `ROUTELY_GITHUB_PRIVATE_KEY`, `ROUTELY_GITHUB_CLIENT_ID`, and `ROUTELY_GITHUB_CLIENT_SECRET`. Backups, static deploys, full rollback, metrics, notifications, and broad VPS operations remain deferred to later checkpoints.
+Production server foundation now supports Dockerfile deployments, domain/proxy/HTTPS state, signed GitHub push-to-deploy for apps connected to a GitHub repository/branch, and stored env/secrets injection. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API and CLI processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Dockerfile deployments are available through `routely deploy <app> [--watch]` and the dashboard deploy panel. Domain commands and the dashboard can add hostnames, verify DNS against `ROUTELY_SERVER_PUBLIC_IP`, and generate Traefik-compatible HTTPS routes for the latest successful deployment. Env commands and the dashboard Env inspector store secret values in SQLite, hide them after save, and mark apps as needing restart/redeploy after env/settings changes. GitHub App env can be configured with `ROUTELY_GITHUB_APP_ID`, `ROUTELY_GITHUB_WEBHOOK_SECRET`, `ROUTELY_GITHUB_PRIVATE_KEY`, `ROUTELY_GITHUB_CLIENT_ID`, and `ROUTELY_GITHUB_CLIENT_SECRET`. Backups, static deploys, full rollback, metrics, notifications, and broad VPS operations remain deferred to later checkpoints.
 
 ## CLI Build And Global Reinstall Flow
 
@@ -282,6 +293,8 @@ run command
 - Checkpoint 6 tests cover proxy config generation, Docker labels, wildcard instructions, mocked DNS verification, persisted domain/proxy route state, and same-origin Next.js domain/proxy route handlers.
 - Checkpoint 7 verification passed `npm run lint`, `npm run test --workspace apps/cli`, `npm run build --workspace apps/cli`, `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, and `node --check apps/daemon/src/server.js`.
 - Checkpoint 7 tests cover GitHub signature validation, webhook event filtering, delivery deduplication, GitHub installation/repository/source metadata persistence, and same-origin Next.js GitHub route handlers.
+- Checkpoint 8 verification passed `npm run lint`, `npm run test --workspace apps/cli`, `npm run build --workspace apps/cli`, `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, and `node --check apps/daemon/src/server.js`.
+- Checkpoint 8 tests cover secret redaction, env merge precedence, env CRUD visibility, restart/redeploy-needed state for env and app settings edits, and same-origin Next.js env route handlers.
 - `npm run build --workspace apps/web` was attempted for Checkpoint 7 and emitted only a Turbopack two-error summary without actionable diagnostics; lint and TypeScript passed. This remains documented as the existing web build/reporting caveat.
 - `npm run build --workspace apps/web` still returns only the partial `Finished TypeScript...` progress line with no final exit marker and no remaining build process, matching the existing web build caveat.
 
@@ -313,12 +326,12 @@ Ports checked as free during the latest setup audit:
 
 ## Next Development Target
 
-Recommended next implementation step after Checkpoint 7:
+Recommended next implementation step after Checkpoint 8:
 
 ```text
-Checkpoint 8: Environment, Secrets, and App Settings
-  - Add app env/secret storage, API, CLI, and dashboard editing.
-  - Hide secret values after creation and redact configured secrets from logs.
-  - Mark apps as needing restart/redeploy after settings changes.
+Checkpoint 9: Logs, Metrics, and Health
+  - Add richer healthcheck behavior, runtime/container health state, and log/metric surfaces.
+  - Separate runtime logs from deployment logs where practical.
+  - Add failure summaries for build, start, proxy, and healthcheck phases.
   - Keep browser calls routed through same-origin /api/* handlers.
 ```

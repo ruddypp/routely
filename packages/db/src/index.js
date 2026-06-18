@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { normalizeAppInput } from "@routely/core";
+import { normalizeAppEnvInput, normalizeAppInput } from "@routely/core";
 
 export const routelyDbVersion = "0.1.0";
 
@@ -66,10 +66,26 @@ export function migrate(db) {
       volumes TEXT NOT NULL DEFAULT '[]',
       compose_file TEXT,
       compose_service TEXT,
+      needs_restart INTEGER NOT NULL DEFAULT 0,
+      needs_redeploy INTEGER NOT NULL DEFAULT 0,
       enabled INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'stopped',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS app_env_vars (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
+      key TEXT NOT NULL,
+      value TEXT NOT NULL DEFAULT '',
+      is_secret INTEGER NOT NULL DEFAULT 0,
+      scope TEXT NOT NULL DEFAULT 'all',
+      needs_restart INTEGER NOT NULL DEFAULT 1,
+      needs_redeploy INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(app_id, key)
     );
 
     CREATE TABLE IF NOT EXISTS runtime_instances (
@@ -239,6 +255,12 @@ export function migrate(db) {
   addColumnIfMissing(db, "apps", "volumes", "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(db, "apps", "compose_file", "TEXT");
   addColumnIfMissing(db, "apps", "compose_service", "TEXT");
+  addColumnIfMissing(db, "apps", "needs_restart", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "apps", "needs_redeploy", "INTEGER NOT NULL DEFAULT 0");
+
+  addColumnIfMissing(db, "app_env_vars", "scope", "TEXT NOT NULL DEFAULT 'all'");
+  addColumnIfMissing(db, "app_env_vars", "needs_restart", "INTEGER NOT NULL DEFAULT 1");
+  addColumnIfMissing(db, "app_env_vars", "needs_redeploy", "INTEGER NOT NULL DEFAULT 1");
 
   addColumnIfMissing(db, "deployments", "phase", "TEXT NOT NULL DEFAULT 'queued'");
   addColumnIfMissing(db, "deployments", "image_tag", "TEXT");
@@ -356,7 +378,18 @@ function parseAppRecord(row) {
     domains: parseJsonArray(row.domains),
     source: parseJsonObject(row.source) || null,
     internal: Boolean(row.internal),
-    volumes: parseJsonArray(row.volumes)
+    volumes: parseJsonArray(row.volumes),
+    needs_restart: Boolean(row.needs_restart),
+    needs_redeploy: Boolean(row.needs_redeploy)
+  };
+}
+
+function parseAppEnvVarRecord(row) {
+  return {
+    ...row,
+    is_secret: Boolean(row.is_secret),
+    needs_restart: Boolean(row.needs_restart),
+    needs_redeploy: Boolean(row.needs_redeploy)
   };
 }
 
@@ -494,10 +527,11 @@ export function updateApp(db, appId, input) {
     name: input.name ?? existing.name,
     status: input.status ?? existing.status
   });
+  const settingsChanged = appSettingsChanged(existing, app);
 
   db.prepare(`
     UPDATE apps
-    SET server_id = ?, name = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, install = ?, dev = ?, build = ?, start = ?, env = ?, port = ?, depends_on = ?, healthcheck = ?, domains = ?, source = ?, image = ?, internal = ?, volumes = ?, compose_file = ?, compose_service = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+    SET server_id = ?, name = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, install = ?, dev = ?, build = ?, start = ?, env = ?, port = ?, depends_on = ?, healthcheck = ?, domains = ?, source = ?, image = ?, internal = ?, volumes = ?, compose_file = ?, compose_service = ?, needs_restart = ?, needs_redeploy = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
     app.server_id,
@@ -522,12 +556,40 @@ export function updateApp(db, appId, input) {
     serializeJsonArray(app.volumes),
     app.compose_file,
     app.compose_service,
+    settingsChanged ? 1 : existing.needs_restart ? 1 : 0,
+    settingsChanged ? 1 : existing.needs_redeploy ? 1 : 0,
     app.enabled ? 1 : 0,
     app.status,
     appId
   );
 
   return getAppById(db, appId);
+}
+
+function appSettingsChanged(existing, next) {
+  const keys = [
+    "type",
+    "preset",
+    "driver",
+    "path",
+    "command",
+    "install",
+    "dev",
+    "build",
+    "start",
+    "env",
+    "port",
+    "healthcheck",
+    "domains",
+    "source",
+    "image",
+    "internal",
+    "volumes",
+    "compose_file",
+    "compose_service",
+    "enabled"
+  ];
+  return keys.some((key) => JSON.stringify(existing[key] ?? null) !== JSON.stringify(next[key] ?? null));
 }
 
 /**
@@ -583,6 +645,90 @@ export function deleteApp(db, appId) {
 
 export function updateAppStatus(db, appId, status) {
   db.prepare("UPDATE apps SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(status, appId);
+}
+
+export function listAppEnvVars(db, appId) {
+  return db.prepare("SELECT * FROM app_env_vars WHERE app_id = ? ORDER BY key ASC").all(appId).map(parseAppEnvVarRecord);
+}
+
+export function getAppEnvVar(db, appId, key) {
+  const row = db.prepare("SELECT * FROM app_env_vars WHERE app_id = ? AND key = ?").get(appId, String(key || "").trim()) || null;
+  return row ? parseAppEnvVarRecord(row) : null;
+}
+
+export function upsertAppEnvVar(db, appId, input) {
+  const app = getAppById(db, appId);
+  if (!app) return null;
+  const env = normalizeAppEnvInput(input);
+
+  db.prepare(`
+    INSERT INTO app_env_vars (app_id, key, value, is_secret, scope, needs_restart, needs_redeploy)
+    VALUES (?, ?, ?, ?, ?, 1, 1)
+    ON CONFLICT(app_id, key) DO UPDATE SET
+      value = excluded.value,
+      is_secret = excluded.is_secret,
+      scope = excluded.scope,
+      needs_restart = 1,
+      needs_redeploy = 1,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(app.id, env.key, env.value, env.isSecret ? 1 : 0, env.scope);
+
+  db.prepare("UPDATE apps SET needs_restart = 1, needs_redeploy = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(app.id);
+
+  return getAppEnvVar(db, app.id, env.key);
+}
+
+export function deleteAppEnvVar(db, appId, key) {
+  const result = db.prepare("DELETE FROM app_env_vars WHERE app_id = ? AND key = ?").run(appId, String(key || "").trim());
+  if (result.changes > 0) {
+    db.prepare("UPDATE apps SET needs_restart = 1, needs_redeploy = 1, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(appId);
+  }
+  return result.changes > 0;
+}
+
+export function clearAppEnvPendingFlags(db, appId, flags = {}) {
+  const clearRestart = flags.restart === true;
+  const clearRedeploy = flags.redeploy === true;
+  if (!clearRestart && !clearRedeploy) return listAppEnvVars(db, appId);
+
+  db.prepare(`
+    UPDATE app_env_vars
+    SET needs_restart = CASE WHEN ? THEN 0 ELSE needs_restart END,
+        needs_redeploy = CASE WHEN ? THEN 0 ELSE needs_redeploy END,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE app_id = ?
+  `).run(clearRestart ? 1 : 0, clearRedeploy ? 1 : 0, appId);
+
+  db.prepare(`
+    UPDATE apps
+    SET needs_restart = CASE WHEN ? THEN 0 ELSE needs_restart END,
+        needs_redeploy = CASE WHEN ? THEN 0 ELSE needs_redeploy END,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(clearRestart ? 1 : 0, clearRedeploy ? 1 : 0, appId);
+
+  return listAppEnvVars(db, appId);
+}
+
+export function appEnvPendingState(db, appId) {
+  const app = getAppById(db, appId);
+  const row = db.prepare(`
+    SELECT
+      COALESCE(MAX(needs_restart), 0) AS needs_restart,
+      COALESCE(MAX(needs_redeploy), 0) AS needs_redeploy,
+      COUNT(*) AS count
+    FROM app_env_vars
+    WHERE app_id = ?
+  `).get(appId);
+  return {
+    count: Number(row?.count || 0),
+    needsRestart: Boolean(app?.needs_restart || row?.needs_restart),
+    needsRedeploy: Boolean(app?.needs_redeploy || row?.needs_redeploy)
+  };
+}
+
+export function listSecretValuesForApp(db, appId) {
+  return db.prepare("SELECT value FROM app_env_vars WHERE app_id = ? AND is_secret = 1").all(appId).map((row) => String(row.value || "")).filter(Boolean);
 }
 
 export function recordRuntimeStart(db, appId, pid) {

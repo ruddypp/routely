@@ -21,6 +21,7 @@ import {
   DEFAULT_DAEMON_PORT,
   DEFAULT_DASHBOARD_PORT,
   appToPublicDto,
+  mergeAppEnv,
   defaultProductionDataDir,
   generateAdminToken,
   hashAdminToken,
@@ -35,6 +36,7 @@ import {
 import {
   getAppByName,
   initializeRoutely,
+  listAppEnvVars,
   listRunningRuntimeInstances,
   listApps,
   reconcileStaleRuntimeInstances,
@@ -42,6 +44,7 @@ import {
   recordRuntimeStop,
   saveServerFoundationState,
   syncWorkspaceConfig,
+  clearAppEnvPendingFlags,
   updateAppStatus,
   upsertApp
 } from "@routely/db";
@@ -125,6 +128,9 @@ Usage:
   routely logs [app]       Print app logs, optionally with --follow
   routely restart [app]    Restart one command app
   routely deploy <app>     Trigger a Dockerfile production deployment, optionally with --watch
+  routely env <app> list
+  routely env <app> set KEY=value [--secret] [--scope all|local|production]
+  routely env <app> unset KEY
   routely github status     Show GitHub App, repositories, and recent webhook deliveries
   routely github repo add <owner/repo> [--branch <branch>] [--installation-id <id>]
   routely github connect <app> <owner/repo> [--branch <branch>] [--auto-deploy false]
@@ -209,6 +215,27 @@ type RoutelyGithubStatusResponse = {
   };
 };
 
+type RoutelyAppEnvVarDto = {
+  id: number;
+  appId: number;
+  key: string;
+  value: string | null;
+  displayValue: string;
+  isSecret: boolean;
+  scope: string;
+  needsRestart: boolean;
+  needsRedeploy: boolean;
+};
+
+type RoutelyAppEnvResponse = {
+  app: RoutelyAppDtoLike;
+  env: {
+    vars: RoutelyAppEnvVarDto[];
+    pending: { count: number; needsRestart: boolean; needsRedeploy: boolean };
+  };
+  envVar?: RoutelyAppEnvVarDto;
+};
+
 async function daemonRequest<T>(path: string, init: RequestInit = {}): Promise<DaemonResult<T>> {
   const daemonUrl = process.env.ROUTELY_DAEMON_URL || `http://127.0.0.1:${process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT}`;
   const adminToken = process.env.ROUTELY_ADMIN_TOKEN;
@@ -277,19 +304,27 @@ function attachForegroundLogs(child: ChildProcess, appName: string): void {
 
 function startLoggedCommandApp(app: RoutelyAppRecord, mode: "foreground" | "detached" = "foreground"): ChildProcess {
   writeLogHeader(app.name, `starting ${app.command || "command"}`);
+  const env = runtimeEnvForApp(app, "local");
 
   if (mode === "foreground") {
-    const child = startCommandApp(app, { stdio: ["ignore", "pipe", "pipe"] });
+    const child = startCommandApp(app, { stdio: ["ignore", "pipe", "pipe"], env });
     attachForegroundLogs(child, app.name);
     return child;
   }
 
   const logPath = ensureLogPath(app.name);
   const fd = openSync(logPath, "a");
-  const child = startCommandApp(app, { stdio: ["ignore", fd, fd] });
+  const child = startCommandApp(app, { stdio: ["ignore", fd, fd], env });
   child.unref();
   closeSync(fd);
   return child;
+}
+
+function runtimeEnvForApp(app: RoutelyAppRecord, scope: "local" | "production" | "all"): Record<string, string> {
+  const { db } = initializeRoutely(workspaceRoot);
+  const env = mergeAppEnv(app.env || {}, listAppEnvVars(db, app.id), { scope });
+  db.close();
+  return env;
 }
 
 function stopPid(pid: number): void {
@@ -635,6 +670,7 @@ async function upCommand(): Promise<void> {
       if (child.pid) {
         recordRuntimeStart(db, app.id, child.pid);
       }
+      clearAppEnvPendingFlags(db, app.id, { restart: true });
 
       child.on("exit", (code) => {
         const status = shuttingDown || code === 0 ? "stopped" : "crashed";
@@ -800,9 +836,91 @@ async function restartCommand(args: string[]): Promise<void> {
   if (child.pid) {
     recordRuntimeStart(db, app.id, child.pid);
   }
+  clearAppEnvPendingFlags(db, app.id, { restart: true });
 
   console.log(`Restarted ${app.name}${child.pid ? ` (${child.pid})` : ""}.`);
   db.close();
+}
+
+async function envCommand(args: string[]): Promise<void> {
+  const appName = String(args[0] || "").trim();
+  const subcommand = String(args[1] || "list").trim();
+
+  if (!appName || !["list", "ls", "set", "unset", "rm"].includes(subcommand)) {
+    console.error("Usage: routely env <app> <list|set|unset> [KEY=value|KEY] [--secret] [--scope all|local|production]");
+    process.exit(1);
+  }
+
+  const { db } = initializeRoutely(workspaceRoot);
+  syncConfig(db);
+  const app = getAppByName(db, appName);
+  db.close();
+  if (!app) {
+    console.error(`App not found: ${appName}`);
+    process.exit(1);
+  }
+
+  if (subcommand === "list" || subcommand === "ls") {
+    const result = await daemonRequest<RoutelyAppEnvResponse>(`/apps/${app.id}/env`);
+    if (!result.ok) {
+      console.error(`Could not list env vars: ${result.error}`);
+      process.exit(1);
+    }
+    const rows = result.data.env.vars;
+    if (rows.length === 0) {
+      console.log(`No stored env vars for ${app.name}.`);
+      return;
+    }
+    for (const row of rows) {
+      const flags = [row.isSecret ? "secret" : "plain", `scope:${row.scope}`];
+      if (row.needsRestart) flags.push("restart-needed");
+      if (row.needsRedeploy) flags.push("redeploy-needed");
+      console.log(`${row.key}=${row.displayValue}\t${flags.join("\t")}`);
+    }
+    return;
+  }
+
+  if (subcommand === "set") {
+    const { positionals, flags } = parseFlags(args.slice(2));
+    const assignment = String(positionals[0] || "");
+    const separator = assignment.indexOf("=");
+    if (separator <= 0) {
+      console.error("Usage: routely env <app> set KEY=value [--secret] [--scope all|local|production]");
+      process.exit(1);
+    }
+    const result = await daemonRequest<RoutelyAppEnvResponse>(`/apps/${app.id}/env`, {
+      method: "POST",
+      body: JSON.stringify({
+        key: assignment.slice(0, separator),
+        value: assignment.slice(separator + 1),
+        isSecret: Boolean(flags.secret),
+        scope: typeof flags.scope === "string" ? flags.scope : "all"
+      })
+    });
+    if (!result.ok) {
+      console.error(`Could not set env var: ${result.error}`);
+      process.exit(1);
+    }
+    const saved = result.data.envVar;
+    console.log(`Set ${saved?.key || assignment.slice(0, separator)} for ${app.name}.`);
+    console.log(`Visibility: ${saved?.isSecret ? "secret" : "plain"}`);
+    console.log("State: restart-needed, redeploy-needed");
+    return;
+  }
+
+  const key = String(args[2] || "").trim();
+  if (!key) {
+    console.error("Usage: routely env <app> unset KEY");
+    process.exit(1);
+  }
+  const result = await daemonRequest<RoutelyAppEnvResponse>(`/apps/${app.id}/env/${encodeURIComponent(key)}`, {
+    method: "DELETE"
+  });
+  if (!result.ok) {
+    console.error(`Could not unset env var: ${result.error}`);
+    process.exit(1);
+  }
+  console.log(`Unset ${key} for ${app.name}.`);
 }
 
 async function deployCommand(args: string[]): Promise<void> {
@@ -1232,6 +1350,9 @@ switch (command) {
     break;
   case "deploy":
     await deployCommand(argv.slice(1));
+    break;
+  case "env":
+    await envCommand(argv.slice(1));
     break;
   case "github":
     await githubCommand(argv.slice(1));

@@ -9,6 +9,7 @@ export const APP_STATUSES = ["stopped", "running", "starting", "crashed", "unkno
 export const DEPLOYMENT_STATUSES = ["queued", "preparing", "building", "starting", "healthchecking", "succeeded", "failed"];
 
 const SECRET_ENV_PATTERN = /(SECRET|TOKEN|PASSWORD|PRIVATE|KEY)/i;
+const REDACTED_VALUE = "[redacted]";
 
 function enumValue(value, allowed, fallback, label) {
   const normalized = value || fallback;
@@ -178,6 +179,8 @@ export function appToPublicDto(app) {
     volumes: app.volumes || [],
     composeFile: app.compose_file || null,
     composeService: app.compose_service || null,
+    needsRestart: Boolean(app.needs_restart),
+    needsRedeploy: Boolean(app.needs_redeploy),
     enabled: Boolean(app.enabled),
     status: app.status,
     createdAt: app.created_at,
@@ -220,6 +223,69 @@ export function deploymentLogToPublicDto(log) {
     message: log.message || "",
     createdAt: log.created_at
   };
+}
+
+export function isSecretEnvKey(key) {
+  return SECRET_ENV_PATTERN.test(String(key || ""));
+}
+
+export function normalizeEnvKey(key) {
+  const normalized = String(key || "").trim();
+  if (!normalized) {
+    throw new Error("Environment variable key is required.");
+  }
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(normalized)) {
+    throw new Error(`Invalid environment variable key: ${normalized}. Use shell-style names like DATABASE_URL.`);
+  }
+  return normalized;
+}
+
+export function normalizeAppEnvInput(input = {}) {
+  const key = normalizeEnvKey(input.key);
+  return {
+    key,
+    value: input.value == null ? "" : String(input.value),
+    isSecret: input.isSecret == null ? isSecretEnvKey(key) : Boolean(input.isSecret),
+    scope: input.scope === "local" || input.scope === "production" ? input.scope : "all"
+  };
+}
+
+export function appEnvVarToPublicDto(row) {
+  return {
+    id: row.id,
+    appId: row.app_id,
+    key: row.key,
+    value: row.is_secret ? null : row.value,
+    displayValue: row.is_secret ? REDACTED_VALUE : row.value,
+    isSecret: Boolean(row.is_secret),
+    scope: row.scope || "all",
+    needsRestart: Boolean(row.needs_restart),
+    needsRedeploy: Boolean(row.needs_redeploy),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export function mergeAppEnv(baseEnv = {}, storedEnvRows = [], options = {}) {
+  const scope = options.scope || "all";
+  const merged = { ...normalizeStringMap(baseEnv) };
+  for (const row of storedEnvRows || []) {
+    const rowScope = row.scope || "all";
+    if (rowScope === "all" || scope === "all" || rowScope === scope) {
+      merged[row.key] = row.value == null ? "" : String(row.value);
+    }
+  }
+  return merged;
+}
+
+export function redactSecrets(value, secrets = []) {
+  let output = String(value == null ? "" : value);
+  const unique = [...new Set((secrets || []).map((secret) => String(secret || "")).filter((secret) => secret.length >= 3))];
+  unique.sort((a, b) => b.length - a.length);
+  for (const secret of unique) {
+    output = output.split(secret).join(REDACTED_VALUE);
+  }
+  return output;
 }
 
 export function appToConfigEntry(input) {

@@ -27,6 +27,8 @@ type DaemonApp = {
   volumes?: string[];
   composeFile?: string | null;
   composeService?: string | null;
+  needsRestart?: boolean;
+  needsRedeploy?: boolean;
   enabled: boolean;
   status: string;
   createdAt: string;
@@ -121,6 +123,30 @@ type DaemonDeploymentLog = {
 type DeploymentLogsResponse = {
   deployment: DaemonDeployment;
   logs: DaemonDeploymentLog[];
+};
+
+type DaemonAppEnvVar = {
+  id: number;
+  appId: number;
+  key: string;
+  value: string | null;
+  displayValue: string;
+  isSecret: boolean;
+  scope: string;
+  needsRestart: boolean;
+  needsRedeploy: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type AppEnvResponse = {
+  app: DaemonApp;
+  env: {
+    vars: DaemonAppEnvVar[];
+    pending: { count: number; needsRestart: boolean; needsRedeploy: boolean };
+  };
+  envVar?: DaemonAppEnvVar;
+  error?: string | null;
 };
 
 type DaemonDomain = {
@@ -1273,6 +1299,7 @@ function AppRow({
             <span className="flex min-w-0 items-center gap-2">
               <span className="block truncate text-sm font-bold">{app.name}</span>
               {disabledReason ? <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{disabledReason}</span> : null}
+              {app.needsRestart || app.needsRedeploy ? <span className="shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">pending</span> : null}
             </span>
             <span className="block truncate font-mono text-[11px] text-muted">{shortPath(app.path)}</span>
             <span className="mt-1 inline-flex rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{resourceLabel(app)}</span>
@@ -1604,7 +1631,77 @@ function DetailPanel({
   onEdit?: () => void;
   onReload?: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "deployments" | "domains" | "proxy" | "github" | "logs" | "config">("overview");
+  const [tab, setTab] = useState<"overview" | "deployments" | "domains" | "proxy" | "github" | "env" | "logs" | "config">("overview");
+  const [appEnv, setAppEnv] = useState<AppEnvResponse["env"] | null>(null);
+  const [envError, setEnvError] = useState<string | null>(null);
+  const [envLoading, setEnvLoading] = useState(false);
+  const [envSaving, setEnvSaving] = useState(false);
+  const [envForm, setEnvForm] = useState({ key: "", value: "", isSecret: true, scope: "all" });
+
+  const loadEnv = useCallback(async (target: DaemonApp) => {
+    setEnvLoading(true);
+    setEnvError(null);
+    try {
+      const response = await fetch(`/api/apps/${target.id}/env`, { cache: "no-store" });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as AppEnvResponse;
+      setAppEnv(data.env);
+    } catch (error) {
+      setEnvError(error instanceof Error ? error.message : "Could not load environment variables.");
+    } finally {
+      setEnvLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!app) {
+      return;
+    }
+    const timer = window.setTimeout(() => void loadEnv(app), 0);
+    return () => window.clearTimeout(timer);
+  }, [app, loadEnv]);
+
+  async function saveEnv(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!app || !envForm.key.trim()) return;
+    setEnvSaving(true);
+    setEnvError(null);
+    try {
+      const response = await fetch(`/api/apps/${app.id}/env`, {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ key: envForm.key.trim(), value: envForm.value, isSecret: envForm.isSecret, scope: envForm.scope })
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as AppEnvResponse;
+      setAppEnv(data.env);
+      setEnvForm({ key: "", value: "", isSecret: true, scope: "all" });
+    } catch (error) {
+      setEnvError(error instanceof Error ? error.message : "Could not save environment variable.");
+    } finally {
+      setEnvSaving(false);
+    }
+  }
+
+  async function unsetEnv(key: string) {
+    if (!app) return;
+    setEnvSaving(true);
+    setEnvError(null);
+    try {
+      const response = await fetch(`/api/apps/${app.id}/env/${encodeURIComponent(key)}`, {
+        method: "DELETE",
+        cache: "no-store"
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as AppEnvResponse;
+      setAppEnv(data.env);
+    } catch (error) {
+      setEnvError(error instanceof Error ? error.message : `Could not unset ${key}.`);
+    } finally {
+      setEnvSaving(false);
+    }
+  }
 
   if (!app) {
     return (
@@ -1641,8 +1738,8 @@ function DetailPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-1 border-b border-white/5 bg-black/20 px-2 py-2 sm:grid-cols-7">
-        {(["overview", "deployments", "domains", "proxy", "github", "logs", "config"] as const).map((item) => (
+      <div className="grid grid-cols-4 gap-1 border-b border-white/5 bg-black/20 px-2 py-2">
+        {(["overview", "deployments", "domains", "proxy", "github", "env", "logs", "config"] as const).map((item) => (
           <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-full px-2 py-1.5 text-[11px] font-bold capitalize ${FOCUS_RING} ${tab === item ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground"}`}>{item}</button>
         ))}
       </div>
@@ -1655,6 +1752,7 @@ function DetailPanel({
           <Meta label="Port" value={app.port ? String(app.port) : "-"} mono />
           <Meta label="Updated" value={timeAgo(app.updatedAt)} />
           <Meta label="Latest deploy" value={latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : "never"} />
+          <Meta label="Settings state" value={app.needsRestart || app.needsRedeploy ? `${app.needsRestart ? "restart" : ""}${app.needsRestart && app.needsRedeploy ? " + " : ""}${app.needsRedeploy ? "redeploy" : ""} needed` : "clean"} />
           <Meta label="Temporary URL" value={latestDeployment?.hostPort ? `http://127.0.0.1:${latestDeployment.hostPort}` : "-"} mono wide />
           <Meta label="Production domains" value={domains.map((domain) => `${domain.hostname} (${domain.status})`).join(", ") || "none"} mono wide />
           <Meta label="Path" value={app.path || "-"} mono wide />
@@ -1703,6 +1801,65 @@ function DetailPanel({
           <Meta label="Auto deploy" value={app.source?.auto_deploy?.enabled === false ? "disabled" : app.source?.type === "github" ? "enabled" : "not connected"} />
           <Meta label="Recent delivery" value={github?.deliveries.find((delivery) => delivery.appId === app.id || delivery.repo === app.source?.repo)?.status || "none"} wide />
         </dl>
+      ) : null}
+
+      {tab === "env" ? (
+        <div>
+          <div className="border-b border-white/5 px-4 py-3">
+            <div className="grid grid-cols-3 gap-2">
+              <ReadinessCard label="Stored" value={String(appEnv?.pending.count || 0)} status={appEnv?.pending.count ? "ok" : "warn"} />
+              <ReadinessCard label="Restart" value={appEnv?.pending.needsRestart ? "needed" : "clean"} status={appEnv?.pending.needsRestart ? "warn" : "ok"} />
+              <ReadinessCard label="Redeploy" value={appEnv?.pending.needsRedeploy ? "needed" : "clean"} status={appEnv?.pending.needsRedeploy ? "warn" : "ok"} />
+            </div>
+            <p className="mt-3 text-xs text-muted">Stored env values override portable `routely.yml` env at runtime. Secret values are hidden after save and injected into local starts and Dockerfile deployments.</p>
+          </div>
+
+          {envError ? <div className="border-b border-negative/20 bg-negative/10 px-4 py-2 text-xs text-negative">{envError}</div> : null}
+
+          <form onSubmit={saveEnv} className="border-b border-white/5 px-4 py-3">
+            <div className="grid gap-2 sm:grid-cols-[minmax(100px,0.8fr)_minmax(0,1fr)]">
+              <Field label="Key" value={envForm.key} onChange={(value) => setEnvForm((current) => ({ ...current, key: value.toUpperCase().replace(/[^A-Z0-9_]/g, "_") }))} placeholder="DATABASE_URL" disabled={!connected || envSaving} mono />
+              <Field label="Value" value={envForm.value} onChange={(value) => setEnvForm((current) => ({ ...current, value }))} placeholder="stored outside routely.yml" disabled={!connected || envSaving} mono />
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(110px,0.8fr)_minmax(0,1fr)_auto] sm:items-end">
+              <label>
+                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Scope</span>
+                <select value={envForm.scope} onChange={(event) => setEnvForm((current) => ({ ...current, scope: event.target.value }))} disabled={!connected || envSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>
+                  <option value="all">all</option>
+                  <option value="local">local</option>
+                  <option value="production">production</option>
+                </select>
+              </label>
+              <label className={`flex min-h-10 items-center justify-between rounded-full bg-surface-raised px-3 ${INSET_RING} ${!connected || envSaving ? "opacity-60" : ""}`}>
+                <span className="text-xs font-bold">Secret value</span>
+                <input type="checkbox" checked={envForm.isSecret} onChange={(event) => setEnvForm((current) => ({ ...current, isSecret: event.target.checked }))} disabled={!connected || envSaving} className="h-4 w-4 accent-[var(--accent)]" />
+              </label>
+              <PillButton type="submit" strong disabled={!connected || envSaving || !envForm.key.trim()}>{envSaving ? "Saving" : "Set env"}</PillButton>
+            </div>
+          </form>
+
+          {envLoading && !appEnv ? <div className="px-4 py-5 text-sm text-muted">Loading env vars...</div> : null}
+          {appEnv?.vars.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No stored env vars yet. Non-secret defaults can still live in the registry config tab.</div> : null}
+          {appEnv?.vars.map((row) => (
+            <div key={row.id} className="border-b border-white/5 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-sm font-bold">{row.key}</p>
+                  <p className="mt-1 break-all font-mono text-[11px] text-muted">{row.displayValue}</p>
+                </div>
+                <div className="flex shrink-0 flex-col items-end gap-1">
+                  <span className="rounded-full bg-surface-raised px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{row.scope}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] ${row.isSecret ? "bg-warning/15 text-warning" : "bg-white/10 text-muted"}`}>{row.isSecret ? "secret" : "plain"}</span>
+                </div>
+              </div>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                {row.needsRestart ? <span className="rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">restart needed</span> : null}
+                {row.needsRedeploy ? <span className="rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">redeploy needed</span> : null}
+                <PillButton onClick={() => void unsetEnv(row.key)} disabled={!connected || envSaving}>Unset</PillButton>
+              </div>
+            </div>
+          ))}
+        </div>
       ) : null}
 
       {tab === "config" ? (

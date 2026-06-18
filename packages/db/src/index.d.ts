@@ -2,6 +2,7 @@ import type Database from "better-sqlite3";
 import type {
   LoadedWorkspaceConfig,
   RoutelyAppInput,
+  RoutelyAppEnvVarRecord,
   RoutelyAppRecord,
   RoutelyAppStatus,
   RoutelyDeploymentLogRecord,
@@ -44,6 +45,17 @@ export function updateApp(db: Database.Database, appId: number, input: Partial<R
 export function deleteApp(db: Database.Database, appId: number): boolean;
 export function syncWorkspaceConfig(db: Database.Database, loaded: LoadedWorkspaceConfig | null): string[];
 export function updateAppStatus(db: Database.Database, appId: number, status: RoutelyAppStatus): void;
+export function listAppEnvVars(db: Database.Database, appId: number): RoutelyAppEnvVarRecord[];
+export function getAppEnvVar(db: Database.Database, appId: number, key: string): RoutelyAppEnvVarRecord | null;
+export function upsertAppEnvVar(
+  db: Database.Database,
+  appId: number,
+  input: { key?: string; value?: unknown; isSecret?: boolean; scope?: string }
+): RoutelyAppEnvVarRecord | null;
+export function deleteAppEnvVar(db: Database.Database, appId: number, key: string): boolean;
+export function clearAppEnvPendingFlags(db: Database.Database, appId: number, flags?: { restart?: boolean; redeploy?: boolean }): RoutelyAppEnvVarRecord[];
+export function appEnvPendingState(db: Database.Database, appId: number): { count: number; needsRestart: boolean; needsRedeploy: boolean };
+export function listSecretValuesForApp(db: Database.Database, appId: number): string[];
 export function recordRuntimeStart(db: Database.Database, appId: number, pid: number): void;
 export function recordRuntimeStop(db: Database.Database, appId: number, pid: number, exitCode: number | null, status?: RoutelyAppStatus): void;
 export function createDeployment(

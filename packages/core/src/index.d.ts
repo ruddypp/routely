@@ -113,6 +113,8 @@ export interface RoutelyAppRecord {
   volumes: string[];
   compose_file: string | null;
   compose_service: string | null;
+  needs_restart?: 0 | 1 | boolean;
+  needs_redeploy?: 0 | 1 | boolean;
   enabled: 0 | 1 | boolean;
   status: RoutelyAppStatus;
   created_at: string;
@@ -143,6 +145,8 @@ export interface RoutelyAppDto {
   volumes: string[];
   composeFile: string | null;
   composeService: string | null;
+  needsRestart?: boolean;
+  needsRedeploy?: boolean;
   enabled: boolean;
   status: RoutelyAppStatus;
   createdAt: string;
@@ -215,6 +219,33 @@ export interface RoutelyDeploymentLogDto {
   createdAt: string;
 }
 
+export interface RoutelyAppEnvVarRecord {
+  id: number;
+  app_id: number;
+  key: string;
+  value: string;
+  is_secret: 0 | 1 | boolean;
+  scope: "all" | "local" | "production" | string;
+  needs_restart: 0 | 1 | boolean;
+  needs_redeploy: 0 | 1 | boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoutelyAppEnvVarDto {
+  id: number;
+  appId: number;
+  key: string;
+  value: string | null;
+  displayValue: string;
+  isSecret: boolean;
+  scope: string;
+  needsRestart: boolean;
+  needsRedeploy: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export const routelyCoreVersion: string;
 export const DEFAULT_DASHBOARD_PORT: number;
 export const DEFAULT_DAEMON_PORT: number;
@@ -227,6 +258,17 @@ export function normalizeAppInput(input: RoutelyAppInput): NormalizedRoutelyAppI
 export function appToPublicDto(app: RoutelyAppRecord): RoutelyAppDto;
 export function deploymentToPublicDto(deployment: RoutelyDeploymentRecord): RoutelyDeploymentDto;
 export function deploymentLogToPublicDto(log: RoutelyDeploymentLogRecord): RoutelyDeploymentLogDto;
+export function isSecretEnvKey(key: string): boolean;
+export function normalizeEnvKey(key: string): string;
+export function normalizeAppEnvInput(input?: { key?: string; value?: unknown; isSecret?: boolean; scope?: string }): {
+  key: string;
+  value: string;
+  isSecret: boolean;
+  scope: string;
+};
+export function appEnvVarToPublicDto(row: RoutelyAppEnvVarRecord): RoutelyAppEnvVarDto;
+export function mergeAppEnv(baseEnv?: Record<string, string>, storedEnvRows?: RoutelyAppEnvVarRecord[], options?: { scope?: string }): Record<string, string>;
+export function redactSecrets(value: unknown, secrets?: string[]): string;
 export function appToConfigEntry(input: RoutelyAppInput): Record<string, unknown>;
 export function filterExportableEnv(env?: Record<string, string>): Record<string, string>;
 
