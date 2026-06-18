@@ -285,20 +285,59 @@ Checkpoint 6 verification performed:
 - `node -e "import('@routely/proxy').then((m)=>console.log(m.routelyProxyVersion))"` passed.
 - `npm run build --workspace apps/web` and the broad workspace build were attempted; the tool again returned only `Finished TypeScript...` and no final exit marker, while `.next` artifacts existed and no build process remained. This matches the known build-capture caveat from prior checkpoints.
 
-Recommended next step after Checkpoint 6 verification and commit:
+Checkpoint 7 is now implemented as the GitHub integration and auto-deploy slice:
+
+- `packages/github` now provides GitHub App configured-state detection, webhook secret lookup, SHA-256 HMAC signature generation/validation, push event filtering, and repo/branch auto-deploy matching helpers without exposing secrets in public DTOs.
+- SQLite migrations now create `github_installations`, `github_repositories`, and `github_webhook_deliveries` tables.
+- DB helpers persist GitHub installation metadata, installed/registered repositories, app-to-repo source metadata, webhook delivery deduplication state, and recent webhook delivery status.
+- App `source` metadata now preserves GitHub auto-deploy settings under `source.auto_deploy` while keeping `routely.yml` exportable.
+- The daemon exposes authenticated GitHub management endpoints:
+  - `GET /github/status`
+  - `GET /github/installations`
+  - `POST /github/installations`
+  - `GET /github/repos`
+  - `POST /github/repos`
+  - `GET /apps/:id/github`
+  - `POST /apps/:id/github`
+  - `GET /github/deliveries`
+- The daemon exposes public `POST /github/webhook`, which authenticates with `X-Hub-Signature-256`, deduplicates `X-GitHub-Delivery`, ignores unsupported events, and queues the existing Dockerfile deployment path for connected app repo/branch push events.
+- Duplicate webhook deliveries return a duplicate response and do not queue a second deployment.
+- Invalid webhook signatures are rejected and recorded as rejected deliveries when a delivery ID is present.
+- Manual Dockerfile deploy remains usable even when GitHub is unconfigured.
+- CLI commands added:
+  - `routely github status`
+  - `routely github installation add <installation-id> --account <login>`
+  - `routely github repo add <owner/repo> [--branch <branch>] [--installation-id <id>]`
+  - `routely github connect <app> <owner/repo> [--branch <branch>] [--auto-deploy false]`
+- Next.js same-origin API routes now proxy GitHub status/installations/repos/deliveries/app-connection endpoints under `/api/*`; `/api/github/webhook` forwards the raw signed body and GitHub headers to the daemon.
+- The production dashboard now includes a GitHub repository section backed by daemon/API/storage data: configured/unconfigured state, webhook/key readiness, repo/branch app connection, auto-deploy toggle, repository rows, and recent webhook deliveries.
+- The app inspector now has Overview, Deployments, Domains, Proxy, GitHub, Logs, and Config tabs backed by real app/deployment/domain/GitHub data.
+- Full GitHub App OAuth install callback, live GitHub API repository/branch fetching, commit status updates, backups, notifications, production database templates, full rollback, metrics collection, and broad VPS operations remain deferred.
+
+Checkpoint 7 verification performed:
+
+- `npm run lint` passed.
+- `npm run test --workspace apps/cli` passed: 9 files / 29 tests.
+- `npm run build --workspace apps/cli` passed.
+- `npm run test --workspace apps/web` passed: 7 files / 17 tests.
+- `npx tsc --noEmit --project apps/web/tsconfig.json` passed.
+- `node --check apps/daemon/src/server.js` passed.
+- `npm run build --workspace apps/web` was attempted and failed with only the Turbopack summary `Turbopack build failed with 2 errors` plus npm lifecycle lines in the captured log. No actionable diagnostics were emitted, while lint and TypeScript passed. Treat this as the existing web-build reporting caveat unless a future run produces concrete diagnostics.
+
+Recommended next step after Checkpoint 7 verification and commit:
 
 ```text
-Move to Checkpoint 7: GitHub Integration and Auto Deploy.
+Move to Checkpoint 8: Environment, Secrets, and App Settings.
 ```
 
-Do not start backups, production database templates, full rollback, metrics collection, notifications, or broader VPS operations before their checkpoints. GitHub automation is the next checkpoint; keep it scoped to repository connection/webhook/deploy triggering and preserve existing domain/proxy/deploy behavior.
+Do not start backups, production database templates, full rollback, metrics collection, notifications, or broader VPS operations before their checkpoints. Preserve existing manual Dockerfile deploy, domain/proxy/HTTPS, same-origin API proxying, and GitHub webhook behavior.
 
 ## Current Progress Snapshot For Next Agent
 
 Last completed commit:
 
 ```text
-pending commit: feat: add domain proxy slice
+pending commit: feat: add github auto deploy slice
 ```
 
 Current state:
@@ -311,19 +350,21 @@ Current state:
 - Checkpoint 4 production server foundation is implemented.
 - Checkpoint 5 production deploy vertical slice is implemented.
 - Checkpoint 6 proxy, domains, and HTTPS is implemented.
+- Checkpoint 7 GitHub integration and auto deploy is implemented.
 - Browser calls remain same-origin under `/api/*`.
 - The shell currently has desktop sidebar navigation, mobile bottom navigation, workspace/status header, local app/service separation, dense resource rows, app/service inspector, recent logs, and add/edit registry forms.
 - The latest frontend pass improved row rhythm, inspector/log hierarchy, form validation/focus/disabled states, loading/empty states, responsive action wrapping, and the server foundation readiness panel.
 - Checkpoint 3 added richer config fields, preset detection, Compose-backed database services, `routely db add`, local Compose driver behavior, SQLite persistence for expanded registry fields, daemon lifecycle support for Compose resources, and dashboard visibility/editing for local services/databases.
 - Checkpoint 5 added deployment history/log tables, Dockerfile driver helpers, daemon deployment endpoints, `routely deploy <app> [--watch]`, same-origin Next.js deployment routes, and a production deploy dashboard panel backed by real deployment state.
 - Checkpoint 6 added domain/proxy tables, Traefik-compatible proxy helpers, daemon domain/proxy endpoints, CLI domain commands, same-origin Next.js domain/proxy routes, and a dashboard domain/proxy/HTTPS panel backed by daemon/API/storage state.
-- Known web build caveat remains: `npm run build --workspace apps/web` returns only `Finished TypeScript...` with no final exit marker and no remaining build process.
+- Checkpoint 7 added GitHub tables/helpers, signed webhook ingestion/deduplication, repo/branch source metadata, push-to-deploy integration with the existing Dockerfile deployment path, CLI GitHub commands, same-origin Next.js GitHub routes, and dashboard GitHub/repository/delivery panels backed by daemon/API/storage state.
+- Known web build caveat remains: `npm run build --workspace apps/web` may return incomplete Turbopack output; during Checkpoint 7 it emitted only a two-error summary without diagnostics, while lint and TypeScript passed.
 
 Next execution direction:
 
-- Start Checkpoint 6 from `docs/14-implementation-plan.md` only after Checkpoint 5 is committed.
-- Reuse the deployment metadata/logging primitives from Checkpoint 5.
-- Keep GitHub automation, backups, and broader VPS app operations deferred until their checkpoints.
+- Start Checkpoint 8 from `docs/14-implementation-plan.md` only after Checkpoint 7 is committed.
+- Reuse existing app/deploy/domain/GitHub metadata and preserve signed webhook push-to-deploy behavior.
+- Keep backups, notifications, production database templates, full rollback, metrics collection, and broader VPS operations deferred until their checkpoints.
 
 ## Current Known Environment
 
@@ -388,18 +429,11 @@ node /home/ruddypp/Documents/work/routely/apps/cli/dist/index.js down
 
 ## Prompt For Next Agent
 
-Copy `docs/NEXT_AGENT_PROMPT.md` into the next agent. That file is now the canonical next prompt and targets Checkpoint 6: Proxy, Domains, and HTTPS.
+Copy `docs/NEXT_AGENT_PROMPT.md` into the next agent. That file is now the canonical next prompt and targets Checkpoint 8: Environment, Secrets, and App Settings.
 
-The prompt explicitly requires a comprehensive product/backend/frontend slice:
+The next checkpoint should add env/secret storage, redaction, CLI/API/dashboard settings, and restart/redeploy-needed state while preserving the completed deploy/domain/GitHub behavior.
 
-- backend/storage/proxy helpers first
-- daemon/API and same-origin Next.js route handlers
-- CLI domain commands
-- focused tests
-- docs and verification
-- then a more Dokploy-inspired, readable production operations panel backed by real data
-
-Do not use older embedded checkpoint prompts from previous handoffs. Checkpoint 0 through Checkpoint 5 are complete; the next implementation should start at Checkpoint 6 unless the user asks for a repair/audit.
+Do not use older embedded checkpoint prompts from previous handoffs. Checkpoint 0 through Checkpoint 7 are complete; the next implementation should start at Checkpoint 8 unless the user asks for a repair/audit.
 
 ## Immediate Next Checklist
 
@@ -408,11 +442,11 @@ Do not use older embedded checkpoint prompts from previous handoffs. Checkpoint 
 - [ ] Read relevant Next.js docs from `node_modules/next/dist/docs/` before editing `apps/web`.
 - [ ] Copy and follow `docs/NEXT_AGENT_PROMPT.md`.
 - [ ] Inspect CLI, daemon, core config, DB, drivers, proxy package, presets, and current dashboard/API implementation.
-- [ ] Implement Checkpoint 6 as a comprehensive backend/CLI/API/frontend slice, not a frontend-only redesign.
-- [ ] Reuse Checkpoint 5 deployment metadata/logging and require a successful deployment before live domain/proxy actions.
-- [ ] Keep GitHub automation, backups, notifications, production database templates, full rollback, metrics collection, and broad VPS operations deferred.
+- [ ] Implement Checkpoint 8 as a comprehensive backend/CLI/API/frontend slice, not a frontend-only redesign.
+- [ ] Reuse existing app/deploy/domain/GitHub metadata and avoid leaking secret values in config, logs, or UI.
+- [ ] Keep backups, notifications, production database templates, full rollback, metrics collection, and broad VPS operations deferred.
 - [ ] Add/adjust focused tests for changed backend/domain/proxy/API/CLI behavior.
 - [ ] Run lint, touched workspace tests/builds, web TypeScript when web is touched, and browser smoke/responsive checks when frontend UI is changed.
 - [ ] Attempt/document the known web build caveat.
 - [ ] Update docs for behavior and verification changes.
-- [ ] Commit only this Checkpoint 6 slice.
+- [ ] Commit only this Checkpoint 8 slice.

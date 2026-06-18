@@ -125,6 +125,9 @@ Usage:
   routely logs [app]       Print app logs, optionally with --follow
   routely restart [app]    Restart one command app
   routely deploy <app>     Trigger a Dockerfile production deployment, optionally with --watch
+  routely github status     Show GitHub App, repositories, and recent webhook deliveries
+  routely github repo add <owner/repo> [--branch <branch>] [--installation-id <id>]
+  routely github connect <app> <owner/repo> [--branch <branch>] [--auto-deploy false]
   routely domain root <domain>
   routely domain add <app> <hostname>
   routely domain verify <hostname>
@@ -159,6 +162,51 @@ type RoutelyDomainListResponse = {
   rootDomain: string | null;
   serverPublicIp: string | null;
   domains: RoutelyDomainDto[];
+};
+
+type RoutelyGithubRepositoryDto = {
+  id: number;
+  installationId: number | null;
+  fullName: string;
+  private: boolean;
+  defaultBranch: string | null;
+  connectedAppId: number | null;
+  connectedAppName: string | null;
+  selectedBranch: string | null;
+  autoDeployEnabled: boolean;
+};
+
+type RoutelyGithubInstallationDto = {
+  installationId: number;
+  accountLogin: string;
+  accountType: string | null;
+  status: string;
+};
+
+type RoutelyGithubDeliveryDto = {
+  deliveryId: string;
+  event: string;
+  status: string;
+  appName: string | null;
+  deploymentId: number | null;
+  repo: string | null;
+  branch: string | null;
+  commitSha: string | null;
+  message: string | null;
+  receivedAt: string;
+};
+
+type RoutelyGithubStatusResponse = {
+  github: {
+    configured: boolean;
+    appId: string | null;
+    clientId: string | null;
+    webhookSecretConfigured: boolean;
+    privateKeyConfigured: boolean;
+    installations: RoutelyGithubInstallationDto[];
+    repositories: RoutelyGithubRepositoryDto[];
+    deliveries: RoutelyGithubDeliveryDto[];
+  };
 };
 
 async function daemonRequest<T>(path: string, init: RequestInit = {}): Promise<DaemonResult<T>> {
@@ -924,6 +972,123 @@ async function domainCommand(args: string[]): Promise<void> {
   process.exit(1);
 }
 
+async function githubCommand(args: string[]): Promise<void> {
+  const subcommand = args[0] || "status";
+
+  if (subcommand === "status") {
+    const result = await daemonRequest<RoutelyGithubStatusResponse>("/github/status");
+    if (!result.ok) {
+      console.error(`Could not read GitHub status: ${result.error}`);
+      process.exit(1);
+    }
+    const github = result.data.github;
+    console.log(`GitHub App: ${github.configured ? "configured" : "not configured"}`);
+    console.log(`App ID: ${github.appId || "-"}`);
+    console.log(`Webhook secret: ${github.webhookSecretConfigured ? "configured" : "missing"}`);
+    console.log(`Private key: ${github.privateKeyConfigured ? "configured" : "missing"}`);
+    console.log(`Installations: ${github.installations.length}`);
+    for (const installation of github.installations) {
+      console.log(`  ${installation.installationId}\t${installation.accountLogin}\t${installation.status}`);
+    }
+    console.log(`Repositories: ${github.repositories.length}`);
+    for (const repo of github.repositories) {
+      const branch = repo.selectedBranch || repo.defaultBranch || "-";
+      const app = repo.connectedAppName || repo.connectedAppId || "-";
+      console.log(`  ${repo.fullName}\tbranch:${branch}\tapp:${app}\tauto:${repo.autoDeployEnabled ? "on" : "off"}`);
+    }
+    if (github.deliveries.length > 0) {
+      console.log("Recent deliveries:");
+      for (const delivery of github.deliveries.slice(0, 5)) {
+        console.log(`  ${delivery.deliveryId}\t${delivery.event}\t${delivery.status}\t${delivery.repo || "-"}:${delivery.branch || "-"}\t${delivery.deploymentId ? `deploy:${delivery.deploymentId}` : delivery.message || "-"}`);
+      }
+    }
+    return;
+  }
+
+  if (subcommand === "repo" && args[1] === "add") {
+    const { positionals, flags } = parseFlags(args.slice(2));
+    const fullName = String(positionals[0] || "").trim();
+    if (!fullName || !fullName.includes("/")) {
+      console.error("Usage: routely github repo add <owner/repo> [--branch <branch>] [--installation-id <id>]");
+      process.exit(1);
+    }
+    const result = await daemonRequest<{ repository: RoutelyGithubRepositoryDto }>("/github/repos", {
+      method: "POST",
+      body: JSON.stringify({
+        fullName,
+        defaultBranch: typeof flags.branch === "string" ? flags.branch : undefined,
+        installationId: typeof flags["installation-id"] === "string" ? Number(flags["installation-id"]) : undefined
+      })
+    });
+    if (!result.ok) {
+      console.error(`Could not add GitHub repository: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`Registered ${result.data.repository.fullName}.`);
+    console.log(`Default branch: ${result.data.repository.defaultBranch || "not set"}`);
+    return;
+  }
+
+  if (subcommand === "installation" && args[1] === "add") {
+    const { positionals, flags } = parseFlags(args.slice(2));
+    const installationId = Number(positionals[0] || flags["installation-id"]);
+    const accountLogin = String(flags.account || positionals[1] || "").trim();
+    if (!Number.isInteger(installationId) || !accountLogin) {
+      console.error("Usage: routely github installation add <installation-id> --account <login>");
+      process.exit(1);
+    }
+    const result = await daemonRequest<{ installation: RoutelyGithubInstallationDto }>("/github/installations", {
+      method: "POST",
+      body: JSON.stringify({ installationId, accountLogin, accountType: typeof flags.type === "string" ? flags.type : undefined, events: ["push"] })
+    });
+    if (!result.ok) {
+      console.error(`Could not add GitHub installation: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`Registered installation ${result.data.installation.installationId} for ${result.data.installation.accountLogin}.`);
+    return;
+  }
+
+  if (subcommand === "connect") {
+    const { positionals, flags } = parseFlags(args.slice(1));
+    const appName = String(positionals[0] || "").trim();
+    const fullName = String(positionals[1] || "").trim();
+    if (!appName || !fullName.includes("/")) {
+      console.error("Usage: routely github connect <app> <owner/repo> [--branch <branch>] [--auto-deploy false]");
+      process.exit(1);
+    }
+    const { db } = initializeRoutely(workspaceRoot);
+    syncConfig(db);
+    const app = getAppByName(db, appName);
+    db.close();
+    if (!app) {
+      console.error(`App not found: ${appName}`);
+      process.exit(1);
+    }
+    const result = await daemonRequest<{ app: RoutelyAppDtoLike; repository: RoutelyGithubRepositoryDto }>(`/apps/${app.id}/github`, {
+      method: "POST",
+      body: JSON.stringify({
+        fullName,
+        branch: typeof flags.branch === "string" ? flags.branch : "main",
+        autoDeployEnabled: flags["auto-deploy"] === "false" ? false : true
+      })
+    });
+    if (!result.ok) {
+      console.error(`Could not connect GitHub repository: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`Connected ${appName} to ${result.data.repository.fullName}.`);
+    console.log(`Branch: ${result.data.repository.selectedBranch || result.data.repository.defaultBranch || "main"}`);
+    console.log(`Auto deploy: ${result.data.repository.autoDeployEnabled ? "enabled" : "disabled"}`);
+    return;
+  }
+
+  console.error("Usage: routely github <status|repo add|installation add|connect> ...");
+  process.exit(1);
+}
+
+type RoutelyAppDtoLike = { id: number; name: string };
+
 async function doctorCommand(): Promise<void> {
   const { db } = initializeRoutely(workspaceRoot);
   syncConfig(db);
@@ -1067,6 +1232,9 @@ switch (command) {
     break;
   case "deploy":
     await deployCommand(argv.slice(1));
+    break;
+  case "github":
+    await githubCommand(argv.slice(1));
     break;
   case "domain":
     await domainCommand(argv.slice(1));

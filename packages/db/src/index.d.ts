@@ -140,6 +140,81 @@ export function upsertProxyRoute(
   }
 ): RoutelyProxyRouteRecord | null;
 export function deleteProxyRouteForDomain(db: Database.Database, hostname: string): boolean;
+export interface RoutelyGithubInstallationRecord {
+  id: number;
+  installation_id: number;
+  account_login: string;
+  account_type: string | null;
+  app_id: string | null;
+  target_type: string | null;
+  permissions: Record<string, unknown>;
+  events: string[];
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+export interface RoutelyGithubRepositoryRecord {
+  id: number;
+  installation_id: number | null;
+  github_repository_id: number | null;
+  full_name: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  default_branch: string | null;
+  html_url: string | null;
+  connected_app_id: number | null;
+  connected_app_name?: string | null;
+  selected_branch: string | null;
+  auto_deploy_enabled: boolean;
+  last_synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+export interface RoutelyGithubWebhookDeliveryRecord {
+  delivery_id: string;
+  event: string;
+  action: string | null;
+  status: string;
+  signature_valid: boolean;
+  app_id: number | null;
+  app_name?: string | null;
+  deployment_id: number | null;
+  repo: string | null;
+  branch: string | null;
+  commit_sha: string | null;
+  message: string | null;
+  received_at: string;
+  processed_at: string | null;
+  updated_at: string;
+}
+export function listGithubInstallations(db: Database.Database): RoutelyGithubInstallationRecord[];
+export function upsertGithubInstallation(db: Database.Database, input: Record<string, unknown>): RoutelyGithubInstallationRecord;
+export function getGithubInstallationByInstallationId(db: Database.Database, installationId: number): RoutelyGithubInstallationRecord | null;
+export function listGithubRepositories(db: Database.Database): RoutelyGithubRepositoryRecord[];
+export function getGithubRepositoryByFullName(db: Database.Database, fullName: string): RoutelyGithubRepositoryRecord | null;
+export function upsertGithubRepository(db: Database.Database, input: Record<string, unknown>): RoutelyGithubRepositoryRecord;
+export function connectAppToGithubRepository(
+  db: Database.Database,
+  appId: number,
+  input: Record<string, unknown>
+): { app: RoutelyAppRecord; repository: RoutelyGithubRepositoryRecord } | null;
+export function getGithubSourceForApp(
+  db: Database.Database,
+  appId: number
+): { app: RoutelyAppRecord | null; source: Record<string, unknown> | null; repository: RoutelyGithubRepositoryRecord | null };
+export function listGithubConnectedAppsForPush(db: Database.Database, push: { repo: string; branch: string }): RoutelyAppRecord[];
+export function recordGithubWebhookDelivery(
+  db: Database.Database,
+  input: Record<string, unknown>
+): { inserted: boolean; delivery: RoutelyGithubWebhookDeliveryRecord | null };
+export function updateGithubWebhookDelivery(
+  db: Database.Database,
+  deliveryId: string,
+  patch: Record<string, unknown>
+): RoutelyGithubWebhookDeliveryRecord | null;
+export function getGithubWebhookDelivery(db: Database.Database, deliveryId: string): RoutelyGithubWebhookDeliveryRecord | null;
+export function listGithubWebhookDeliveries(db: Database.Database, options?: { limit?: number }): RoutelyGithubWebhookDeliveryRecord[];
 export function getSetting(db: Database.Database, key: string): string | null;
 export function setSetting(db: Database.Database, key: string, value: string): void;
 export interface RoutelyServerFoundationState {

@@ -28,7 +28,13 @@ export interface RoutelyAppInput {
   depends_on?: string[] | string | null;
   healthcheck?: { path?: string | null; expected_status?: number | string | null } | null;
   domains?: string[] | string | null;
-  source?: { type?: string | null; repo?: string | null; branch?: string | null } | null;
+  source?: {
+    type?: string | null;
+    repo?: string | null;
+    branch?: string | null;
+    auto_deploy?: { enabled?: boolean; branches?: string[] | string | null } | null;
+    autoDeploy?: { enabled?: boolean; branches?: string[] | string | null } | null;
+  } | null;
   image?: string | null;
   internal?: boolean;
   volumes?: string[] | string | null;
@@ -73,7 +79,7 @@ export interface NormalizedRoutelyAppInput {
   depends_on: string[];
   healthcheck: { path: string | null; expected_status: number | null } | null;
   domains: string[];
-  source: { type: string | null; repo: string | null; branch: string | null } | null;
+  source: { type: string | null; repo: string | null; branch: string | null; auto_deploy?: { enabled: boolean; branches: string[] } } | null;
   image: string | null;
   internal: boolean;
   volumes: string[];
@@ -101,7 +107,7 @@ export interface RoutelyAppRecord {
   depends_on: string[];
   healthcheck: { path: string | null; expected_status: number | null } | null;
   domains: string[];
-  source: { type: string | null; repo: string | null; branch: string | null } | null;
+  source: { type: string | null; repo: string | null; branch: string | null; auto_deploy?: { enabled: boolean; branches: string[] } } | null;
   image: string | null;
   internal: 0 | 1 | boolean;
   volumes: string[];
@@ -131,7 +137,7 @@ export interface RoutelyAppDto {
   dependsOn: string[];
   healthcheck: { path: string | null; expected_status: number | null } | null;
   domains: string[];
-  source: { type: string | null; repo: string | null; branch: string | null } | null;
+  source: { type: string | null; repo: string | null; branch: string | null; auto_deploy?: { enabled: boolean; branches: string[] } } | null;
   image: string | null;
   internal: boolean;
   volumes: string[];

@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import "dotenv/config";
+import { config as loadDotenv } from "dotenv";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync } from "node:fs";
 import net from "node:net";
 import { dirname, resolve } from "node:path";
@@ -17,6 +18,7 @@ import {
 } from "@routely/core";
 import {
   appendDeploymentLog,
+  connectAppToGithubRepository,
   createDeployment,
   createDomain,
   deleteApp,
@@ -25,10 +27,15 @@ import {
   getDeploymentById,
   getDomainByHostname,
   getAppById,
+  getGithubSourceForApp,
   getLatestSuccessfulDeploymentForApp,
   getServerFoundationState,
   getSetting,
   initializeRoutely,
+  listGithubConnectedAppsForPush,
+  listGithubInstallations,
+  listGithubRepositories,
+  listGithubWebhookDeliveries,
   listDeploymentLogs,
   listDeployments,
   listDeploymentsForApp,
@@ -43,10 +50,14 @@ import {
   saveServerFoundationState,
   setSetting,
   syncWorkspaceConfig,
+  recordGithubWebhookDelivery,
   updateApp,
   updateDeployment,
   updateAppStatus,
   updateDomainVerification,
+  updateGithubWebhookDelivery,
+  upsertGithubInstallation,
+  upsertGithubRepository,
   upsertProxyRoute,
   upsertApp
 } from "@routely/db";
@@ -70,11 +81,18 @@ import {
   verifyDnsARecord,
   wildcardInstructions
 } from "@routely/proxy";
+import {
+  filterGithubWebhookEvent,
+  getGithubAppConfig,
+  githubWebhookSecret,
+  validateGithubWebhookSignature
+} from "@routely/github";
 
 const port = Number(process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT);
 const host = process.env.ROUTELY_DAEMON_HOST || "127.0.0.1";
 const serverFile = fileURLToPath(import.meta.url);
 const workspaceRoot = process.env.ROUTELY_WORKSPACE_ROOT || process.env.ROUTELY_REPO_ROOT || resolve(dirname(serverFile), "../../..");
+loadDotenv({ path: resolve(workspaceRoot, ".env"), override: false });
 const { db, databasePath } = initializeRoutely(workspaceRoot);
 const startedAt = new Date().toISOString();
 const LOG_TAIL_BYTES = 64 * 1024;
@@ -91,7 +109,17 @@ try {
 
 reconcileStaleRuntimeInstances(db);
 
-const app = Fastify({ logger: true });
+const app = Fastify({ logger: true, bodyLimit: 2 * 1024 * 1024 });
+
+app.removeContentTypeParser("application/json");
+app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, body, done) => {
+  request.rawBody = body;
+  try {
+    done(null, body.length > 0 ? JSON.parse(body.toString("utf8")) : {});
+  } catch (error) {
+    done(error);
+  }
+});
 
 function serverFoundationState() {
   const state = getServerFoundationState(db);
@@ -134,7 +162,7 @@ function publicServerStatus() {
           checks: Array.isArray(lastDoctor.checks) ? lastDoctor.checks : []
         }
       : null,
-    disabledProductionActions: ["github", "backups", "metrics", "rollback"]
+    disabledProductionActions: ["backups", "metrics", "rollback"]
   };
 }
 
@@ -168,7 +196,7 @@ function isAuthorized(request) {
 
 app.addHook("preHandler", async (request, reply) => {
   const url = request.url.split("?")[0];
-  const publicPaths = new Set(["/health", "/server/status", "/auth/status"]);
+  const publicPaths = new Set(["/health", "/server/status", "/auth/status", "/github/webhook"]);
 
   if (publicPaths.has(url)) {
     return;
@@ -476,6 +504,102 @@ function publicProxyRouteDto(route) {
     createdAt: route.created_at,
     updatedAt: route.updated_at
   };
+}
+
+function publicGithubInstallationDto(installation) {
+  return {
+    id: installation.id,
+    installationId: installation.installation_id,
+    accountLogin: installation.account_login,
+    accountType: installation.account_type || null,
+    appId: installation.app_id || null,
+    targetType: installation.target_type || null,
+    permissions: installation.permissions || {},
+    events: installation.events || [],
+    status: installation.status,
+    createdAt: installation.created_at,
+    updatedAt: installation.updated_at
+  };
+}
+
+function publicGithubRepositoryDto(repository) {
+  return {
+    id: repository.id,
+    installationId: repository.installation_id || null,
+    repositoryId: repository.github_repository_id || null,
+    fullName: repository.full_name,
+    owner: repository.owner,
+    name: repository.name,
+    private: Boolean(repository.private),
+    defaultBranch: repository.default_branch || null,
+    htmlUrl: repository.html_url || null,
+    connectedAppId: repository.connected_app_id || null,
+    connectedAppName: repository.connected_app_name || null,
+    selectedBranch: repository.selected_branch || null,
+    autoDeployEnabled: Boolean(repository.auto_deploy_enabled),
+    lastSyncedAt: repository.last_synced_at || null,
+    createdAt: repository.created_at,
+    updatedAt: repository.updated_at
+  };
+}
+
+function publicGithubDeliveryDto(delivery) {
+  return {
+    deliveryId: delivery.delivery_id,
+    event: delivery.event,
+    action: delivery.action || null,
+    status: delivery.status,
+    signatureValid: Boolean(delivery.signature_valid),
+    appId: delivery.app_id || null,
+    appName: delivery.app_name || null,
+    deploymentId: delivery.deployment_id || null,
+    repo: delivery.repo || null,
+    branch: delivery.branch || null,
+    commitSha: delivery.commit_sha || null,
+    message: delivery.message || null,
+    receivedAt: delivery.received_at,
+    processedAt: delivery.processed_at || null,
+    updatedAt: delivery.updated_at
+  };
+}
+
+function publicGithubStatus() {
+  const config = getGithubAppConfig();
+  return {
+    configured: config.configured,
+    appId: config.appId,
+    clientId: config.clientId,
+    webhookSecretConfigured: config.webhookSecretConfigured,
+    privateKeyConfigured: config.privateKeyConfigured,
+    installations: listGithubInstallations(db).map(publicGithubInstallationDto),
+    repositories: listGithubRepositories(db).map(publicGithubRepositoryDto),
+    deliveries: listGithubWebhookDeliveries(db).map(publicGithubDeliveryDto)
+  };
+}
+
+function queueDeploymentForApp(appRecord, source = {}) {
+  const latest = getLatestSuccessfulDeploymentForApp(db, appRecord.id);
+  const deployment = createDeployment(db, {
+    appId: appRecord.id,
+    source: {
+      type: source.type || appRecord.source?.type || "local",
+      repo: source.repo || appRecord.source?.repo || null,
+      branch: source.branch || appRecord.source?.branch || null,
+      commitSha: source.commitSha || null
+    },
+    previous: latest
+      ? { imageTag: latest.image_tag, containerName: latest.container_name }
+      : {},
+    containerPort: appRecord.port || 3000
+  });
+  appendDeploymentLog(db, deployment.id, {
+    phase: "queued",
+    message: source.commitSha
+      ? `queued GitHub deployment for ${appRecord.name} at ${source.commitSha}`
+      : `queued deployment for ${appRecord.name}`
+  });
+  void runDockerfileDeployment(appRecord, deployment.id);
+  return deployment;
 }
 
 function serverPublicIp() {
@@ -927,23 +1051,164 @@ app.post("/apps/:id/deployments", async (request, reply) => {
     return reply.code(400).send({ error: `${record.name} is disabled.` });
   }
 
-  const latest = getLatestSuccessfulDeploymentForApp(db, record.id);
-  const deployment = createDeployment(db, {
-    appId: record.id,
-    source: {
-      type: record.source?.type || "local",
-      repo: record.source?.repo || null,
-      branch: record.source?.branch || null
-    },
-    previous: latest
-      ? { imageTag: latest.image_tag, containerName: latest.container_name }
-      : {},
-    containerPort: record.port || 3000
-  });
-  appendDeploymentLog(db, deployment.id, { phase: "queued", message: `queued deployment for ${record.name}` });
-
-  void runDockerfileDeployment(record, deployment.id);
+  const deployment = queueDeploymentForApp(record);
   return reply.code(202).send({ app: appToPublicDto(record), deployment: deploymentToPublicDto(getDeploymentById(db, deployment.id)) });
+});
+
+app.get("/github/status", async () => {
+  return { github: publicGithubStatus() };
+});
+
+app.get("/github/installations", async () => {
+  return { installations: listGithubInstallations(db).map(publicGithubInstallationDto) };
+});
+
+app.post("/github/installations", async (request, reply) => {
+  try {
+    const installation = upsertGithubInstallation(db, request.body || {});
+    return reply.code(201).send({ installation: publicGithubInstallationDto(installation) });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid GitHub installation payload." });
+  }
+});
+
+app.get("/github/repos", async () => {
+  return { repositories: listGithubRepositories(db).map(publicGithubRepositoryDto) };
+});
+
+app.post("/github/repos", async (request, reply) => {
+  try {
+    const repository = upsertGithubRepository(db, request.body || {});
+    return reply.code(201).send({ repository: publicGithubRepositoryDto(repository) });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid GitHub repository payload." });
+  }
+});
+
+app.get("/apps/:id/github", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+  const source = getGithubSourceForApp(db, record.id);
+  return {
+    app: appToPublicDto(source.app || record),
+    source: source.source || null,
+    repository: source.repository ? publicGithubRepositoryDto(source.repository) : null,
+    github: publicGithubStatus()
+  };
+});
+
+app.post("/apps/:id/github", async (request, reply) => {
+  const record = findAppOrReply(request, reply);
+  if (!record) return;
+
+  try {
+    const connected = connectAppToGithubRepository(db, record.id, request.body || {});
+    if (!connected) {
+      return reply.code(404).send({ error: `App ${record.id} not found.` });
+    }
+    upsertWorkspaceConfigEntry(workspaceRoot, connected.app, connected.app.type === "app" || connected.app.type === "worker" || connected.app.type === "static" ? "apps" : "services");
+    return reply.code(200).send({ app: appToPublicDto(connected.app), repository: publicGithubRepositoryDto(connected.repository) });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid GitHub app connection payload." });
+  }
+});
+
+app.get("/github/deliveries", async () => {
+  return { deliveries: listGithubWebhookDeliveries(db).map(publicGithubDeliveryDto) };
+});
+
+app.post("/github/webhook", async (request, reply) => {
+  const deliveryId = request.headers["x-github-delivery"];
+  const eventName = request.headers["x-github-event"];
+  const signature = request.headers["x-hub-signature-256"];
+  const delivery = Array.isArray(deliveryId) ? deliveryId[0] : deliveryId;
+  const event = Array.isArray(eventName) ? eventName[0] : eventName;
+  const signatureHeader = Array.isArray(signature) ? signature[0] : signature;
+  const rawBody = request.rawBody || Buffer.from(JSON.stringify(request.body || {}), "utf8");
+
+  if (!delivery) {
+    return reply.code(400).send({ error: "Missing X-GitHub-Delivery header." });
+  }
+
+  const signatureResult = validateGithubWebhookSignature({
+    payload: rawBody,
+    signature: signatureHeader,
+    secret: githubWebhookSecret()
+  });
+
+  if (!signatureResult.ok) {
+    recordGithubWebhookDelivery(db, {
+      deliveryId: delivery,
+      event: event || "unknown",
+      status: "rejected",
+      signatureValid: false,
+      message: signatureResult.reason
+    });
+    return reply.code(401).send({ error: signatureResult.reason || "Invalid GitHub webhook signature." });
+  }
+
+  const filtered = filterGithubWebhookEvent(event, request.body || {});
+  const push = filtered.push;
+  const recorded = recordGithubWebhookDelivery(db, {
+    deliveryId: delivery,
+    event: event || "unknown",
+    action: filtered.action,
+    status: filtered.supported ? "received" : "ignored",
+    signatureValid: true,
+    repo: push?.repo || null,
+    branch: push?.branch || null,
+    commitSha: push?.commitSha || null,
+    message: filtered.reason || push?.message || null
+  });
+
+  if (!recorded.inserted) {
+    return reply.code(200).send({ ok: true, duplicate: true, delivery: publicGithubDeliveryDto(recorded.delivery) });
+  }
+
+  if (!filtered.supported || !push) {
+    const updated = updateGithubWebhookDelivery(db, delivery, {
+      status: "ignored",
+      action: filtered.action,
+      message: filtered.reason,
+      processedAt: new Date().toISOString()
+    });
+    return reply.code(202).send({ ok: true, ignored: true, reason: filtered.reason, delivery: publicGithubDeliveryDto(updated) });
+  }
+
+  const matches = listGithubConnectedAppsForPush(db, push);
+  if (matches.length === 0) {
+    const updated = updateGithubWebhookDelivery(db, delivery, {
+      status: "ignored",
+      action: "push",
+      repo: push.repo,
+      branch: push.branch,
+      commitSha: push.commitSha,
+      message: `No Routely app is connected to ${push.repo}:${push.branch}.`,
+      processedAt: new Date().toISOString()
+    });
+    return reply.code(202).send({ ok: true, ignored: true, reason: updated.message, delivery: publicGithubDeliveryDto(updated) });
+  }
+
+  const target = matches[0];
+  const deployment = queueDeploymentForApp(target, { type: "github", repo: push.repo, branch: push.branch, commitSha: push.commitSha });
+  const updated = updateGithubWebhookDelivery(db, delivery, {
+    status: "deployment_queued",
+    action: "push",
+    appId: target.id,
+    deploymentId: deployment.id,
+    repo: push.repo,
+    branch: push.branch,
+    commitSha: push.commitSha,
+    message: `Queued deployment ${deployment.id} for ${target.name}.`,
+    processedAt: new Date().toISOString()
+  });
+
+  return reply.code(202).send({
+    ok: true,
+    deployment: deploymentToPublicDto(getDeploymentById(db, deployment.id)),
+    app: appToPublicDto(target),
+    delivery: publicGithubDeliveryDto(updated)
+  });
 });
 
 app.get("/deployments/:id", async (request, reply) => {

@@ -109,11 +109,21 @@ function normalizeSource(value) {
     return null;
   }
 
-  return {
+  const source = {
     type: stringOrNull(value.type),
     repo: stringOrNull(value.repo),
     branch: stringOrNull(value.branch)
   };
+
+  const autoDeploy = value.auto_deploy || value.autoDeploy;
+  if (autoDeploy && typeof autoDeploy === "object" && !Array.isArray(autoDeploy)) {
+    source.auto_deploy = {
+      enabled: autoDeploy.enabled == null ? true : Boolean(autoDeploy.enabled),
+      branches: normalizeStringArray(autoDeploy.branches)
+    };
+  }
+
+  return source;
 }
 
 function normalizeStringArray(value) {

@@ -123,6 +123,70 @@ export type DaemonProxyRoute = {
   updatedAt: string;
 };
 
+export type DaemonGithubInstallation = {
+  id: number;
+  installationId: number;
+  accountLogin: string;
+  accountType: string | null;
+  appId: string | null;
+  targetType: string | null;
+  permissions: Record<string, unknown>;
+  events: string[];
+  status: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DaemonGithubRepository = {
+  id: number;
+  installationId: number | null;
+  repositoryId: number | null;
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  defaultBranch: string | null;
+  htmlUrl: string | null;
+  connectedAppId: number | null;
+  connectedAppName: string | null;
+  selectedBranch: string | null;
+  autoDeployEnabled: boolean;
+  lastSyncedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DaemonGithubDelivery = {
+  deliveryId: string;
+  event: string;
+  action: string | null;
+  status: string;
+  signatureValid: boolean;
+  appId: number | null;
+  appName: string | null;
+  deploymentId: number | null;
+  repo: string | null;
+  branch: string | null;
+  commitSha: string | null;
+  message: string | null;
+  receivedAt: string;
+  processedAt: string | null;
+  updatedAt: string;
+};
+
+export type DaemonGithubStatusResponse = {
+  github: {
+    configured: boolean;
+    appId: string | null;
+    clientId: string | null;
+    webhookSecretConfigured: boolean;
+    privateKeyConfigured: boolean;
+    installations: DaemonGithubInstallation[];
+    repositories: DaemonGithubRepository[];
+    deliveries: DaemonGithubDelivery[];
+  };
+};
+
 export type DaemonHealth = {
   ok: boolean;
   service: string;

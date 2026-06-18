@@ -168,6 +168,55 @@ export function migrate(db) {
       UNIQUE(domain_id)
     );
 
+    CREATE TABLE IF NOT EXISTS github_installations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      installation_id INTEGER NOT NULL UNIQUE,
+      account_login TEXT NOT NULL,
+      account_type TEXT,
+      app_id TEXT,
+      target_type TEXT,
+      permissions TEXT NOT NULL DEFAULT '{}',
+      events TEXT NOT NULL DEFAULT '[]',
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS github_repositories (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      installation_id INTEGER REFERENCES github_installations(installation_id) ON DELETE SET NULL,
+      github_repository_id INTEGER UNIQUE,
+      full_name TEXT NOT NULL UNIQUE,
+      owner TEXT NOT NULL,
+      name TEXT NOT NULL,
+      private INTEGER NOT NULL DEFAULT 0,
+      default_branch TEXT,
+      html_url TEXT,
+      connected_app_id INTEGER REFERENCES apps(id) ON DELETE SET NULL,
+      selected_branch TEXT,
+      auto_deploy_enabled INTEGER NOT NULL DEFAULT 0,
+      last_synced_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS github_webhook_deliveries (
+      delivery_id TEXT PRIMARY KEY,
+      event TEXT NOT NULL,
+      action TEXT,
+      status TEXT NOT NULL DEFAULT 'received',
+      signature_valid INTEGER NOT NULL DEFAULT 0,
+      app_id INTEGER REFERENCES apps(id) ON DELETE SET NULL,
+      deployment_id INTEGER REFERENCES deployments(id) ON DELETE SET NULL,
+      repo TEXT,
+      branch TEXT,
+      commit_sha TEXT,
+      message TEXT,
+      received_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      processed_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS settings (
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL,
@@ -203,6 +252,14 @@ export function migrate(db) {
   addColumnIfMissing(db, "domains", "verification_message", "TEXT");
   addColumnIfMissing(db, "domains", "last_verified_at", "TEXT");
   addColumnIfMissing(db, "proxy_routes", "deployment_id", "INTEGER REFERENCES deployments(id) ON DELETE SET NULL");
+
+  addColumnIfMissing(db, "github_repositories", "connected_app_id", "INTEGER REFERENCES apps(id) ON DELETE SET NULL");
+  addColumnIfMissing(db, "github_repositories", "selected_branch", "TEXT");
+  addColumnIfMissing(db, "github_repositories", "auto_deploy_enabled", "INTEGER NOT NULL DEFAULT 0");
+
+  addColumnIfMissing(db, "github_webhook_deliveries", "app_id", "INTEGER REFERENCES apps(id) ON DELETE SET NULL");
+  addColumnIfMissing(db, "github_webhook_deliveries", "deployment_id", "INTEGER REFERENCES deployments(id) ON DELETE SET NULL");
+  addColumnIfMissing(db, "github_webhook_deliveries", "message", "TEXT");
 
   db.prepare(`
     INSERT OR IGNORE INTO servers (id, name, kind, status)
@@ -761,6 +818,255 @@ export function listProxyRoutes(db) {
     JOIN apps ON apps.id = proxy_routes.app_id
     ORDER BY domains.hostname ASC
   `).all().map(parseProxyRouteRecord);
+}
+
+function parseGithubInstallationRecord(row) {
+  return {
+    ...row,
+    permissions: parseJsonObject(row.permissions),
+    events: parseJsonArray(row.events)
+  };
+}
+
+function parseGithubRepositoryRecord(row) {
+  return {
+    ...row,
+    private: Boolean(row.private),
+    auto_deploy_enabled: Boolean(row.auto_deploy_enabled)
+  };
+}
+
+function parseGithubWebhookDeliveryRecord(row) {
+  return {
+    ...row,
+    signature_valid: Boolean(row.signature_valid)
+  };
+}
+
+export function listGithubInstallations(db) {
+  return db.prepare("SELECT * FROM github_installations ORDER BY account_login ASC").all().map(parseGithubInstallationRecord);
+}
+
+export function upsertGithubInstallation(db, input) {
+  const installationId = Number(input.installationId || input.installation_id);
+  if (!Number.isInteger(installationId)) {
+    throw new Error("GitHub installation_id is required.");
+  }
+  const accountLogin = String(input.accountLogin || input.account_login || "").trim();
+  if (!accountLogin) {
+    throw new Error("GitHub account login is required.");
+  }
+
+  db.prepare(`
+    INSERT INTO github_installations (installation_id, account_login, account_type, app_id, target_type, permissions, events, status)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(installation_id) DO UPDATE SET
+      account_login = excluded.account_login,
+      account_type = excluded.account_type,
+      app_id = excluded.app_id,
+      target_type = excluded.target_type,
+      permissions = excluded.permissions,
+      events = excluded.events,
+      status = excluded.status,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    installationId,
+    accountLogin,
+    input.accountType || input.account_type || null,
+    input.appId || input.app_id || null,
+    input.targetType || input.target_type || null,
+    serializeJsonObject(input.permissions) || "{}",
+    serializeJsonArray(input.events),
+    input.status || "active"
+  );
+
+  return getGithubInstallationByInstallationId(db, installationId);
+}
+
+export function getGithubInstallationByInstallationId(db, installationId) {
+  const row = db.prepare("SELECT * FROM github_installations WHERE installation_id = ?").get(Number(installationId)) || null;
+  return row ? parseGithubInstallationRecord(row) : null;
+}
+
+export function listGithubRepositories(db) {
+  return db.prepare(`
+    SELECT github_repositories.*, apps.name AS connected_app_name
+    FROM github_repositories
+    LEFT JOIN apps ON apps.id = github_repositories.connected_app_id
+    ORDER BY github_repositories.full_name ASC
+  `).all().map(parseGithubRepositoryRecord);
+}
+
+export function getGithubRepositoryByFullName(db, fullName) {
+  const row = db.prepare(`
+    SELECT github_repositories.*, apps.name AS connected_app_name
+    FROM github_repositories
+    LEFT JOIN apps ON apps.id = github_repositories.connected_app_id
+    WHERE github_repositories.full_name = ?
+  `).get(String(fullName || "").trim()) || null;
+  return row ? parseGithubRepositoryRecord(row) : null;
+}
+
+export function upsertGithubRepository(db, input) {
+  const fullName = String(input.fullName || input.full_name || "").trim();
+  if (!fullName || !fullName.includes("/")) {
+    throw new Error("GitHub repository full_name must look like owner/name.");
+  }
+  const [owner, ...nameParts] = fullName.split("/");
+  const name = String(input.name || nameParts.join("/")).trim();
+
+  db.prepare(`
+    INSERT INTO github_repositories (installation_id, github_repository_id, full_name, owner, name, private, default_branch, html_url, last_synced_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(full_name) DO UPDATE SET
+      installation_id = excluded.installation_id,
+      github_repository_id = COALESCE(excluded.github_repository_id, github_repositories.github_repository_id),
+      owner = excluded.owner,
+      name = excluded.name,
+      private = CASE WHEN excluded.private = 1 THEN 1 ELSE github_repositories.private END,
+      default_branch = COALESCE(excluded.default_branch, github_repositories.default_branch),
+      html_url = COALESCE(excluded.html_url, github_repositories.html_url),
+      last_synced_at = CURRENT_TIMESTAMP,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(
+    input.installationId || input.installation_id || null,
+    input.repositoryId || input.github_repository_id || null,
+    fullName,
+    owner,
+    name,
+    input.private ? 1 : 0,
+    input.defaultBranch || input.default_branch || null,
+    input.htmlUrl || input.html_url || null
+  );
+
+  return getGithubRepositoryByFullName(db, fullName);
+}
+
+export function connectAppToGithubRepository(db, appId, input) {
+  const app = getAppById(db, appId);
+  if (!app) return null;
+  const repo = upsertGithubRepository(db, input);
+  const branch = String(input.branch || repo.default_branch || "main").trim();
+  const autoDeployEnabled = input.autoDeployEnabled ?? input.auto_deploy_enabled ?? true;
+
+  const source = {
+    ...(app.source || {}),
+    type: "github",
+    repo: repo.full_name,
+    branch,
+    auto_deploy: {
+      enabled: Boolean(autoDeployEnabled),
+      branches: [branch]
+    }
+  };
+
+  db.prepare(`
+    UPDATE apps
+    SET source = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(serializeJsonObject(source), app.id);
+
+  db.prepare(`
+    INSERT INTO app_sources (app_id, source_type, repo, branch, path, dockerfile_path)
+    VALUES (?, 'github', ?, ?, ?, ?)
+    ON CONFLICT(app_id, source_type) DO UPDATE SET
+      repo = excluded.repo,
+      branch = excluded.branch,
+      path = excluded.path,
+      dockerfile_path = excluded.dockerfile_path,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(app.id, repo.full_name, branch, input.path || app.path || null, input.dockerfilePath || input.dockerfile_path || null);
+
+  db.prepare(`
+    UPDATE github_repositories
+    SET connected_app_id = ?, selected_branch = ?, auto_deploy_enabled = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE full_name = ?
+  `).run(app.id, branch, autoDeployEnabled ? 1 : 0, repo.full_name);
+
+  return { app: getAppById(db, app.id), repository: getGithubRepositoryByFullName(db, repo.full_name) };
+}
+
+export function getGithubSourceForApp(db, appId) {
+  const app = getAppById(db, appId);
+  const sourceRow = db.prepare("SELECT * FROM app_sources WHERE app_id = ? AND source_type = 'github'").get(appId) || null;
+  const repository = app?.source?.repo ? getGithubRepositoryByFullName(db, app.source.repo) : null;
+  return { app, source: sourceRow, repository };
+}
+
+export function listGithubConnectedAppsForPush(db, push) {
+  return listApps(db).filter((app) => {
+    const source = app.source || {};
+    const autoDeploy = source.auto_deploy || {};
+    const branches = Array.isArray(autoDeploy.branches) && autoDeploy.branches.length > 0 ? autoDeploy.branches : [source.branch || "main"];
+    return source.type === "github" && source.repo === push.repo && autoDeploy.enabled !== false && branches.includes(push.branch);
+  });
+}
+
+export function recordGithubWebhookDelivery(db, input) {
+  const deliveryId = String(input.deliveryId || input.delivery_id || "").trim();
+  if (!deliveryId) {
+    throw new Error("GitHub delivery ID is required.");
+  }
+
+  const result = db.prepare(`
+    INSERT OR IGNORE INTO github_webhook_deliveries (delivery_id, event, action, status, signature_valid, repo, branch, commit_sha, message)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    deliveryId,
+    input.event || "unknown",
+    input.action || null,
+    input.status || "received",
+    input.signatureValid ? 1 : 0,
+    input.repo || null,
+    input.branch || null,
+    input.commitSha || null,
+    input.message || null
+  );
+
+  return {
+    inserted: result.changes > 0,
+    delivery: getGithubWebhookDelivery(db, deliveryId)
+  };
+}
+
+export function updateGithubWebhookDelivery(db, deliveryId, patch) {
+  const existing = getGithubWebhookDelivery(db, deliveryId);
+  if (!existing) return null;
+
+  db.prepare(`
+    UPDATE github_webhook_deliveries
+    SET status = ?, action = ?, app_id = ?, deployment_id = ?, repo = ?, branch = ?, commit_sha = ?, message = ?, processed_at = COALESCE(?, processed_at), updated_at = CURRENT_TIMESTAMP
+    WHERE delivery_id = ?
+  `).run(
+    patch.status || existing.status,
+    patch.action === undefined ? existing.action : patch.action,
+    patch.appId === undefined ? existing.app_id : patch.appId,
+    patch.deploymentId === undefined ? existing.deployment_id : patch.deploymentId,
+    patch.repo === undefined ? existing.repo : patch.repo,
+    patch.branch === undefined ? existing.branch : patch.branch,
+    patch.commitSha === undefined ? existing.commit_sha : patch.commitSha,
+    patch.message === undefined ? existing.message : patch.message,
+    patch.processedAt === undefined ? new Date().toISOString() : patch.processedAt,
+    deliveryId
+  );
+
+  return getGithubWebhookDelivery(db, deliveryId);
+}
+
+export function getGithubWebhookDelivery(db, deliveryId) {
+  const row = db.prepare("SELECT * FROM github_webhook_deliveries WHERE delivery_id = ?").get(String(deliveryId || "")) || null;
+  return row ? parseGithubWebhookDeliveryRecord(row) : null;
+}
+
+export function listGithubWebhookDeliveries(db, options = {}) {
+  const limit = Number.isInteger(options.limit) ? options.limit : 20;
+  return db.prepare(`
+    SELECT github_webhook_deliveries.*, apps.name AS app_name
+    FROM github_webhook_deliveries
+    LEFT JOIN apps ON apps.id = github_webhook_deliveries.app_id
+    ORDER BY received_at DESC, delivery_id DESC
+    LIMIT ?
+  `).all(limit).map(parseGithubWebhookDeliveryRecord);
 }
 
 export function upsertProxyRoute(db, input) {

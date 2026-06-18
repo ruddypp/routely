@@ -21,7 +21,7 @@ type DaemonApp = {
   dependsOn?: string[];
   healthcheck?: { path: string | null; expected_status: number | null } | null;
   domains?: string[];
-  source?: { type: string | null; repo: string | null; branch: string | null } | null;
+  source?: { type: string | null; repo: string | null; branch: string | null; auto_deploy?: { enabled: boolean; branches: string[] } } | null;
   image?: string | null;
   internal?: boolean;
   volumes?: string[];
@@ -155,6 +155,64 @@ type DaemonProxyRoute = {
   updatedAt: string;
 };
 
+type DaemonGithubInstallation = {
+  id: number;
+  installationId: number;
+  accountLogin: string;
+  accountType: string | null;
+  status: string;
+  events: string[];
+  updatedAt: string;
+};
+
+type DaemonGithubRepository = {
+  id: number;
+  installationId: number | null;
+  repositoryId: number | null;
+  fullName: string;
+  owner: string;
+  name: string;
+  private: boolean;
+  defaultBranch: string | null;
+  htmlUrl: string | null;
+  connectedAppId: number | null;
+  connectedAppName: string | null;
+  selectedBranch: string | null;
+  autoDeployEnabled: boolean;
+  lastSyncedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type DaemonGithubDelivery = {
+  deliveryId: string;
+  event: string;
+  action: string | null;
+  status: string;
+  signatureValid: boolean;
+  appId: number | null;
+  appName: string | null;
+  deploymentId: number | null;
+  repo: string | null;
+  branch: string | null;
+  commitSha: string | null;
+  message: string | null;
+  receivedAt: string;
+  processedAt: string | null;
+  updatedAt: string;
+};
+
+type DaemonGithubStatus = {
+  configured: boolean;
+  appId: string | null;
+  clientId: string | null;
+  webhookSecretConfigured: boolean;
+  privateKeyConfigured: boolean;
+  installations: DaemonGithubInstallation[];
+  repositories: DaemonGithubRepository[];
+  deliveries: DaemonGithubDelivery[];
+};
+
 type HealthResponse = {
   connected: boolean;
   daemonUrl: string;
@@ -187,6 +245,11 @@ type DomainsResponse = {
 type ProxyRoutesResponse = {
   routes: DaemonProxyRoute[];
   config: Record<string, unknown>;
+  error?: string | null;
+};
+
+type GithubStatusResponse = {
+  github: DaemonGithubStatus | null;
   error?: string | null;
 };
 
@@ -416,6 +479,10 @@ export default function DashboardClient() {
   const [domainsError, setDomainsError] = useState<string | null>(null);
   const [proxyRoutes, setProxyRoutes] = useState<DaemonProxyRoute[]>([]);
   const [proxyError, setProxyError] = useState<string | null>(null);
+  const [github, setGithub] = useState<DaemonGithubStatus | null>(null);
+  const [githubError, setGithubError] = useState<string | null>(null);
+  const [githubSaving, setGithubSaving] = useState(false);
+  const [githubForm, setGithubForm] = useState({ appId: "", fullName: "", branch: "main", autoDeploy: true });
   const [domainSaving, setDomainSaving] = useState(false);
   const [domainActionByHostname, setDomainActionByHostname] = useState<Record<string, string | null>>({});
   const [domainForm, setDomainForm] = useState({ appId: "", hostname: "" });
@@ -445,13 +512,14 @@ export default function DashboardClient() {
     if (showRefresh) setRefreshing(true);
 
     try {
-      const [healthRes, appsRes, serverRes, deploymentsRes, domainsRes, proxyRes] = await Promise.all([
+      const [healthRes, appsRes, serverRes, deploymentsRes, domainsRes, proxyRes, githubRes] = await Promise.all([
         fetch("/api/health", { cache: "no-store" }),
         fetch("/api/apps", { cache: "no-store" }),
         fetch("/api/server/status", { cache: "no-store" }),
         fetch("/api/deployments", { cache: "no-store" }),
         fetch("/api/domains", { cache: "no-store" }),
-        fetch("/api/proxy/routes", { cache: "no-store" })
+        fetch("/api/proxy/routes", { cache: "no-store" }),
+        fetch("/api/github/status", { cache: "no-store" })
       ]);
 
       const healthData = (await healthRes.json()) as HealthResponse;
@@ -460,6 +528,7 @@ export default function DashboardClient() {
       const deploymentsData = (await deploymentsRes.json().catch(() => ({ deployments: [], error: "Deployments unavailable." }))) as DeploymentsResponse;
       const domainsData = (await domainsRes.json().catch(() => ({ rootDomain: null, serverPublicIp: null, domains: [], error: "Domains unavailable." }))) as DomainsResponse;
       const proxyData = (await proxyRes.json().catch(() => ({ routes: [], config: {}, error: "Proxy routes unavailable." }))) as ProxyRoutesResponse;
+      const githubData = (await githubRes.json().catch(() => ({ github: null, error: "GitHub status unavailable." }))) as GithubStatusResponse;
 
       if (!mounted.current) return;
 
@@ -475,7 +544,10 @@ export default function DashboardClient() {
       setDomainsError(domainsData.error || null);
       setProxyRoutes(proxyData.routes || []);
       setProxyError(proxyData.error || null);
+      setGithub(githubData.github || null);
+      setGithubError(githubData.error || null);
       setRootDomainInput((current) => current || domainsData.rootDomain || "");
+      setGithubForm((current) => ({ ...current, appId: current.appId || String(appsData.apps?.find((app) => app.driver === "dockerfile")?.id || "") }));
       setLastUpdated(new Date().toISOString());
       setSelectedAppId((current) => current ?? appsData.apps?.[0]?.id ?? null);
     } catch {
@@ -487,6 +559,7 @@ export default function DashboardClient() {
       setDeploymentsError("Dashboard could not reach its API.");
       setDomainsError("Dashboard could not reach its API.");
       setProxyError("Dashboard could not reach its API.");
+      setGithubError("Dashboard could not reach its API.");
     } finally {
       if (mounted.current) setLoading(false);
       if (mounted.current && showRefresh) setRefreshing(false);
@@ -676,6 +749,37 @@ export default function DashboardClient() {
     }
   }, [poll]);
 
+  const connectGithubRepository = useCallback(async () => {
+    if (!githubForm.appId || !githubForm.fullName.trim()) {
+      setGithubError("Choose an app and enter a repository as owner/name.");
+      return;
+    }
+    setGithubError(null);
+    setGithubSaving(true);
+    try {
+      const response = await fetch(`/api/apps/${encodeURIComponent(githubForm.appId)}/github`, {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          fullName: githubForm.fullName.trim(),
+          branch: githubForm.branch.trim() || "main",
+          autoDeployEnabled: githubForm.autoDeploy
+        })
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as { app: DaemonApp; repository: DaemonGithubRepository };
+      replaceApp(data.app);
+      setSelectedAppId(data.app.id);
+      setGithubForm((current) => ({ ...current, fullName: data.repository.fullName, branch: data.repository.selectedBranch || data.repository.defaultBranch || current.branch }));
+      void poll();
+    } catch (error) {
+      setGithubError(error instanceof Error ? error.message : "Could not connect GitHub repository.");
+    } finally {
+      setGithubSaving(false);
+    }
+  }, [githubForm.appId, githubForm.autoDeploy, githubForm.branch, githubForm.fullName, poll, replaceApp]);
+
   const runAction = useCallback(
     async (app: DaemonApp, action: AppAction) => {
       setActionError(null);
@@ -822,6 +926,10 @@ export default function DashboardClient() {
               domainForm={domainForm}
               domainSaving={domainSaving}
               error={deployError || deploymentsError}
+              github={github}
+              githubError={githubError}
+              githubForm={githubForm}
+              githubSaving={githubSaving}
               latestByAppId={latestDeploymentByAppId}
               proxyRoutes={proxyRoutes}
               rootDomainInput={rootDomainInput}
@@ -830,6 +938,8 @@ export default function DashboardClient() {
               deployingByAppId={deployingByAppId}
               onDomainFormChange={setDomainForm}
               onDeploy={(app) => void deployApp(app)}
+              onGithubConnect={() => void connectGithubRepository()}
+              onGithubFormChange={setGithubForm}
               onRemoveDomain={(domain) => void removeDomain(domain)}
               onRootDomainChange={setRootDomainInput}
               onSaveRootDomain={() => void saveRootDomain()}
@@ -916,6 +1026,7 @@ export default function DashboardClient() {
               connected={connected}
               deployments={selectedDeployments}
               domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []}
+              github={github}
               deploymentLogs={deploymentLogs}
               deploymentLogsError={deploymentLogsError}
               deploymentLogsLoading={deploymentLogsLoading}
@@ -953,13 +1064,13 @@ function Sidebar({ connected }: { connected: boolean }) {
         <NavItem active label="Local apps" dot={connected} />
         <NavItem label="Production" />
         <NavItem label="Domains" dot={connected} />
+        <NavItem label="GitHub" dot={connected} />
         <NavItem label="Logs" />
         <NavItem label="Metrics" />
       </nav>
       <div className="mt-7 border-t border-white/5 pt-4">
         <p className="px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Later</p>
         <nav className="mt-2 space-y-1">
-          <NavItem label="GitHub" disabled />
           <NavItem label="Databases" disabled />
           <NavItem label="Backups" disabled />
           <NavItem label="Settings" disabled />
@@ -1199,12 +1310,18 @@ function ProductionDeployPanel({
   domainSaving,
   deployingByAppId,
   error,
+  github,
+  githubError,
+  githubForm,
+  githubSaving,
   latestByAppId,
   proxyRoutes,
   rootDomainInput,
   onAddDomain,
   onDomainFormChange,
   onDeploy,
+  onGithubConnect,
+  onGithubFormChange,
   onLogs,
   onRemoveDomain,
   onRootDomainChange,
@@ -1224,12 +1341,18 @@ function ProductionDeployPanel({
   domainSaving: boolean;
   deployingByAppId: Record<number, boolean>;
   error: string | null;
+  github: DaemonGithubStatus | null;
+  githubError: string | null;
+  githubForm: { appId: string; fullName: string; branch: string; autoDeploy: boolean };
+  githubSaving: boolean;
   latestByAppId: Map<number, DaemonDeployment>;
   proxyRoutes: DaemonProxyRoute[];
   rootDomainInput: string;
   onAddDomain: () => void;
   onDomainFormChange: (form: { appId: string; hostname: string }) => void;
   onDeploy: (app: DaemonApp) => void;
+  onGithubConnect: () => void;
+  onGithubFormChange: (form: { appId: string; fullName: string; branch: string; autoDeploy: boolean }) => void;
   onLogs: (deployment: DaemonDeployment) => void;
   onRemoveDomain: (domain: DaemonDomain) => void;
   onRootDomainChange: (value: string) => void;
@@ -1242,6 +1365,7 @@ function ProductionDeployPanel({
   const authReady = Boolean(!server?.auth.required || server.auth.configured);
   const ready = connected && dockerReady && dataReady && authReady;
   const recent = deployments.slice(0, 4);
+  const recentDeliveries = github?.deliveries.slice(0, 4) || [];
 
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
@@ -1263,6 +1387,7 @@ function ProductionDeployPanel({
 
       {error ? <Alert title="Deployment action failed" message={error} /> : null}
       {domainsError ? <Alert title="Domain or proxy action failed" message={domainsError} /> : null}
+      {githubError ? <Alert title="GitHub action failed" message={githubError} /> : null}
 
       <div className="grid gap-0 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.95fr)]">
         <div className="min-w-0 border-b border-white/5 lg:border-b-0 lg:border-r">
@@ -1353,6 +1478,60 @@ function ProductionDeployPanel({
             );
           })}
 
+          <ResourceSection title="GitHub repository" count={github?.repositories.length || 0} />
+          <div className="border-b border-white/5 px-4 py-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <ReadinessCard label="App" value={github?.configured ? "configured" : "missing"} status={github?.configured ? "ok" : "warn"} />
+              <ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} />
+              <ReadinessCard label="Key" value={github?.privateKeyConfigured ? "ready" : "later"} status={github?.privateKeyConfigured ? "ok" : "warn"} />
+              <ReadinessCard label="Repos" value={String(github?.repositories.length || 0)} status={github?.repositories.length ? "ok" : "warn"} />
+            </div>
+            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_110px_auto]">
+              <label>
+                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">App</span>
+                <select value={githubForm.appId} onChange={(event) => onGithubFormChange({ ...githubForm, appId: event.target.value })} disabled={!connected || githubSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>
+                  <option value="">Choose app</option>
+                  {apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}
+                </select>
+              </label>
+              <Field label="Repository" value={githubForm.fullName} onChange={(value) => onGithubFormChange({ ...githubForm, fullName: value })} placeholder="owner/repo" disabled={!connected || githubSaving} />
+              <Field label="Branch" value={githubForm.branch} onChange={(value) => onGithubFormChange({ ...githubForm, branch: value })} placeholder="main" disabled={!connected || githubSaving} />
+              <div className="flex items-end">
+                <PillButton onClick={onGithubConnect} disabled={!connected || githubSaving || !githubForm.appId || !githubForm.fullName.trim()} strong>{githubSaving ? "Saving" : "Connect"}</PillButton>
+              </div>
+            </div>
+            <label className="mt-3 flex items-center justify-between gap-3 rounded-md bg-black/20 px-3 py-2 text-xs">
+              <span><span className="font-bold">Auto deploy on push</span><span className="block text-muted">Only matching branch push events can queue deployments.</span></span>
+              <input type="checkbox" checked={githubForm.autoDeploy} onChange={(event) => onGithubFormChange({ ...githubForm, autoDeploy: event.target.checked })} disabled={githubSaving} className="h-4 w-4 accent-[var(--accent)]" />
+            </label>
+          </div>
+
+          {github?.repositories.length ? github.repositories.map((repo) => (
+            <div key={repo.id} className="border-b border-white/5 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-sm font-bold">{repo.fullName}</p>
+                  <p className="mt-1 text-[11px] text-muted">{repo.connectedAppName || "not connected"} · {repo.selectedBranch || repo.defaultBranch || "branch not set"} · {repo.private ? "private" : "public"}</p>
+                </div>
+                <StatusBadge status={repo.autoDeployEnabled ? "running" : "stopped"} />
+              </div>
+            </div>
+          )) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Connect a repository to store source metadata and enable signed push-to-deploy.</div>}
+
+          <ResourceSection title="Webhook deliveries" count={recentDeliveries.length} />
+          {recentDeliveries.length === 0 ? <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Signed push deliveries will appear here after GitHub sends webhooks.</div> : recentDeliveries.map((delivery) => (
+            <div key={delivery.deliveryId} className="border-b border-white/5 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold">{delivery.repo || delivery.event}</p>
+                  <p className="mt-1 truncate font-mono text-[11px] text-muted">{delivery.branch || "-"} · {delivery.commitSha?.slice(0, 7) || "no commit"} · {timeAgo(delivery.receivedAt)}</p>
+                </div>
+                <StatusBadge status={delivery.status} />
+              </div>
+              {delivery.message ? <p className="mt-2 text-xs text-muted">{delivery.message}</p> : null}
+            </div>
+          ))}
+
           <ResourceSection title="Recent deployment phases" count={recent.length} />
           {recent.length === 0 ? (
             <div className="px-4 py-5 text-sm text-muted">Deployment history will appear here after the first Dockerfile deploy.</div>
@@ -1361,7 +1540,7 @@ function ProductionDeployPanel({
           ))}
           <div className="border-t border-white/5 bg-black/20 px-4 py-3">
             <div className="flex flex-wrap gap-2">
-              {['GitHub', 'Backups', 'Metrics', 'Rollback'].map((item) => (
+              {['Backups', 'Metrics', 'Rollback'].map((item) => (
                 <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/60">{item} locked</span>
               ))}
             </div>
@@ -1395,6 +1574,7 @@ function DetailPanel({
   deploymentLogsLoading,
   deployments,
   domains,
+  github,
   deploying,
   error,
   loading,
@@ -1413,6 +1593,7 @@ function DetailPanel({
   deploymentLogsLoading: boolean;
   deployments: DaemonDeployment[];
   domains: DaemonDomain[];
+  github: DaemonGithubStatus | null;
   deploying: boolean;
   error: string | null;
   loading: boolean;
@@ -1423,7 +1604,7 @@ function DetailPanel({
   onEdit?: () => void;
   onReload?: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "deployments" | "logs" | "config">("overview");
+  const [tab, setTab] = useState<"overview" | "deployments" | "domains" | "proxy" | "github" | "logs" | "config">("overview");
 
   if (!app) {
     return (
@@ -1460,8 +1641,8 @@ function DetailPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-4 gap-1 border-b border-white/5 bg-black/20 px-2 py-2">
-        {(["overview", "deployments", "logs", "config"] as const).map((item) => (
+      <div className="grid grid-cols-3 gap-1 border-b border-white/5 bg-black/20 px-2 py-2 sm:grid-cols-7">
+        {(["overview", "deployments", "domains", "proxy", "github", "logs", "config"] as const).map((item) => (
           <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-full px-2 py-1.5 text-[11px] font-bold capitalize ${FOCUS_RING} ${tab === item ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground"}`}>{item}</button>
         ))}
       </div>
@@ -1489,6 +1670,41 @@ function DetailPanel({
         </div>
       ) : null}
 
+      {tab === "domains" ? (
+        <div>
+          {domains.length === 0 ? <div className="px-4 py-6 text-sm text-muted">No domains are attached to this app.</div> : domains.map((domain) => (
+            <div key={domain.id} className="border-b border-white/5 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate font-mono text-sm font-bold">{domain.hostname}</p>
+                  <p className="mt-1 text-[11px] text-muted">target {domain.targetPort ? `:${domain.targetPort}` : "pending"} · {domain.verificationMessage || "verification pending"}</p>
+                </div>
+                <StatusBadge status={domain.status} />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {tab === "proxy" ? (
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
+          <Meta label="Proxy exposure" value={app.internal || app.type === "database" ? "blocked" : "allowed after DNS verification"} />
+          <Meta label="HTTPS" value={domains.some((domain) => domain.tlsStatus === "issuing" || domain.tlsStatus === "active") ? "route generated" : "pending"} />
+          <Meta label="Public routes" value={domains.map((domain) => `${domain.hostname}:${domain.tlsStatus}`).join(", ") || "none"} mono wide />
+        </dl>
+      ) : null}
+
+      {tab === "github" ? (
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
+          <Meta label="GitHub App" value={github?.configured ? "configured" : "not configured"} />
+          <Meta label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing secret"} />
+          <Meta label="Repository" value={app.source?.repo || "not connected"} mono wide />
+          <Meta label="Branch" value={app.source?.branch || "main/master default"} mono />
+          <Meta label="Auto deploy" value={app.source?.auto_deploy?.enabled === false ? "disabled" : app.source?.type === "github" ? "enabled" : "not connected"} />
+          <Meta label="Recent delivery" value={github?.deliveries.find((delivery) => delivery.appId === app.id || delivery.repo === app.source?.repo)?.status || "none"} wide />
+        </dl>
+      ) : null}
+
       {tab === "config" ? (
         <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
           <Meta label="Enabled" value={app.enabled ? "yes" : "no"} />
@@ -1501,6 +1717,7 @@ function DetailPanel({
           <Meta label="Compose" value={[app.composeFile, app.composeService].filter(Boolean).join(" / ") || "generated"} mono wide />
           <Meta label="Depends on" value={(app.dependsOn || []).join(", ") || "-"} wide />
           <Meta label="Domains" value={(app.domains || []).join(", ") || "locked"} wide />
+          <Meta label="Source" value={app.source?.repo ? `${app.source.repo}:${app.source.branch || "main"}` : "-"} mono wide />
           <Meta label="Volumes" value={(app.volumes || []).join(", ") || "-"} mono wide />
           <Meta label="Env" value={Object.keys(app.env || {}).length > 0 ? Object.keys(app.env || {}).join(", ") : "-"} mono wide />
         </dl>
