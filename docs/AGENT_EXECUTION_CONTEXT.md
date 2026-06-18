@@ -1,8 +1,8 @@
 # Routely Agent Execution Context
 
 Last updated: 2026-06-18  
-Current completed checkpoint: Checkpoint 9, Logs, Metrics, and Health  
-Next checkpoint: Checkpoint 10, Database Services and Backups
+Current completed checkpoint: Checkpoint 10, Database Services and Backups  
+Next checkpoint: Checkpoint 11, Notifications and Release Polish
 
 This file is a compact handoff and copy-paste prompt for another implementation agent.
 
@@ -46,6 +46,7 @@ Implemented checkpoints:
 - Checkpoint 7: GitHub integration and signed push-to-deploy.
 - Checkpoint 8: environment, secrets, app settings, redaction, env injection, restart/redeploy-needed state.
 - Checkpoint 9: logs, metrics, and health.
+- Checkpoint 10: database services and backups.
 
 Current important behavior:
 
@@ -55,17 +56,25 @@ Current important behavior:
 - Keep secrets out of `routely.yml` by default. Stored secret values are hidden after save.
 - Keep unsafe/future features inert unless the checkpoint explicitly asks for them.
 
-Checkpoint 9 added:
+Checkpoint 10 added:
 
-- SQLite `healthchecks` and `metrics_samples` persistence.
-- Shared helpers for HTTP/runtime health evaluation, public health/metric DTOs, and SSE event framing.
-- Authenticated daemon endpoints: `/apps/:id/health`, `/apps/:id/metrics`, `/metrics`, `/deployments/:id/logs/stream`.
-- Health refresh uses configured HTTP healthchecks, Docker container running state for successful deployments, or local runtime/Compose state.
-- Deployment failures persist unhealthy app state with failing phase summaries.
-- Runtime and deployment logs continue to redact stored app secret values where practical.
-- CLI `routely health <app>` shows health, latest deploy state, and recent metric samples.
-- Same-origin Next.js route handlers proxy health, metrics, and log stream endpoints.
-- Dashboard inspector has a Health tab and overview health/CPU/RAM cards backed by daemon/storage data.
+- SQLite `databases`, `backup_jobs`, and `backup_runs` persistence with idempotent migrations.
+- Shared helpers for database/backup DTOs, supported database type validation, cron schedule parsing, due-schedule checks, and retention selection.
+- Authenticated daemon endpoints: `/databases`, `/databases/:id/start`, `/databases/:id/stop`, `/backups`, `/backups/:id`, and `/backups/:id/run`.
+- Production database creation uses the existing Compose-backed database templates and keeps services internal-only by default.
+- Manual backup runs execute narrow Docker Compose dump/checkpoint commands for PostgreSQL, MySQL, MariaDB, MongoDB, and Redis, write local files under the production data backup directory, persist run status/message/file metadata, and prune expired successful backup files according to retention.
+- A lightweight daemon scheduler checks enabled backup jobs every minute using stored cron metadata and queues the same backup runner for due jobs.
+- CLI now includes `routely db ls`, `routely backup enable <database>`, `routely backup disable <database>`, `routely backup run <database>`, and `routely backup ls`.
+- Same-origin Next.js route handlers proxy database and backup endpoints under `/api/*`.
+- Dashboard now has a real Databases & Backups operational panel backed by daemon/storage data, with create/start/stop database controls, backup enable/run/toggle controls, and backup run history.
+- Secret/raw database env values are not returned in database DTOs; API/UI show env key names only.
+
+Still deferred:
+
+- Destructive restore automation.
+- External backup storage.
+- Notifications/alerts.
+- Full rollback and broad VPS operations.
 
 Current CLI surface includes workspace init/sync/add/up/down/ps/logs/restart/doctor, server init/doctor, deploy, env, domain, GitHub, and `routely health <app>`.
 
@@ -91,16 +100,14 @@ Frontend/information architecture direction for upcoming work:
 
 Next task:
 
-Implement Checkpoint 10 from `docs/14-implementation-plan.md`: Database Services and Backups.
+Implement Checkpoint 11 from `docs/14-implementation-plan.md`: Notifications and Release Polish.
 
-Checkpoint 10 should be conservative:
+Checkpoint 11 should be conservative:
 
-- Build production database service records/templates only when backed by real daemon/storage/runtime behavior.
-- Add backup job/run persistence and a safe manual backup path.
-- Add sidebar/navigation structure for Databases and Backups when real data exists, while keeping the dashboard home as a high-level overview.
-- Keep restore/destructive operations explicit and deferred unless the plan requires a narrow inert placeholder.
-- Do not implement notifications, full rollback, marketplace templates, broad VPS operations, or unsafe restore automation.
-- Reuse secret redaction and never leak database credentials in logs/API/UI.
+- Add notification settings and delivery attempts only when backed by real storage/API behavior.
+- Support generic webhook, Discord webhook, and Telegram where practical with secret redaction.
+- Trigger notifications for deploy succeeded, deploy failed, and backup failed.
+- Keep restore/destructive operations, marketplace templates, broad VPS operations, and full rollback deferred.
 
 Required checks remain:
 

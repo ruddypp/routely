@@ -1,8 +1,8 @@
 # Next Agent Prompt
 
 Last updated: 2026-06-18  
-Latest completed checkpoint: Checkpoint 9, Logs, Metrics, and Health  
-Expected commit: `feat: add app health logs`
+Latest completed checkpoint: Checkpoint 10, Database Services and Backups  
+Expected commit: `feat: add database backups`
 
 Use this prompt for the next implementation agent. It asks for the next full product/backend/frontend slice, not a frontend-only redesign.
 
@@ -36,37 +36,38 @@ Product/design execution rule:
 - Preserve DESIGN.md: dark functional surfaces, compact typography, restrained green accent, rounded controls, and no generic SaaS landing page.
 
 Current progress:
-- Checkpoint 0 through Checkpoint 9 are implemented.
+- Checkpoint 0 through Checkpoint 10 are implemented.
 - Browser code must keep using same-origin /api/*; do not call the daemon directly from browser code.
 - Production mode requires admin bearer token auth for private daemon actions.
-- Manual Dockerfile deploy, domain/proxy/HTTPS state, signed GitHub push-to-deploy behavior, stored env/secrets, secret redaction, restart/redeploy-needed state, runtime/deploy logs, app health, and metric samples must be preserved.
+- Manual Dockerfile deploy, domain/proxy/HTTPS state, signed GitHub push-to-deploy behavior, stored env/secrets, secret redaction, restart/redeploy-needed state, runtime/deploy logs, app health, metric samples, production database records, and local-file backup state must be preserved.
 
 Current implemented surface:
 - CLI supports workspace init/sync/add/up/down/ps/logs/restart/doctor.
 - CLI supports routely server init, routely server doctor, routely deploy <app> [--watch], env commands, domain commands, GitHub commands, and routely health <app>.
-- SQLite/config persistence covers apps, services, Compose metadata, deployments, deployment logs, domains, proxy routes, GitHub state, webhook deliveries, app env/secrets, restart/redeploy-needed flags, healthchecks, and metrics_samples.
+- SQLite/config persistence covers apps, services, Compose metadata, deployments, deployment logs, domains, proxy routes, GitHub state, webhook deliveries, app env/secrets, restart/redeploy-needed flags, healthchecks, metrics_samples, databases, backup_jobs, and backup_runs.
 - Dockerfile deployments build local Dockerfile apps, start containers on temporary 127.0.0.1:32xxx ports, inject stored production env, run healthcheck/container-running checks, persist deployment/log metadata, and refresh app health state.
 - Domains target the latest successful Dockerfile deployment and generate Traefik-compatible HTTPS config after DNS verification.
 - GitHub webhooks validate X-Hub-Signature-256, deduplicate X-GitHub-Delivery, filter unsupported events, and queue the existing Dockerfile deployment flow for connected repo/branch pushes.
-- Dashboard has local app/service separation, server readiness, Dockerfile deploy panel, deployment phase/log panels, temporary URLs, domain/DNS/proxy/HTTPS controls, GitHub repository/source/delivery controls, Env inspector, Health inspector, pending restart/redeploy indicators, desktop sidebar, and mobile bottom nav.
+- Dashboard has local app/service separation, server readiness, Dockerfile deploy panel, deployment phase/log panels, temporary URLs, domain/DNS/proxy/HTTPS controls, GitHub repository/source/delivery controls, Env inspector, Health inspector, Databases & Backups panel, pending restart/redeploy indicators, desktop sidebar, and mobile bottom nav.
 
 Your next task:
-Implement Checkpoint 10 from docs/14-implementation-plan.md comprehensively: Database Services and Backups.
+Implement Checkpoint 11 from docs/14-implementation-plan.md comprehensively: Notifications and Release Polish.
 
 Execution bar:
-- Backend first: schema/DB helpers for production database and backup state, daemon endpoints, auth enforcement, safe command/runtime behavior, secret redaction, and tests.
-- CLI/API where useful: add database/backup workflows only if backed by real daemon/storage data.
-- Frontend after backend exists: add database/backup surfaces around real data, preferably as sidebar feature pages/panels rather than more content crammed into the dashboard overview. Future/unsafe actions must be inert and labeled as later scope.
+- Backend first: schema/DB helpers for notification settings and delivery attempts, daemon endpoints, auth enforcement, safe outbound request behavior, secret redaction, and tests.
+- CLI/API where useful: add notification workflows only if backed by real daemon/storage data.
+- Frontend after backend exists: add notification/release-polish surfaces around real data, preferably as sidebar feature pages/panels rather than more content crammed into the dashboard overview. Future/unsafe actions must be inert and labeled as later scope.
 - Improve the existing frontend structure while implementing the backend slice: make daily operations more readable and comfortable, with less dashboard clutter and clearer sidebar hierarchy.
-- Keep database services and backups narrow. Do not build broad VPS management.
-- Do not implement notifications, full rollback, marketplace templates, destructive restore automation, or broad VPS operations during Checkpoint 10.
-- Preserve manual Dockerfile deploy, domain/proxy/HTTPS, GitHub webhook behavior, stored env injection, health/metrics/log state, restart/redeploy-needed state, and same-origin Next.js API proxy behavior.
+- Keep notifications narrow: generic webhook, Discord webhook, and Telegram where practical.
+- Trigger notifications for deploy succeeded, deploy failed, and backup failed.
+- Do not implement full rollback, marketplace templates, destructive restore automation, external backup storage, or broad VPS operations during Checkpoint 11.
+- Preserve manual Dockerfile deploy, domain/proxy/HTTPS, GitHub webhook behavior, stored env injection, health/metrics/log state, database/backup state, restart/redeploy-needed state, and same-origin Next.js API proxy behavior.
 
 Required reading before coding:
 1. AGENTS.md
 2. docs/HANDOFF.md
 3. docs/AGENT_EXECUTION_CONTEXT.md
-4. docs/14-implementation-plan.md, especially Checkpoint 10
+4. docs/14-implementation-plan.md, especially Checkpoint 11
 5. docs/13-current-setup-status.md
 6. docs/01-prd.md
 7. docs/02-technical-architecture.md
@@ -79,15 +80,15 @@ Required reading before coding:
 14. docs/09-security-model.md
 15. docs/feature-specs/dashboard.md
 16. docs/feature-specs/logs-and-monitoring.md
-17. Relevant database/backup docs/specs if added
+17. Relevant notification/release-polish docs/specs if added
 18. DESIGN.md
 
 Before editing apps/web, read relevant Next.js docs in node_modules/next/dist/docs/. This repo uses Next.js with breaking changes and AGENTS.md says this is not the Next.js you know.
 
 Testing and verification:
-- Add focused unit tests for new database/backup helpers and safety/redaction behavior.
+- Add focused unit tests for new notification helpers and safety/redaction behavior.
 - Add DB/API tests for persistence and daemon route behavior.
-- Add route-handler tests for same-origin database/backup endpoints and daemon-unreachable/auth failures.
+- Add route-handler tests for same-origin notification endpoints and daemon-unreachable/auth failures.
 - Run at minimum:
   - npm run lint
   - npm run test --workspace apps/cli if CLI/shared code is touched
@@ -101,5 +102,5 @@ Documentation and commit:
 - Update docs if behavior, commands, config fields, verification status, known caveats, or deferred boundaries change.
 - Update docs/HANDOFF.md, docs/13-current-setup-status.md, docs/NEXT_AGENT_PROMPT.md, and docs/AGENT_EXECUTION_CONTEXT.md at the end.
 - Preserve unrelated user changes. Do not use destructive git commands.
-- After verification, commit only files changed for Checkpoint 10 with a concise commit message such as feat: add database backups.
+- After verification, commit only files changed for Checkpoint 11 with a concise commit message such as feat: add notifications.
 ```

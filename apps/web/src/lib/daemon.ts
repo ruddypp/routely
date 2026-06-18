@@ -146,6 +146,57 @@ export type DaemonMetricSample = {
   sampledAt: string;
 };
 
+export type DaemonDatabase = {
+  id: number;
+  appId: number | null;
+  appName: string | null;
+  name: string;
+  type: string;
+  status: string;
+  internal: boolean;
+  image: string | null;
+  port: number | null;
+  composeService: string | null;
+  composeFile: string | null;
+  volumeName: string | null;
+  envKeys: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DaemonBackupJob = {
+  id: number;
+  databaseId: number;
+  databaseName: string | null;
+  databaseType: string | null;
+  enabled: boolean;
+  schedule: string | null;
+  retentionDays: number;
+  localDir: string | null;
+  lastRunStatus: string | null;
+  lastRunAt: string | null;
+  lastRunMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DaemonBackupRun = {
+  id: number;
+  backupJobId: number;
+  databaseId: number;
+  databaseName: string | null;
+  databaseType: string | null;
+  status: string;
+  trigger: string;
+  filePath: string | null;
+  sizeBytes: number | null;
+  message: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 export type DaemonAppHealthResponse = {
   app: DaemonApp;
   latestDeployment: DaemonDeployment | null;

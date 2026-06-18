@@ -9,6 +9,9 @@ import type {
   RoutelyDeploymentRecord,
   RoutelyHealthcheckRecord,
   RoutelyMetricSampleRecord,
+  RoutelyDatabaseRecord,
+  RoutelyBackupJobRecord,
+  RoutelyBackupRunRecord,
   RoutelyDeploymentStatus
 } from "@routely/core";
 
@@ -137,6 +140,49 @@ export function recordMetricSample(
 ): RoutelyMetricSampleRecord;
 export function listMetricSamplesForApp(db: Database.Database, appId: number, options?: { limit?: number }): RoutelyMetricSampleRecord[];
 export function listHostMetricSamples(db: Database.Database, options?: { limit?: number }): RoutelyMetricSampleRecord[];
+export function listDatabases(db: Database.Database): RoutelyDatabaseRecord[];
+export function getDatabaseById(db: Database.Database, databaseId: number): RoutelyDatabaseRecord | null;
+export function getDatabaseByName(db: Database.Database, name: string): RoutelyDatabaseRecord | null;
+export function upsertDatabase(
+  db: Database.Database,
+  input: {
+    appId?: number | null;
+    app_id?: number | null;
+    name?: string;
+    type?: string;
+    preset?: string;
+    status?: string;
+    internal?: boolean;
+    image?: string | null;
+    port?: number | string | null;
+    composeService?: string | null;
+    compose_service?: string | null;
+    composeFile?: string | null;
+    compose_file?: string | null;
+    volumeName?: string | null;
+    volume_name?: string | null;
+    env?: Record<string, string>;
+  }
+): RoutelyDatabaseRecord;
+export function updateDatabaseStatus(db: Database.Database, databaseId: number, status: string): RoutelyDatabaseRecord | null;
+export function upsertBackupJob(
+  db: Database.Database,
+  input: { databaseId?: number; database_id?: number; enabled?: boolean; schedule?: string | null; retentionDays?: number; retention_days?: number; localDir?: string | null; local_dir?: string | null }
+): RoutelyBackupJobRecord;
+export function getBackupJobById(db: Database.Database, backupJobId: number): RoutelyBackupJobRecord | null;
+export function getBackupJobForDatabase(db: Database.Database, databaseId: number): RoutelyBackupJobRecord | null;
+export function listBackupJobs(db: Database.Database): RoutelyBackupJobRecord[];
+export function listDueBackupJobs(db: Database.Database, isDue: (schedule: string, lastRunAt: string | null) => boolean): RoutelyBackupJobRecord[];
+export function createBackupRun(db: Database.Database, input: { backupJobId?: number; backup_job_id?: number; trigger?: string; message?: string | null }): RoutelyBackupRunRecord;
+export function updateBackupRun(
+  db: Database.Database,
+  backupRunId: number,
+  patch: { status?: string; filePath?: string | null; file_path?: string | null; sizeBytes?: number | null; size_bytes?: number | null; message?: string | null; finishedAt?: string | null; finished_at?: string | null }
+): RoutelyBackupRunRecord | null;
+export function getBackupRunById(db: Database.Database, backupRunId: number): RoutelyBackupRunRecord | null;
+export function listBackupRuns(db: Database.Database, options?: { limit?: number }): RoutelyBackupRunRecord[];
+export function listBackupRunsForJob(db: Database.Database, backupJobId: number, options?: { limit?: number }): RoutelyBackupRunRecord[];
+export function markBackupRunsPruned(db: Database.Database, runIds?: number[]): RoutelyBackupRunRecord[];
 export interface RoutelyDomainRecord {
   id: number;
   app_id: number;

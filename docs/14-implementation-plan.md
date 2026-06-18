@@ -1186,11 +1186,11 @@ Track CLI progress against `docs/05-cli-spec.md`.
 - [ ] `routely db add mysql`
 - [ ] `routely db add redis`
 - [ ] `routely db add mongodb`
-- [ ] `routely db ls`
-- [ ] `routely backup enable <database>`
-- [ ] `routely backup disable <database>`
-- [ ] `routely backup run <database>`
-- [ ] `routely backup ls`
+- [x] `routely db ls`
+- [x] `routely backup enable <database>`
+- [x] `routely backup disable <database>`
+- [x] `routely backup run <database>`
+- [x] `routely backup ls`
 
 ## 28. API Endpoint Completion Map
 
@@ -1242,14 +1242,14 @@ Track daemon and dashboard API progress against `docs/06-api-spec.md`.
 
 ### Database and Backup API
 
-- [ ] `GET /databases`
-- [ ] `POST /databases`
-- [ ] `POST /databases/:id/start`
-- [ ] `POST /databases/:id/stop`
-- [ ] `GET /backups`
-- [ ] `POST /backups`
-- [ ] `POST /backups/:id/run`
-- [ ] `PATCH /backups/:id`
+- [x] `GET /databases`
+- [x] `POST /databases`
+- [x] `POST /databases/:id/start`
+- [x] `POST /databases/:id/stop`
+- [x] `GET /backups`
+- [x] `POST /backups`
+- [x] `POST /backups/:id/run`
+- [x] `PATCH /backups/:id`
 
 ## 29. Data Schema Completion Map
 
@@ -1285,9 +1285,9 @@ Track SQLite schema progress against `docs/08-data-model.md`.
 
 ### Databases and Backups
 
-- [ ] `databases`
-- [ ] `backup_jobs`
-- [ ] `backup_runs`
+- [x] `databases`
+- [x] `backup_jobs`
+- [x] `backup_runs`
 
 Schema rules:
 

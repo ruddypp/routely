@@ -1068,6 +1068,263 @@ function parseMetricSampleRecord(row) {
   };
 }
 
+function parseDatabaseRecord(row) {
+  return {
+    ...row,
+    app_id: row.app_id == null ? null : Number(row.app_id),
+    internal: Boolean(row.internal),
+    port: row.port == null ? null : Number(row.port),
+    env: parseJsonObject(row.env)
+  };
+}
+
+function parseBackupJobRecord(row) {
+  return {
+    ...row,
+    database_id: Number(row.database_id),
+    enabled: Boolean(row.enabled),
+    retention_days: Number(row.retention_days || 7)
+  };
+}
+
+function parseBackupRunRecord(row) {
+  return {
+    ...row,
+    backup_job_id: Number(row.backup_job_id),
+    database_id: Number(row.database_id),
+    size_bytes: row.size_bytes == null ? null : Number(row.size_bytes)
+  };
+}
+
+export function listDatabases(db) {
+  return db.prepare(`
+    SELECT databases.*, apps.name AS app_name
+    FROM databases
+    LEFT JOIN apps ON apps.id = databases.app_id
+    ORDER BY databases.name ASC
+  `).all().map(parseDatabaseRecord);
+}
+
+export function getDatabaseById(db, databaseId) {
+  const row = db.prepare(`
+    SELECT databases.*, apps.name AS app_name
+    FROM databases
+    LEFT JOIN apps ON apps.id = databases.app_id
+    WHERE databases.id = ?
+  `).get(databaseId) || null;
+  return row ? parseDatabaseRecord(row) : null;
+}
+
+export function getDatabaseByName(db, name) {
+  const row = db.prepare(`
+    SELECT databases.*, apps.name AS app_name
+    FROM databases
+    LEFT JOIN apps ON apps.id = databases.app_id
+    WHERE databases.name = ?
+  `).get(String(name || "").trim()) || null;
+  return row ? parseDatabaseRecord(row) : null;
+}
+
+export function upsertDatabase(db, input = {}) {
+  const name = String(input.name || "").trim();
+  if (!name) throw new Error("Database name is required.");
+  const type = normalizeDatabaseType(input.type || input.preset);
+  const existing = getDatabaseByName(db, name);
+  const payload = {
+    appId: input.appId ?? input.app_id ?? existing?.app_id ?? null,
+    status: input.status || existing?.status || "stopped",
+    internal: input.internal == null ? true : Boolean(input.internal),
+    image: input.image || existing?.image || null,
+    port: input.port == null || input.port === "" ? null : Number(input.port),
+    composeService: input.composeService || input.compose_service || existing?.compose_service || name,
+    composeFile: input.composeFile || input.compose_file || existing?.compose_file || null,
+    volumeName: input.volumeName || input.volume_name || existing?.volume_name || `${name}_data`,
+    env: input.env && typeof input.env === "object" && !Array.isArray(input.env) ? input.env : existing?.env || {}
+  };
+
+  if (existing) {
+    db.prepare(`
+      UPDATE databases
+      SET app_id = ?, type = ?, status = ?, internal = ?, image = ?, port = ?, compose_service = ?, compose_file = ?, volume_name = ?, env = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(
+      payload.appId,
+      type,
+      payload.status,
+      payload.internal ? 1 : 0,
+      payload.image,
+      payload.port,
+      payload.composeService,
+      payload.composeFile,
+      payload.volumeName,
+      serializeJsonObject(payload.env) || "{}",
+      existing.id
+    );
+    return getDatabaseById(db, existing.id);
+  }
+
+  const result = db.prepare(`
+    INSERT INTO databases (app_id, name, type, status, internal, image, port, compose_service, compose_file, volume_name, env)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    payload.appId,
+    name,
+    type,
+    payload.status,
+    payload.internal ? 1 : 0,
+    payload.image,
+    payload.port,
+    payload.composeService,
+    payload.composeFile,
+    payload.volumeName,
+    serializeJsonObject(payload.env) || "{}"
+  );
+  return getDatabaseById(db, Number(result.lastInsertRowid));
+}
+
+export function updateDatabaseStatus(db, databaseId, status) {
+  db.prepare("UPDATE databases SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?").run(String(status || "unknown"), databaseId);
+  return getDatabaseById(db, databaseId);
+}
+
+export function upsertBackupJob(db, input = {}) {
+  const databaseId = Number(input.databaseId || input.database_id);
+  if (!Number.isInteger(databaseId)) throw new Error("Backup databaseId is required.");
+  if (!getDatabaseById(db, databaseId)) throw new Error(`Database ${databaseId} not found.`);
+  const schedule = normalizeBackupSchedule(input.schedule);
+  const retentionDays = Math.max(1, Number(input.retentionDays || input.retention_days || 7));
+  const enabled = input.enabled == null ? true : Boolean(input.enabled);
+  const localDir = input.localDir || input.local_dir || null;
+
+  db.prepare(`
+    INSERT INTO backup_jobs (database_id, enabled, schedule, retention_days, local_dir)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(database_id) DO UPDATE SET
+      enabled = excluded.enabled,
+      schedule = excluded.schedule,
+      retention_days = excluded.retention_days,
+      local_dir = excluded.local_dir,
+      updated_at = CURRENT_TIMESTAMP
+  `).run(databaseId, enabled ? 1 : 0, schedule, retentionDays, localDir);
+  return getBackupJobForDatabase(db, databaseId);
+}
+
+export function getBackupJobById(db, backupJobId) {
+  const row = db.prepare(`
+    SELECT backup_jobs.*, databases.name AS database_name, databases.type AS database_type,
+      latest.status AS last_run_status, latest.finished_at AS last_run_at, latest.message AS last_run_message
+    FROM backup_jobs
+    JOIN databases ON databases.id = backup_jobs.database_id
+    LEFT JOIN backup_runs latest ON latest.id = (
+      SELECT id FROM backup_runs WHERE backup_job_id = backup_jobs.id ORDER BY created_at DESC, id DESC LIMIT 1
+    )
+    WHERE backup_jobs.id = ?
+  `).get(backupJobId) || null;
+  return row ? parseBackupJobRecord(row) : null;
+}
+
+export function getBackupJobForDatabase(db, databaseId) {
+  const row = db.prepare(`
+    SELECT backup_jobs.*, databases.name AS database_name, databases.type AS database_type,
+      latest.status AS last_run_status, latest.finished_at AS last_run_at, latest.message AS last_run_message
+    FROM backup_jobs
+    JOIN databases ON databases.id = backup_jobs.database_id
+    LEFT JOIN backup_runs latest ON latest.id = (
+      SELECT id FROM backup_runs WHERE backup_job_id = backup_jobs.id ORDER BY created_at DESC, id DESC LIMIT 1
+    )
+    WHERE backup_jobs.database_id = ?
+  `).get(databaseId) || null;
+  return row ? parseBackupJobRecord(row) : null;
+}
+
+export function listBackupJobs(db) {
+  return db.prepare(`
+    SELECT backup_jobs.*, databases.name AS database_name, databases.type AS database_type,
+      latest.status AS last_run_status, latest.finished_at AS last_run_at, latest.message AS last_run_message
+    FROM backup_jobs
+    JOIN databases ON databases.id = backup_jobs.database_id
+    LEFT JOIN backup_runs latest ON latest.id = (
+      SELECT id FROM backup_runs WHERE backup_job_id = backup_jobs.id ORDER BY created_at DESC, id DESC LIMIT 1
+    )
+    ORDER BY databases.name ASC
+  `).all().map(parseBackupJobRecord);
+}
+
+export function listDueBackupJobs(db, isDue) {
+  return listBackupJobs(db).filter((job) => job.enabled && job.schedule && isDue(job.schedule, job.last_run_at));
+}
+
+export function createBackupRun(db, input = {}) {
+  const backupJobId = Number(input.backupJobId || input.backup_job_id);
+  const job = getBackupJobById(db, backupJobId);
+  if (!job) throw new Error(`Backup job ${backupJobId} not found.`);
+  const result = db.prepare(`
+    INSERT INTO backup_runs (backup_job_id, database_id, status, trigger, started_at, message)
+    VALUES (?, ?, 'queued', ?, CURRENT_TIMESTAMP, ?)
+  `).run(job.id, job.database_id, input.trigger || "manual", input.message || null);
+  return getBackupRunById(db, Number(result.lastInsertRowid));
+}
+
+export function updateBackupRun(db, backupRunId, patch = {}) {
+  const existing = getBackupRunById(db, backupRunId);
+  if (!existing) return null;
+  db.prepare(`
+    UPDATE backup_runs
+    SET status = ?, file_path = ?, size_bytes = ?, message = ?, finished_at = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
+  `).run(
+    patch.status || existing.status,
+    patch.filePath === undefined && patch.file_path === undefined ? existing.file_path : patch.filePath ?? patch.file_path,
+    patch.sizeBytes === undefined && patch.size_bytes === undefined ? existing.size_bytes : patch.sizeBytes ?? patch.size_bytes,
+    patch.message === undefined ? existing.message : patch.message,
+    patch.finishedAt === undefined && patch.finished_at === undefined ? existing.finished_at : patch.finishedAt ?? patch.finished_at,
+    backupRunId
+  );
+  return getBackupRunById(db, backupRunId);
+}
+
+export function getBackupRunById(db, backupRunId) {
+  const row = db.prepare(`
+    SELECT backup_runs.*, databases.name AS database_name, databases.type AS database_type
+    FROM backup_runs
+    JOIN databases ON databases.id = backup_runs.database_id
+    WHERE backup_runs.id = ?
+  `).get(backupRunId) || null;
+  return row ? parseBackupRunRecord(row) : null;
+}
+
+export function listBackupRuns(db, options = {}) {
+  const limit = Number.isInteger(options.limit) ? options.limit : 50;
+  return db.prepare(`
+    SELECT backup_runs.*, databases.name AS database_name, databases.type AS database_type
+    FROM backup_runs
+    JOIN databases ON databases.id = backup_runs.database_id
+    ORDER BY backup_runs.created_at DESC, backup_runs.id DESC
+    LIMIT ?
+  `).all(limit).map(parseBackupRunRecord);
+}
+
+export function listBackupRunsForJob(db, backupJobId, options = {}) {
+  const limit = Number.isInteger(options.limit) ? options.limit : 50;
+  return db.prepare(`
+    SELECT backup_runs.*, databases.name AS database_name, databases.type AS database_type
+    FROM backup_runs
+    JOIN databases ON databases.id = backup_runs.database_id
+    WHERE backup_runs.backup_job_id = ?
+    ORDER BY backup_runs.created_at DESC, backup_runs.id DESC
+    LIMIT ?
+  `).all(backupJobId, limit).map(parseBackupRunRecord);
+}
+
+export function markBackupRunsPruned(db, runIds = []) {
+  const ids = (runIds || []).map(Number).filter(Number.isInteger);
+  if (ids.length === 0) return [];
+  const mark = db.prepare("UPDATE backup_runs SET status = 'pruned', updated_at = CURRENT_TIMESTAMP WHERE id = ?");
+  const apply = db.transaction((items) => items.forEach((id) => mark.run(id)));
+  apply(ids);
+  return ids.map((id) => getBackupRunById(db, id)).filter(Boolean);
+}
+
 function parseDeploymentRecord(row) {
   return {
     ...row,

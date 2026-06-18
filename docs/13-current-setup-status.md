@@ -120,6 +120,17 @@ Product references for future work:
 - Next.js same-origin route handlers proxy health, metrics, and deployment log stream endpoints under `/api/*`; browser code still does not call the daemon directly.
 - The dashboard inspector now has a Health tab with health checks, HTTP timing, latest host/container metric samples, and overview health/CPU/RAM cards backed by daemon data.
 - Backups, notifications, production database templates, full rollback, alerts, and broad VPS operations remain deferred.
+- Checkpoint 10 has added the first database services and backups slice.
+- SQLite now stores production database records, backup jobs, and backup runs in `databases`, `backup_jobs`, and `backup_runs`.
+- Shared helpers validate supported database types, parse narrow cron schedules, determine due backup jobs, select old successful backups for retention pruning, and convert database/backup rows to public DTOs without exposing raw database env values.
+- The daemon exposes authenticated database and backup endpoints at `/databases`, `/databases/:id/start`, `/databases/:id/stop`, `/backups`, `/backups/:id`, and `/backups/:id/run`.
+- Production database creation reuses Compose-backed templates for PostgreSQL, MySQL, MariaDB, Redis, and MongoDB, with internal networking as the default.
+- Manual backup runs execute Docker Compose dump/checkpoint commands for supported templates, write local backup files under the production data backup directory, persist run status/file/message metadata, and prune expired successful backup files according to retention.
+- The daemon has a lightweight scheduled backup loop that checks enabled jobs every minute against stored cron metadata and runs due jobs through the same backup runner.
+- CLI database/backup operations now include `routely db ls`, `routely backup enable <database>`, `routely backup disable <database>`, `routely backup run <database>`, and `routely backup ls`.
+- Next.js same-origin route handlers proxy database and backup endpoints under `/api/*`; browser code still does not call the daemon directly.
+- The dashboard now includes a real Databases & Backups operational panel with database create/start/stop controls, backup enable/run/toggle controls, schedule/retention state, and backup run history backed by daemon/storage data.
+- Restore automation, external backup storage, notifications, full rollback, marketplace templates, and broad VPS operations remain deferred.
 
 ## Current Structure
 
@@ -237,6 +248,10 @@ routely env web list
 routely env web set DATABASE_URL=postgres://user:pass@db/app --secret --scope production
 routely env web unset DATABASE_URL
 routely health web
+routely db ls
+routely backup enable postgres --schedule "0 2 * * *" --retention-days 7
+routely backup run postgres
+routely backup ls
 routely domain root example.com
 routely domain add web web.example.com
 routely domain verify web.example.com
@@ -254,7 +269,7 @@ Command apps declared in `routely.yml` can use `depends_on` to control local sta
 
 Local Compose services declared in `services:` use `driver: compose`. Generated Compose files are written under `.routely/compose` unless `compose_file` is supplied. Database templates are local-development defaults and are internal by default where practical.
 
-Production server foundation now supports Dockerfile deployments, domain/proxy/HTTPS state, signed GitHub push-to-deploy for apps connected to a GitHub repository/branch, stored env/secrets injection, app health state, runtime/deployment log inspection, and narrow host/container metric sampling. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API and CLI processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Dockerfile deployments are available through `routely deploy <app> [--watch]` and the dashboard deploy panel. Domain commands and the dashboard can add hostnames, verify DNS against `ROUTELY_SERVER_PUBLIC_IP`, and generate Traefik-compatible HTTPS routes for the latest successful deployment. Env commands and the dashboard Env inspector store secret values in SQLite, hide them after save, and mark apps as needing restart/redeploy after env/settings changes. GitHub App env can be configured with `ROUTELY_GITHUB_APP_ID`, `ROUTELY_GITHUB_WEBHOOK_SECRET`, `ROUTELY_GITHUB_PRIVATE_KEY`, `ROUTELY_GITHUB_CLIENT_ID`, and `ROUTELY_GITHUB_CLIENT_SECRET`. Backups, static deploys, full rollback, alerts, notifications, production database templates, and broad VPS operations remain deferred to later checkpoints.
+Production server foundation now supports Dockerfile deployments, domain/proxy/HTTPS state, signed GitHub push-to-deploy for apps connected to a GitHub repository/branch, stored env/secrets injection, app health state, runtime/deployment log inspection, narrow host/container metric sampling, production database records, and local-file database backups. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API and CLI processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Dockerfile deployments are available through `routely deploy <app> [--watch]` and the dashboard deploy panel. Domain commands and the dashboard can add hostnames, verify DNS against `ROUTELY_SERVER_PUBLIC_IP`, and generate Traefik-compatible HTTPS routes for the latest successful deployment. Env commands and the dashboard Env inspector store secret values in SQLite, hide them after save, and mark apps as needing restart/redeploy after env/settings changes. GitHub App env can be configured with `ROUTELY_GITHUB_APP_ID`, `ROUTELY_GITHUB_WEBHOOK_SECRET`, `ROUTELY_GITHUB_PRIVATE_KEY`, `ROUTELY_GITHUB_CLIENT_ID`, and `ROUTELY_GITHUB_CLIENT_SECRET`. Restore automation, external backup storage, static deploys, full rollback, alerts, notifications, and broad VPS operations remain deferred to later checkpoints.
 
 ## CLI Build And Global Reinstall Flow
 

@@ -1,7 +1,7 @@
 import Fastify from "fastify";
 import "dotenv/config";
 import { config as loadDotenv } from "dotenv";
-import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, statfsSync } from "node:fs";
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, statfsSync, unlinkSync, writeFileSync } from "node:fs";
 import net from "node:net";
 import os from "node:os";
 import { dirname, resolve } from "node:path";
@@ -10,6 +10,10 @@ import {
   DEFAULT_DAEMON_PORT,
   appToPublicDto,
   appEnvVarToPublicDto,
+  backupJobToPublicDto,
+  backupRunToPublicDto,
+  backupScheduleDue,
+  databaseToPublicDto,
   defaultProductionDataDir,
   deploymentLogToPublicDto,
   deploymentToPublicDto,
@@ -20,14 +24,17 @@ import {
   loadWorkspaceConfig,
   mergeAppEnv,
   metricSampleToPublicDto,
+  normalizeDatabaseType,
   redactSecrets,
   runServerDoctorChecks,
+  selectBackupRunsForRetention,
   upsertWorkspaceConfigEntry,
   verifyAdminToken
 } from "@routely/core";
 import {
   appendDeploymentLog,
   appEnvPendingState,
+  createBackupRun,
   clearAppEnvPendingFlags,
   connectAppToGithubRepository,
   createDeployment,
@@ -37,6 +44,11 @@ import {
   deleteAppEnvVar,
   deleteProxyRouteForDomain,
   getDeploymentById,
+  getBackupJobById,
+  getBackupJobForDatabase,
+  getBackupRunById,
+  getDatabaseById,
+  getDatabaseByName,
   getDomainByHostname,
   getAppById,
   getGithubSourceForApp,
@@ -45,6 +57,11 @@ import {
   getSetting,
   listHealthchecksForApp,
   listHostMetricSamples,
+  listBackupJobs,
+  listBackupRuns,
+  listBackupRunsForJob,
+  listDatabases,
+  listDueBackupJobs,
   listMetricSamplesForApp,
   initializeRoutely,
   listAppEnvVars,
@@ -62,6 +79,7 @@ import {
   listSecretValuesForApp,
   listApps,
   recordMetricSample,
+  markBackupRunsPruned,
   recordRuntimeStart,
   recordRuntimeStop,
   reconcileStaleRuntimeInstances,
@@ -71,7 +89,9 @@ import {
   recordGithubWebhookDelivery,
   updateApp,
   updateDeployment,
+  updateBackupRun,
   updateAppStatus,
+  updateDatabaseStatus,
   updateDomainVerification,
   updateGithubWebhookDelivery,
   upsertHealthcheckResult,
@@ -79,11 +99,14 @@ import {
   upsertGithubInstallation,
   upsertGithubRepository,
   upsertProxyRoute,
+  upsertBackupJob,
+  upsertDatabase,
   upsertApp
 } from "@routely/db";
 import {
   buildDockerfileContainerName,
   buildDockerfileImageTag,
+  composeProjectName,
   dockerBuildArgs,
   dockerInspectRunningArgs,
   dockerRemoveContainerArgs,
@@ -91,8 +114,10 @@ import {
   spawnDocker,
   startCommandApp,
   startComposeService,
-  stopComposeService
+  stopComposeService,
+  writeComposeConfig
 } from "@routely/drivers";
+import { createDatabaseService } from "@routely/presets";
 import {
   buildTraefikDynamicConfig,
   buildTraefikRoute,
@@ -182,7 +207,7 @@ function publicServerStatus() {
           checks: Array.isArray(lastDoctor.checks) ? lastDoctor.checks : []
         }
       : null,
-    disabledProductionActions: ["backups", "metrics", "rollback"]
+    disabledProductionActions: ["rollback", "notifications", "external backup storage"]
   };
 }
 
@@ -1045,6 +1070,141 @@ async function collectMetricsForApp(appRecord) {
   return rows;
 }
 
+function backupRootDir(job = null) {
+  return job?.local_dir || resolve(serverFoundationState().dataDir || resolve(workspaceRoot, ".routely"), "backups");
+}
+
+function backupFileName(databaseRecord, suffix) {
+  return `${safeLogName(databaseRecord.name)}-${new Date().toISOString().replace(/[:.]/g, "-")}.${suffix}`;
+}
+
+function databaseRecordToApp(databaseRecord) {
+  if (databaseRecord.app_id) {
+    return getAppById(db, databaseRecord.app_id);
+  }
+  return getAppByName(db, databaseRecord.name);
+}
+
+function publicBackupPayload() {
+  return {
+    jobs: listBackupJobs(db).map(backupJobToPublicDto),
+    runs: listBackupRuns(db).map(backupRunToPublicDto)
+  };
+}
+
+function buildProductionDatabaseService(input) {
+  const type = normalizeDatabaseType(input.type || input.preset);
+  const name = String(input.name || type).trim();
+  const service = createDatabaseService(type, { name });
+  service.internal = true;
+  service.enabled = input.enabled == null ? true : Boolean(input.enabled);
+  service.status = "stopped";
+
+  if (input.env && typeof input.env === "object" && !Array.isArray(input.env)) {
+    service.env = { ...(service.env || {}), ...input.env };
+  }
+  if (input.image) service.image = String(input.image);
+  if (input.port != null && input.port !== "") service.port = Number(input.port);
+
+  return service;
+}
+
+async function startDatabaseRecord(databaseRecord) {
+  const appRecord = databaseRecordToApp(databaseRecord);
+  if (!appRecord) {
+    throw new Error(`Database ${databaseRecord.name} has no backing Compose app.`);
+  }
+  if (appRecord.driver !== "compose") {
+    throw new Error(`Database ${databaseRecord.name} is not backed by the Compose driver.`);
+  }
+  const logPath = ensureLogPath(appRecord.name);
+  const fd = openSync(logPath, "a");
+  try {
+    writeLogHeader(appRecord.name, "starting production database service");
+    await waitForChild(startComposeService(appRecord, workspaceRoot, { stdio: ["ignore", fd, fd] }));
+    updateAppStatus(db, appRecord.id, "running");
+    return updateDatabaseStatus(db, databaseRecord.id, "running");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+async function stopDatabaseRecord(databaseRecord) {
+  const appRecord = databaseRecordToApp(databaseRecord);
+  if (!appRecord) {
+    throw new Error(`Database ${databaseRecord.name} has no backing Compose app.`);
+  }
+  const logPath = ensureLogPath(appRecord.name);
+  const fd = openSync(logPath, "a");
+  try {
+    writeLogHeader(appRecord.name, "stopping production database service");
+    await waitForChild(stopComposeService(appRecord, workspaceRoot, { stdio: ["ignore", fd, fd] }));
+    updateAppStatus(db, appRecord.id, "stopped");
+    return updateDatabaseStatus(db, databaseRecord.id, "stopped");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function backupCommandForDatabase(databaseRecord) {
+  if (databaseRecord.type === "postgres") return { args: ["exec", "-T", databaseRecord.compose_service, "pg_dumpall", "-U", "postgres"], suffix: "sql" };
+  if (databaseRecord.type === "mysql") return { args: ["exec", "-T", databaseRecord.compose_service, "mysqldump", "--all-databases", "-uroot"], suffix: "sql" };
+  if (databaseRecord.type === "mariadb") return { args: ["exec", "-T", databaseRecord.compose_service, "mariadb-dump", "--all-databases", "-uroot"], suffix: "sql" };
+  if (databaseRecord.type === "mongodb") return { args: ["exec", "-T", databaseRecord.compose_service, "mongodump", "--archive"], suffix: "archive" };
+  if (databaseRecord.type === "redis") return { args: ["exec", "-T", databaseRecord.compose_service, "redis-cli", "BGSAVE"], suffix: "txt" };
+  throw new Error(`Backup is not implemented for ${databaseRecord.type}.`);
+}
+
+async function runBackupJob(job, trigger = "manual") {
+  const databaseRecord = getDatabaseById(db, job.database_id);
+  if (!databaseRecord) throw new Error(`Database ${job.database_id} not found.`);
+  const appRecord = databaseRecordToApp(databaseRecord);
+  if (!appRecord) throw new Error(`Database ${databaseRecord.name} has no backing Compose app.`);
+  const command = backupCommandForDatabase(databaseRecord);
+  const run = createBackupRun(db, { backupJobId: job.id, trigger, message: `queued ${trigger} backup` });
+  const directory = backupRootDir(job);
+  mkdirSync(directory, { recursive: true });
+  const filePath = resolve(directory, backupFileName(databaseRecord, command.suffix));
+
+  try {
+    updateBackupRun(db, run.id, { status: "running", message: `running ${databaseRecord.type} backup` });
+    const composeFile = writeComposeConfig(appRecord, workspaceRoot);
+    const args = ["compose", "-p", composeProjectName(workspaceRoot), "-f", composeFile, ...command.args];
+    const result = await captureChild(spawnDocker(args, { cwd: workspaceRoot, stdio: ["ignore", "pipe", "pipe"] }));
+    writeFileSync(filePath, result.stdout || result.stderr || `Backup command completed for ${databaseRecord.name}.\n`, "utf8");
+    const size = statSync(filePath).size;
+    const completed = updateBackupRun(db, run.id, {
+      status: "succeeded",
+      filePath,
+      sizeBytes: size,
+      message: `${databaseRecord.type} backup completed (${size} bytes)` ,
+      finishedAt: new Date().toISOString()
+    });
+    pruneBackupRuns(job);
+    return completed;
+  } catch (error) {
+    try {
+      if (existsSync(filePath)) unlinkSync(filePath);
+    } catch {}
+    return updateBackupRun(db, run.id, {
+      status: "failed",
+      message: error instanceof Error ? error.message : String(error),
+      finishedAt: new Date().toISOString()
+    });
+  }
+}
+
+function pruneBackupRuns(job) {
+  const stale = selectBackupRunsForRetention(listBackupRunsForJob(db, job.id, { limit: 500 }), job.retention_days);
+  for (const run of stale) {
+    try {
+      if (run.file_path && existsSync(run.file_path)) unlinkSync(run.file_path);
+    } catch {}
+  }
+  markBackupRunsPruned(db, stale.map((run) => run.id));
+  return stale;
+}
+
 app.get("/health", async (request) => {
   const server = publicServerStatus();
   return {
@@ -1349,6 +1509,104 @@ app.get("/metrics", async (request) => {
   return { metrics: listHostMetricSamples(db).map(metricSampleToPublicDto) };
 });
 
+app.get("/databases", async () => {
+  return { databases: listDatabases(db).map(databaseToPublicDto) };
+});
+
+app.post("/databases", async (request, reply) => {
+  try {
+    const service = buildProductionDatabaseService(request.body || {});
+    const savedApp = upsertApp(db, service);
+    upsertWorkspaceConfigEntry(workspaceRoot, savedApp, "services");
+    const databaseRecord = upsertDatabase(db, {
+      appId: savedApp.id,
+      name: savedApp.name,
+      type: savedApp.preset,
+      status: savedApp.status,
+      internal: true,
+      image: savedApp.image,
+      port: savedApp.port,
+      composeService: savedApp.compose_service || savedApp.name,
+      composeFile: savedApp.compose_file,
+      volumeName: savedApp.volumes?.[0]?.split(":")?.[0] || `${savedApp.name}_data`,
+      env: savedApp.env || {}
+    });
+    return reply.code(201).send({ app: appToPublicDto(savedApp), database: databaseToPublicDto(databaseRecord) });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid database payload." });
+  }
+});
+
+app.post("/databases/:id/start", async (request, reply) => {
+  const databaseRecord = getDatabaseById(db, Number(request.params.id));
+  if (!databaseRecord) return reply.code(404).send({ error: `Database ${request.params.id} not found.` });
+  try {
+    const started = await startDatabaseRecord(databaseRecord);
+    return reply.code(200).send({ database: databaseToPublicDto(started) });
+  } catch (error) {
+    return reply.code(500).send({ error: error instanceof Error ? error.message : "Could not start database." });
+  }
+});
+
+app.post("/databases/:id/stop", async (request, reply) => {
+  const databaseRecord = getDatabaseById(db, Number(request.params.id));
+  if (!databaseRecord) return reply.code(404).send({ error: `Database ${request.params.id} not found.` });
+  try {
+    const stopped = await stopDatabaseRecord(databaseRecord);
+    return reply.code(200).send({ database: databaseToPublicDto(stopped) });
+  } catch (error) {
+    return reply.code(500).send({ error: error instanceof Error ? error.message : "Could not stop database." });
+  }
+});
+
+app.get("/backups", async () => {
+  return publicBackupPayload();
+});
+
+app.post("/backups", async (request, reply) => {
+  try {
+    const databaseId = Number(request.body?.databaseId || request.body?.database_id);
+    const databaseName = request.body?.databaseName || request.body?.database;
+    const databaseRecord = Number.isInteger(databaseId) ? getDatabaseById(db, databaseId) : databaseName ? getDatabaseByName(db, databaseName) : null;
+    if (!databaseRecord) return reply.code(404).send({ error: "Database not found for backup job." });
+    const job = upsertBackupJob(db, {
+      databaseId: databaseRecord.id,
+      enabled: request.body?.enabled,
+      schedule: request.body?.schedule ?? null,
+      retentionDays: request.body?.retentionDays || request.body?.retention_days || 7,
+      localDir: request.body?.localDir || request.body?.local_dir || null
+    });
+    return reply.code(201).send({ job: backupJobToPublicDto(job), ...publicBackupPayload() });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid backup job payload." });
+  }
+});
+
+app.patch("/backups/:id", async (request, reply) => {
+  const existing = getBackupJobById(db, Number(request.params.id));
+  if (!existing) return reply.code(404).send({ error: `Backup job ${request.params.id} not found.` });
+  try {
+    const job = upsertBackupJob(db, {
+      databaseId: existing.database_id,
+      enabled: request.body?.enabled ?? existing.enabled,
+      schedule: request.body?.schedule === undefined ? existing.schedule : request.body.schedule,
+      retentionDays: request.body?.retentionDays || request.body?.retention_days || existing.retention_days,
+      localDir: request.body?.localDir === undefined && request.body?.local_dir === undefined ? existing.local_dir : request.body?.localDir ?? request.body?.local_dir
+    });
+    return reply.code(200).send({ job: backupJobToPublicDto(job), ...publicBackupPayload() });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid backup job update." });
+  }
+});
+
+app.post("/backups/:id/run", async (request, reply) => {
+  const job = getBackupJobById(db, Number(request.params.id));
+  if (!job) return reply.code(404).send({ error: `Backup job ${request.params.id} not found.` });
+  const run = await runBackupJob(job, request.body?.trigger || "manual");
+  const status = run?.status === "succeeded" ? 201 : 500;
+  return reply.code(status).send({ run: backupRunToPublicDto(getBackupRunById(db, run.id)), ...publicBackupPayload() });
+});
+
 app.get("/deployments", async (request) => {
   const appId = Number(request.query?.appId);
   const deployments = Number.isInteger(appId)
@@ -1608,7 +1866,26 @@ app.delete("/apps/:id", async (request, reply) => {
   return reply.code(200).send({ ok: true, id });
 });
 
+let backupSchedulerRunning = false;
+async function runDueBackupJobs() {
+  if (backupSchedulerRunning) return;
+  backupSchedulerRunning = true;
+  try {
+    const due = listDueBackupJobs(db, (schedule, lastRunAt) => backupScheduleDue(schedule, new Date(), lastRunAt));
+    for (const job of due) {
+      void runBackupJob(job, "scheduled");
+    }
+  } finally {
+    backupSchedulerRunning = false;
+  }
+}
+
+const backupScheduler = setInterval(() => {
+  void runDueBackupJobs();
+}, 60_000);
+
 function shutdown() {
+  clearInterval(backupScheduler);
   db.close();
   process.exit(0);
 }

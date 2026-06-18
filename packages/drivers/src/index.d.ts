@@ -22,6 +22,7 @@ export function startCommandApp(app: RoutelyAppRecord, options?: StartCommandApp
 export function buildComposeConfig(app: RoutelyAppRecord): Record<string, unknown>;
 export function composeConfigToYaml(config: Record<string, unknown>): string;
 export function writeComposeConfig(app: RoutelyAppRecord, workspaceRoot: string): string;
+export function composeProjectName(workspaceRoot: string): string;
 export function startComposeService(app: RoutelyAppRecord, workspaceRoot: string, options?: ComposeServiceOptions): ChildProcess;
 export function stopComposeService(app: RoutelyAppRecord, workspaceRoot: string, options?: ComposeServiceOptions): ChildProcess;
 export function buildDockerfileImageTag(appName: string, deploymentId: number): string;

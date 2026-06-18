@@ -160,6 +160,44 @@ Verification caveat:
 
 ## Current Checkpoint Status
 
+Checkpoint 10 is now implemented as a conservative database services and backups slice:
+
+- SQLite migrations now create `databases`, `backup_jobs`, and `backup_runs` tables.
+- Shared core helpers cover supported database type validation, backup schedule parsing, due-schedule checks, retention selection, and public database/backup DTOs that expose env key names but not raw env values.
+- The daemon exposes authenticated database and backup endpoints:
+  - `GET /databases`
+  - `POST /databases`
+  - `POST /databases/:id/start`
+  - `POST /databases/:id/stop`
+  - `GET /backups`
+  - `POST /backups`
+  - `PATCH /backups/:id`
+  - `POST /backups/:id/run`
+- Production database creation reuses Compose-backed templates for PostgreSQL, MySQL, MariaDB, Redis, and MongoDB and keeps databases internal-only by default.
+- Manual backup runs use Docker Compose dump/checkpoint commands for supported templates, write local files under the production data backup directory, persist status/file/message/size metadata, and prune expired successful backup files according to retention.
+- A lightweight daemon scheduler checks enabled backup jobs every minute and runs due jobs using the same backup runner.
+- CLI additions are backed by daemon/storage data: `routely db ls`, `routely backup enable <database>`, `routely backup disable <database>`, `routely backup run <database>`, and `routely backup ls`.
+- Next.js same-origin route handlers proxy database and backup endpoints under `/api/*`.
+- The dashboard now includes a real Databases & Backups panel with database create/start/stop controls, backup enable/run/toggle controls, schedule/retention state, and backup run history.
+- Restore automation, external backup storage, notifications, full rollback, marketplace templates, and broad VPS operations remain deferred.
+
+Verification performed for Checkpoint 10:
+
+- `npm run lint` passed.
+- `npm run test --workspace apps/cli` passed: 12 files, 39 tests.
+- `npm run build --workspace apps/cli` passed.
+- `npm run test --workspace apps/web` passed: 10 files, 28 tests.
+- `npx tsc --noEmit --project apps/web/tsconfig.json` passed.
+- `node --check apps/daemon/src/server.js` passed.
+- Daemon smoke start with a temporary workspace and `/health` request passed.
+- `npm run build --workspace apps/web` was attempted and returned only the known partial Turbopack output (`Finished TypeScript...`) with no final exit marker; no `next build`/Turbopack process remained afterward.
+
+Recommended next step:
+
+- Move to Checkpoint 11: Notifications and Release Polish.
+- Keep notification settings/delivery backed by real storage/API behavior and secret redaction.
+- Do not add restore automation, external backup storage, marketplace templates, broad VPS operations, or full rollback unless a later checkpoint explicitly asks for them.
+
 Checkpoint 0 is complete.
 
 Checkpoint 1 is complete for the documented remaining scope.
@@ -386,9 +424,9 @@ Current state:
 
 Next execution direction:
 
-- Start Checkpoint 10 from `docs/14-implementation-plan.md` only after Checkpoint 9 is committed.
-- Reuse existing app/deploy/domain/GitHub/env/logs/health/metrics metadata and preserve signed webhook push-to-deploy behavior.
-- Keep notifications, full rollback, restore/destructive operations, and broader VPS operations deferred unless the checkpoint explicitly includes them.
+- Start Checkpoint 11 from `docs/14-implementation-plan.md` only after Checkpoint 10 is committed.
+- Reuse existing app/deploy/domain/GitHub/env/logs/health/metrics/database/backup metadata and preserve signed webhook push-to-deploy behavior.
+- Keep full rollback, restore/destructive operations, external backup storage, marketplace templates, and broader VPS operations deferred unless a later checkpoint explicitly includes them.
 
 ## Current Known Environment
 
@@ -453,11 +491,11 @@ node /home/ruddypp/Documents/work/routely/apps/cli/dist/index.js down
 
 ## Prompt For Next Agent
 
-Copy `docs/NEXT_AGENT_PROMPT.md` into the next agent. That file is now the canonical next prompt and targets Checkpoint 10: Database Services and Backups.
+Copy `docs/NEXT_AGENT_PROMPT.md` into the next agent. That file is now the canonical next prompt and targets Checkpoint 11: Notifications and Release Polish.
 
-The next checkpoint should add production database and backup workflows conservatively while preserving completed deploy/domain/GitHub/env/logs/health/metrics behavior.
+The next checkpoint should add notification settings and delivery workflows conservatively while preserving completed deploy/domain/GitHub/env/logs/health/metrics/database/backup behavior.
 
-Do not use older embedded checkpoint prompts from previous handoffs. Checkpoint 0 through Checkpoint 9 are complete; the next implementation should start at Checkpoint 10 unless the user asks for a repair/audit.
+Do not use older embedded checkpoint prompts from previous handoffs. Checkpoint 0 through Checkpoint 10 are complete; the next implementation should start at Checkpoint 11 unless the user asks for a repair/audit.
 
 ## Immediate Next Checklist
 
@@ -466,12 +504,12 @@ Do not use older embedded checkpoint prompts from previous handoffs. Checkpoint 
 - [ ] Read relevant Next.js docs from `node_modules/next/dist/docs/` before editing `apps/web`.
 - [ ] Copy and follow `docs/NEXT_AGENT_PROMPT.md`.
 - [ ] Inspect CLI, daemon, core config, DB, drivers, proxy package, presets, and current dashboard/API implementation.
-- [ ] Implement Checkpoint 10 as a comprehensive backend/CLI/API/frontend slice, not a frontend-only redesign.
-- [ ] Reuse existing app/deploy/domain/GitHub/env/logs/health/metrics metadata and avoid leaking secret values in config, logs, backups, or UI.
+- [ ] Implement Checkpoint 11 as a comprehensive backend/CLI/API/frontend slice, not a frontend-only redesign.
+- [ ] Reuse existing app/deploy/domain/GitHub/env/logs/health/metrics/database/backup metadata and avoid leaking secret values in config, logs, notifications, backups, or UI.
 - [ ] Keep dashboard home as overview and put feature workflows in sidebar navigation; make frontend more Dokploy-like only after real backend/API/storage behavior exists.
-- [ ] Keep notifications, full rollback, destructive restore operations, and broad VPS operations deferred unless explicitly in scope.
+- [ ] Keep full rollback, destructive restore operations, external backup storage, marketplace templates, and broad VPS operations deferred unless explicitly in scope.
 - [ ] Add/adjust focused tests for changed backend/domain/proxy/API/CLI behavior.
 - [ ] Run lint, touched workspace tests/builds, web TypeScript when web is touched, and browser smoke/responsive checks when frontend UI is changed.
 - [ ] Attempt/document the known web build caveat.
 - [ ] Update docs for behavior and verification changes.
-- [ ] Commit only this Checkpoint 10 slice.
+- [ ] Commit only this Checkpoint 11 slice.

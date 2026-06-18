@@ -139,6 +139,11 @@ Usage:
   routely domain add <app> <hostname>
   routely domain verify <hostname>
   routely domain ls
+  routely db ls            List production database records from the daemon
+  routely backup enable <database> [--schedule "0 2 * * *"] [--retention-days 7]
+  routely backup disable <database>
+  routely backup run <database>
+  routely backup ls
   routely doctor           Check local Routely prerequisites and port availability
   routely server init      Prepare production server foundation state and admin token
   routely server doctor    Check production server readiness
@@ -276,6 +281,57 @@ type RoutelyAppHealthResponse = {
 type RoutelyAppMetricsResponse = {
   app: RoutelyAppDtoLike;
   metrics: RoutelyMetricSampleDto[];
+};
+
+type RoutelyDatabaseDto = {
+  id: number;
+  appId: number | null;
+  appName: string | null;
+  name: string;
+  type: string;
+  status: string;
+  internal: boolean;
+  image: string | null;
+  port: number | null;
+  composeService: string | null;
+  volumeName: string | null;
+  envKeys: string[];
+};
+
+type RoutelyBackupJobDto = {
+  id: number;
+  databaseId: number;
+  databaseName: string | null;
+  databaseType: string | null;
+  enabled: boolean;
+  schedule: string | null;
+  retentionDays: number;
+  localDir: string | null;
+  lastRunStatus: string | null;
+  lastRunAt: string | null;
+  lastRunMessage: string | null;
+};
+
+type RoutelyBackupRunDto = {
+  id: number;
+  backupJobId: number;
+  databaseId: number;
+  databaseName: string | null;
+  databaseType: string | null;
+  status: string;
+  trigger: string;
+  filePath: string | null;
+  sizeBytes: number | null;
+  message: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+};
+
+type RoutelyBackupsResponse = {
+  jobs: RoutelyBackupJobDto[];
+  runs: RoutelyBackupRunDto[];
+  job?: RoutelyBackupJobDto;
+  run?: RoutelyBackupRunDto;
 };
 
 async function daemonRequest<T>(path: string, init: RequestInit = {}): Promise<DaemonResult<T>> {
@@ -592,10 +648,26 @@ function objectPresetValue(value: unknown): RoutelyAppInput["healthcheck"] {
   return value && typeof value === "object" && !Array.isArray(value) ? value as RoutelyAppInput["healthcheck"] : null;
 }
 
-function dbCommand(args: string[]): void {
+async function dbCommand(args: string[]): Promise<void> {
   const subcommand = args[0];
+  if (subcommand === "ls" || subcommand === "list") {
+    const result = await daemonRequest<{ databases: RoutelyDatabaseDto[] }>("/databases");
+    if (!result.ok) {
+      console.error(`Could not list databases: ${result.error}`);
+      process.exit(1);
+    }
+    if (result.data.databases.length === 0) {
+      console.log("No production databases registered yet.");
+      return;
+    }
+    for (const database of result.data.databases) {
+      console.log(`${database.name}\t${database.type}\t${database.status}\t${database.internal ? "internal" : "public"}\t${database.image || "-"}\t${database.port ? `:${database.port}` : "-"}`);
+    }
+    return;
+  }
+
   if (subcommand !== "add") {
-    console.error("Usage: routely db add <postgres|mysql|mariadb|redis|mongodb> [--name <name>] [--port <port>]");
+    console.error("Usage: routely db <add|ls> ...");
     process.exit(1);
   }
 
@@ -621,6 +693,91 @@ function dbCommand(args: string[]): void {
   console.log(`Port:    ${saved.port}`);
   console.log(`Config:  ${configWrite.configPath}`);
   db.close();
+}
+
+async function backupCommand(args: string[]): Promise<void> {
+  const subcommand = String(args[0] || "ls").trim();
+
+  if (subcommand === "ls" || subcommand === "list") {
+    const result = await daemonRequest<RoutelyBackupsResponse>("/backups");
+    if (!result.ok) {
+      console.error(`Could not list backups: ${result.error}`);
+      process.exit(1);
+    }
+    if (result.data.jobs.length === 0) console.log("No backup jobs configured yet.");
+    for (const job of result.data.jobs) {
+      console.log(`job:${job.id}\t${job.databaseName || job.databaseId}\t${job.enabled ? "enabled" : "disabled"}\t${job.schedule || "manual"}\tretention:${job.retentionDays}d\tlast:${job.lastRunStatus || "never"}`);
+    }
+    for (const run of result.data.runs.slice(0, 10)) {
+      console.log(`run:${run.id}\t${run.databaseName || run.databaseId}\t${run.status}\t${run.trigger}\t${run.filePath || run.message || "-"}`);
+    }
+    return;
+  }
+
+  if (!["enable", "disable", "run"].includes(subcommand)) {
+    console.error("Usage: routely backup <enable|disable|run|ls> <database> [--schedule <cron>] [--retention-days <days>]");
+    process.exit(1);
+  }
+
+  const { positionals, flags } = parseFlags(args.slice(1));
+  const database = String(positionals[0] || "").trim();
+  if (!database) {
+    console.error(`Usage: routely backup ${subcommand} <database>`);
+    process.exit(1);
+  }
+
+  if (subcommand === "enable") {
+    const result = await daemonRequest<RoutelyBackupsResponse>("/backups", {
+      method: "POST",
+      body: JSON.stringify({
+        database,
+        enabled: true,
+        schedule: typeof flags.schedule === "string" ? flags.schedule : "0 2 * * *",
+        retentionDays: typeof flags["retention-days"] === "string" ? Number(flags["retention-days"]) : 7
+      })
+    });
+    if (!result.ok) {
+      console.error(`Could not enable backup: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`Enabled backups for ${result.data.job?.databaseName || database}.`);
+    console.log(`Schedule: ${result.data.job?.schedule || "manual"}`);
+    return;
+  }
+
+  const jobsResult = await daemonRequest<RoutelyBackupsResponse>("/backups");
+  if (!jobsResult.ok) {
+    console.error(`Could not read backup jobs: ${jobsResult.error}`);
+    process.exit(1);
+  }
+  const job = jobsResult.data.jobs.find((item) => item.databaseName === database || String(item.databaseId) === database || String(item.id) === database);
+  if (!job) {
+    console.error(`Backup job not found for ${database}. Run routely backup enable ${database} first.`);
+    process.exit(1);
+  }
+
+  if (subcommand === "disable") {
+    const result = await daemonRequest<RoutelyBackupsResponse>(`/backups/${job.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ enabled: false })
+    });
+    if (!result.ok) {
+      console.error(`Could not disable backup: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`Disabled backups for ${job.databaseName || database}.`);
+    return;
+  }
+
+  const result = await daemonRequest<RoutelyBackupsResponse>(`/backups/${job.id}/run`, {
+    method: "POST",
+    body: JSON.stringify({ trigger: "manual" })
+  });
+  if (!result.ok) {
+    console.error(`Backup failed: ${result.error}`);
+    process.exit(1);
+  }
+  console.log(`Backup ${result.data.run?.status}: ${result.data.run?.filePath || result.data.run?.message || "no file"}`);
 }
 
 function stopProcess(child: ChildProcess): void {
@@ -1478,7 +1635,10 @@ switch (command) {
     addCommand(argv.slice(1));
     break;
   case "db":
-    dbCommand(argv.slice(1));
+    await dbCommand(argv.slice(1));
+    break;
+  case "backup":
+    await backupCommand(argv.slice(1));
     break;
   case "up":
     await upCommand();

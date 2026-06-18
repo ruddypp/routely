@@ -189,7 +189,7 @@ function collectNamedVolumes(volumes = []) {
   return named;
 }
 
-function composeProjectName(workspaceRoot) {
+export function composeProjectName(workspaceRoot) {
   return `routely_${safeName(workspaceRoot).slice(-40)}`;
 }
 

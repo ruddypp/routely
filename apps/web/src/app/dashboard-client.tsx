@@ -157,6 +157,57 @@ type DaemonMetricSample = {
   sampledAt: string;
 };
 
+type DaemonDatabase = {
+  id: number;
+  appId: number | null;
+  appName: string | null;
+  name: string;
+  type: string;
+  status: string;
+  internal: boolean;
+  image: string | null;
+  port: number | null;
+  composeService: string | null;
+  composeFile: string | null;
+  volumeName: string | null;
+  envKeys: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+type DaemonBackupJob = {
+  id: number;
+  databaseId: number;
+  databaseName: string | null;
+  databaseType: string | null;
+  enabled: boolean;
+  schedule: string | null;
+  retentionDays: number;
+  localDir: string | null;
+  lastRunStatus: string | null;
+  lastRunAt: string | null;
+  lastRunMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type DaemonBackupRun = {
+  id: number;
+  backupJobId: number;
+  databaseId: number;
+  databaseName: string | null;
+  databaseType: string | null;
+  status: string;
+  trigger: string;
+  filePath: string | null;
+  sizeBytes: number | null;
+  message: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
 type AppHealthResponse = {
   app: DaemonApp;
   latestDeployment: DaemonDeployment | null;
@@ -322,6 +373,19 @@ type ProxyRoutesResponse = {
 
 type GithubStatusResponse = {
   github: DaemonGithubStatus | null;
+  error?: string | null;
+};
+
+type DatabasesResponse = {
+  databases: DaemonDatabase[];
+  error?: string | null;
+};
+
+type BackupsResponse = {
+  jobs: DaemonBackupJob[];
+  runs: DaemonBackupRun[];
+  job?: DaemonBackupJob;
+  run?: DaemonBackupRun;
   error?: string | null;
 };
 
@@ -567,6 +631,16 @@ export default function DashboardClient() {
   const [githubError, setGithubError] = useState<string | null>(null);
   const [githubSaving, setGithubSaving] = useState(false);
   const [githubForm, setGithubForm] = useState({ appId: "", fullName: "", branch: "main", autoDeploy: true });
+  const [databases, setDatabases] = useState<DaemonDatabase[]>([]);
+  const [databasesError, setDatabasesError] = useState<string | null>(null);
+  const [databaseActionById, setDatabaseActionById] = useState<Record<number, string | null>>({});
+  const [databaseSaving, setDatabaseSaving] = useState(false);
+  const [databaseForm, setDatabaseForm] = useState({ type: "postgres", name: "postgres" });
+  const [backupJobs, setBackupJobs] = useState<DaemonBackupJob[]>([]);
+  const [backupRuns, setBackupRuns] = useState<DaemonBackupRun[]>([]);
+  const [backupsError, setBackupsError] = useState<string | null>(null);
+  const [backupActionById, setBackupActionById] = useState<Record<number, string | null>>({});
+  const [backupForm, setBackupForm] = useState({ databaseId: "", schedule: "0 2 * * *", retentionDays: "7" });
   const [domainSaving, setDomainSaving] = useState(false);
   const [domainActionByHostname, setDomainActionByHostname] = useState<Record<string, string | null>>({});
   const [domainForm, setDomainForm] = useState({ appId: "", hostname: "" });
@@ -596,14 +670,16 @@ export default function DashboardClient() {
     if (showRefresh) setRefreshing(true);
 
     try {
-      const [healthRes, appsRes, serverRes, deploymentsRes, domainsRes, proxyRes, githubRes] = await Promise.all([
+      const [healthRes, appsRes, serverRes, deploymentsRes, domainsRes, proxyRes, githubRes, databasesRes, backupsRes] = await Promise.all([
         fetch("/api/health", { cache: "no-store" }),
         fetch("/api/apps", { cache: "no-store" }),
         fetch("/api/server/status", { cache: "no-store" }),
         fetch("/api/deployments", { cache: "no-store" }),
         fetch("/api/domains", { cache: "no-store" }),
         fetch("/api/proxy/routes", { cache: "no-store" }),
-        fetch("/api/github/status", { cache: "no-store" })
+        fetch("/api/github/status", { cache: "no-store" }),
+        fetch("/api/databases", { cache: "no-store" }),
+        fetch("/api/backups", { cache: "no-store" })
       ]);
 
       const healthData = (await healthRes.json()) as HealthResponse;
@@ -613,6 +689,8 @@ export default function DashboardClient() {
       const domainsData = (await domainsRes.json().catch(() => ({ rootDomain: null, serverPublicIp: null, domains: [], error: "Domains unavailable." }))) as DomainsResponse;
       const proxyData = (await proxyRes.json().catch(() => ({ routes: [], config: {}, error: "Proxy routes unavailable." }))) as ProxyRoutesResponse;
       const githubData = (await githubRes.json().catch(() => ({ github: null, error: "GitHub status unavailable." }))) as GithubStatusResponse;
+      const databasesData = (await databasesRes.json().catch(() => ({ databases: [], error: "Databases unavailable." }))) as DatabasesResponse;
+      const backupsData = (await backupsRes.json().catch(() => ({ jobs: [], runs: [], error: "Backups unavailable." }))) as BackupsResponse;
 
       if (!mounted.current) return;
 
@@ -630,8 +708,14 @@ export default function DashboardClient() {
       setProxyError(proxyData.error || null);
       setGithub(githubData.github || null);
       setGithubError(githubData.error || null);
+      setDatabases(databasesData.databases || []);
+      setDatabasesError(databasesData.error || null);
+      setBackupJobs(backupsData.jobs || []);
+      setBackupRuns(backupsData.runs || []);
+      setBackupsError(backupsData.error || null);
       setRootDomainInput((current) => current || domainsData.rootDomain || "");
       setGithubForm((current) => ({ ...current, appId: current.appId || String(appsData.apps?.find((app) => app.driver === "dockerfile")?.id || "") }));
+      setBackupForm((current) => ({ ...current, databaseId: current.databaseId || String(databasesData.databases?.[0]?.id || "") }));
       setLastUpdated(new Date().toISOString());
       setSelectedAppId((current) => current ?? appsData.apps?.[0]?.id ?? null);
     } catch {
@@ -644,6 +728,8 @@ export default function DashboardClient() {
       setDomainsError("Dashboard could not reach its API.");
       setProxyError("Dashboard could not reach its API.");
       setGithubError("Dashboard could not reach its API.");
+      setDatabasesError("Dashboard could not reach its API.");
+      setBackupsError("Dashboard could not reach its API.");
     } finally {
       if (mounted.current) setLoading(false);
       if (mounted.current && showRefresh) setRefreshing(false);
@@ -864,6 +950,115 @@ export default function DashboardClient() {
     }
   }, [githubForm.appId, githubForm.autoDeploy, githubForm.branch, githubForm.fullName, poll, replaceApp]);
 
+  const createDatabase = useCallback(async () => {
+    if (!databaseForm.name.trim()) {
+      setDatabasesError("Database name is required.");
+      return;
+    }
+    setDatabaseSaving(true);
+    setDatabasesError(null);
+    try {
+      const response = await fetch("/api/databases", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: databaseForm.type, name: databaseForm.name.trim() })
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as { app: DaemonApp; database: DaemonDatabase };
+      setDatabases((current) => [...current.filter((item) => item.id !== data.database.id), data.database].sort((a, b) => a.name.localeCompare(b.name)));
+      setApps((current) => [...current.filter((item) => item.id !== data.app.id), data.app].sort((a, b) => a.name.localeCompare(b.name)));
+      setBackupForm((current) => ({ ...current, databaseId: String(data.database.id) }));
+      void poll();
+    } catch (error) {
+      setDatabasesError(error instanceof Error ? error.message : "Could not create database.");
+    } finally {
+      setDatabaseSaving(false);
+    }
+  }, [databaseForm.name, databaseForm.type, poll]);
+
+  const runDatabaseAction = useCallback(async (database: DaemonDatabase, action: "start" | "stop") => {
+    setDatabasesError(null);
+    setDatabaseActionById((current) => ({ ...current, [database.id]: action }));
+    try {
+      const response = await fetch(`/api/databases/${database.id}/${action}`, { method: "POST", cache: "no-store" });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as { database: DaemonDatabase };
+      setDatabases((current) => current.map((item) => (item.id === data.database.id ? data.database : item)));
+      void poll();
+    } catch (error) {
+      setDatabasesError(error instanceof Error ? error.message : `Could not ${action} ${database.name}.`);
+    } finally {
+      setDatabaseActionById((current) => ({ ...current, [database.id]: null }));
+    }
+  }, [poll]);
+
+  const enableBackup = useCallback(async () => {
+    if (!backupForm.databaseId) {
+      setBackupsError("Choose a database before enabling backups.");
+      return;
+    }
+    setBackupsError(null);
+    try {
+      const response = await fetch("/api/backups", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ databaseId: Number(backupForm.databaseId), schedule: backupForm.schedule.trim() || null, retentionDays: Number(backupForm.retentionDays || 7) })
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as BackupsResponse;
+      setBackupJobs(data.jobs || []);
+      setBackupRuns(data.runs || []);
+      void poll();
+    } catch (error) {
+      setBackupsError(error instanceof Error ? error.message : "Could not enable backups.");
+    }
+  }, [backupForm.databaseId, backupForm.retentionDays, backupForm.schedule, poll]);
+
+  const runBackup = useCallback(async (job: DaemonBackupJob) => {
+    setBackupsError(null);
+    setBackupActionById((current) => ({ ...current, [job.id]: "run" }));
+    try {
+      const response = await fetch(`/api/backups/${job.id}/run`, {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ trigger: "manual" })
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as BackupsResponse;
+      setBackupJobs(data.jobs || []);
+      setBackupRuns(data.runs || []);
+      void poll();
+    } catch (error) {
+      setBackupsError(error instanceof Error ? error.message : `Could not run backup for ${job.databaseName || job.databaseId}.`);
+    } finally {
+      setBackupActionById((current) => ({ ...current, [job.id]: null }));
+    }
+  }, [poll]);
+
+  const toggleBackup = useCallback(async (job: DaemonBackupJob, enabled: boolean) => {
+    setBackupsError(null);
+    setBackupActionById((current) => ({ ...current, [job.id]: enabled ? "enable" : "disable" }));
+    try {
+      const response = await fetch(`/api/backups/${job.id}`, {
+        method: "PATCH",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled })
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as BackupsResponse;
+      setBackupJobs(data.jobs || []);
+      setBackupRuns(data.runs || []);
+    } catch (error) {
+      setBackupsError(error instanceof Error ? error.message : "Could not update backup job.");
+    } finally {
+      setBackupActionById((current) => ({ ...current, [job.id]: null }));
+    }
+  }, []);
+
   const runAction = useCallback(
     async (app: DaemonApp, action: AppAction) => {
       setActionError(null);
@@ -1031,6 +1226,27 @@ export default function DashboardClient() {
               onLogs={(deployment) => void loadDeploymentLogs(deployment)}
             />
 
+            <DatabaseBackupPanel
+              backupActionById={backupActionById}
+              backupForm={backupForm}
+              backupJobs={backupJobs}
+              backupRuns={backupRuns}
+              backupsError={backupsError}
+              connected={connected}
+              databaseActionById={databaseActionById}
+              databaseForm={databaseForm}
+              databaseSaving={databaseSaving}
+              databases={databases}
+              databasesError={databasesError}
+              onBackupFormChange={setBackupForm}
+              onCreateDatabase={() => void createDatabase()}
+              onDatabaseAction={(database, action) => void runDatabaseAction(database, action)}
+              onDatabaseFormChange={setDatabaseForm}
+              onEnableBackup={() => void enableBackup()}
+              onRunBackup={(job) => void runBackup(job)}
+              onToggleBackup={(job, enabled) => void toggleBackup(job, enabled)}
+            />
+
             <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
               <div className="flex flex-col gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.035] to-transparent px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
@@ -1151,12 +1367,12 @@ function Sidebar({ connected }: { connected: boolean }) {
         <NavItem label="GitHub" dot={connected} />
         <NavItem label="Logs" />
         <NavItem label="Metrics" />
+        <NavItem label="Databases" dot={connected} />
+        <NavItem label="Backups" dot={connected} />
       </nav>
       <div className="mt-7 border-t border-white/5 pt-4">
         <p className="px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Later</p>
         <nav className="mt-2 space-y-1">
-          <NavItem label="Databases" disabled />
-          <NavItem label="Backups" disabled />
           <NavItem label="Settings" disabled />
         </nav>
       </div>
@@ -1647,6 +1863,163 @@ function DeploymentSummaryRow({ deployment, onLogs }: { deployment: DaemonDeploy
         <StatusBadge status={deployment.status} />
       </div>
     </button>
+  );
+}
+
+function DatabaseBackupPanel({
+  backupActionById,
+  backupForm,
+  backupJobs,
+  backupRuns,
+  backupsError,
+  connected,
+  databaseActionById,
+  databaseForm,
+  databaseSaving,
+  databases,
+  databasesError,
+  onBackupFormChange,
+  onCreateDatabase,
+  onDatabaseAction,
+  onDatabaseFormChange,
+  onEnableBackup,
+  onRunBackup,
+  onToggleBackup
+}: {
+  backupActionById: Record<number, string | null>;
+  backupForm: { databaseId: string; schedule: string; retentionDays: string };
+  backupJobs: DaemonBackupJob[];
+  backupRuns: DaemonBackupRun[];
+  backupsError: string | null;
+  connected: boolean;
+  databaseActionById: Record<number, string | null>;
+  databaseForm: { type: string; name: string };
+  databaseSaving: boolean;
+  databases: DaemonDatabase[];
+  databasesError: string | null;
+  onBackupFormChange: (form: { databaseId: string; schedule: string; retentionDays: string }) => void;
+  onCreateDatabase: () => void;
+  onDatabaseAction: (database: DaemonDatabase, action: "start" | "stop") => void;
+  onDatabaseFormChange: (form: { type: string; name: string }) => void;
+  onEnableBackup: () => void;
+  onRunBackup: (job: DaemonBackupJob) => void;
+  onToggleBackup: (job: DaemonBackupJob, enabled: boolean) => void;
+}) {
+  const latestRun = backupRuns[0] || null;
+  return (
+    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
+      <div className="grid gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 xl:grid-cols-[0.85fr_1.15fr]">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Databases & backups</p>
+          <h2 className="text-lg font-bold leading-tight sm:text-xl">Internal services with local-file backups</h2>
+          <p className="mt-1 max-w-2xl text-sm text-muted">Create supported database services, keep them internal by default, and run manual or scheduled local backups.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <ReadinessCard label="Databases" value={String(databases.length)} status={databases.length ? "ok" : "warn"} />
+          <ReadinessCard label="Backups" value={String(backupJobs.length)} status={backupJobs.length ? "ok" : "warn"} />
+          <ReadinessCard label="Latest" value={latestRun?.status || "never"} status={latestRun?.status === "succeeded" ? "ok" : latestRun?.status === "failed" ? "error" : "warn"} />
+          <ReadinessCard label="Storage" value="local file" status="ok" />
+        </div>
+      </div>
+
+      {databasesError ? <Alert title="Database action failed" message={databasesError} /> : null}
+      {backupsError ? <Alert title="Backup action failed" message={backupsError} /> : null}
+
+      <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]">
+        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
+          <ResourceSection title="Database services" count={databases.length} />
+          <div className="border-b border-white/5 px-4 py-3">
+            <div className="grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]">
+              <label>
+                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Type</span>
+                <select value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>
+                  {['postgres', 'mysql', 'mariadb', 'redis', 'mongodb'].map((type) => <option key={type} value={type}>{type}</option>)}
+                </select>
+              </label>
+              <Field label="Name" value={databaseForm.name} onChange={(value) => onDatabaseFormChange({ ...databaseForm, name: value })} placeholder="postgres" disabled={!connected || databaseSaving} />
+              <div className="flex items-end"><PillButton strong onClick={onCreateDatabase} disabled={!connected || databaseSaving || !databaseForm.name.trim()}>{databaseSaving ? "Creating" : "Create"}</PillButton></div>
+            </div>
+          </div>
+
+          {databases.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No production database records yet. Create one to add a Compose-backed internal service.</div> : databases.map((database) => {
+            const busy = databaseActionById[database.id];
+            const running = database.status === "running";
+            return (
+              <div key={database.id} className="border-b border-white/5 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold">{database.name}</p>
+                    <p className="mt-1 truncate font-mono text-[11px] text-muted">{database.image || database.type} · {database.composeService || "compose"} · {database.volumeName || "volume pending"}</p>
+                  </div>
+                  <StatusBadge status={database.status} />
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-2">
+                  <ReadinessCard label="Network" value={database.internal ? "internal" : "public"} status={database.internal ? "ok" : "error"} />
+                  <ReadinessCard label="Port" value={database.port ? `:${database.port}` : "none"} status="ok" />
+                  <ReadinessCard label="Env" value={`${database.envKeys.length} keys`} status="ok" />
+                </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <PillButton onClick={() => onDatabaseAction(database, "start")} disabled={!connected || Boolean(busy) || running}>{busy === "start" ? "Starting" : "Start"}</PillButton>
+                  <PillButton onClick={() => onDatabaseAction(database, "stop")} disabled={!connected || Boolean(busy) || !running}>{busy === "stop" ? "Stopping" : "Stop"}</PillButton>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="min-w-0">
+          <ResourceSection title="Backup jobs" count={backupJobs.length} />
+          <div className="border-b border-white/5 px-4 py-3">
+            <div className="grid gap-2 sm:grid-cols-[minmax(120px,0.9fr)_minmax(0,1fr)_100px_auto]">
+              <label>
+                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Database</span>
+                <select value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>
+                  <option value="">Choose</option>
+                  {databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}
+                </select>
+              </label>
+              <Field label="Schedule" value={backupForm.schedule} onChange={(value) => onBackupFormChange({ ...backupForm, schedule: value })} placeholder="0 2 * * *" disabled={!connected} mono />
+              <Field label="Keep days" value={backupForm.retentionDays} onChange={(value) => onBackupFormChange({ ...backupForm, retentionDays: value })} placeholder="7" disabled={!connected} type="number" />
+              <div className="flex items-end"><PillButton strong onClick={onEnableBackup} disabled={!connected || !backupForm.databaseId}>Enable</PillButton></div>
+            </div>
+          </div>
+
+          {backupJobs.length === 0 ? <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Enable backups for a database to schedule local backup files and run manual backups.</div> : backupJobs.map((job) => {
+            const busy = backupActionById[job.id];
+            return (
+              <div key={job.id} className="border-b border-white/5 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold">{job.databaseName || `database ${job.databaseId}`}</p>
+                    <p className="mt-1 truncate font-mono text-[11px] text-muted">{job.schedule || "manual only"} · retain {job.retentionDays}d · {job.localDir || "default backup dir"}</p>
+                  </div>
+                  <StatusBadge status={job.enabled ? "running" : "stopped"} />
+                </div>
+                {job.lastRunMessage ? <p className="mt-2 text-xs text-muted">Last run: {job.lastRunStatus || "unknown"} · {job.lastRunAt ? timeAgo(job.lastRunAt) : "never"} · {job.lastRunMessage}</p> : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <PillButton onClick={() => onRunBackup(job)} disabled={!connected || Boolean(busy)}>{busy === "run" ? "Running" : "Run now"}</PillButton>
+                  <PillButton onClick={() => onToggleBackup(job, !job.enabled)} disabled={!connected || Boolean(busy)}>{job.enabled ? "Disable" : "Enable"}</PillButton>
+                </div>
+              </div>
+            );
+          })}
+
+          <ResourceSection title="Backup runs" count={backupRuns.length} />
+          {backupRuns.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Backup run history will appear here after a manual or scheduled run.</div> : backupRuns.slice(0, 6).map((run) => (
+            <div key={run.id} className="border-b border-white/5 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold">#{run.id} {run.databaseName || `database ${run.databaseId}`}</p>
+                  <p className="mt-1 truncate font-mono text-[11px] text-muted">{run.trigger} · {run.finishedAt ? timeAgo(run.finishedAt) : timeAgo(run.createdAt)} · {formatBytes(run.sizeBytes)}</p>
+                </div>
+                <StatusBadge status={run.status} />
+              </div>
+              <p className="mt-2 truncate text-xs text-muted">{run.filePath || run.message || "no backup file"}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
   );
 }
 
