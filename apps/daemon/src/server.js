@@ -56,6 +56,7 @@ import {
   getDatabaseById,
   getDatabaseByName,
   getDomainByHostname,
+  getActiveDeploymentForApp,
   getAppById,
   getGithubSourceForApp,
   getLatestSuccessfulDeploymentForApp,
@@ -152,6 +153,7 @@ loadDotenv({ path: resolve(workspaceRoot, ".env"), override: false });
 const { db, databasePath } = initializeRoutely(workspaceRoot);
 const startedAt = new Date().toISOString();
 const LOG_TAIL_BYTES = 64 * 1024;
+const lifecycleQueues = new Map();
 
 // Pick up apps declared in routely.yml on boot so the daemon and CLI agree.
 try {
@@ -363,6 +365,38 @@ function reconcileRuntimeState() {
 function runningInstancesForApp(appId) {
   reconcileRuntimeState();
   return listRunningRuntimeInstances(db).filter((instance) => instance.app_id === appId);
+}
+
+function reconcileAppRuntimeState(appId) {
+  reconcileRuntimeState();
+  const record = getAppById(db, appId);
+  if (!record) return null;
+
+  if (record.driver === "command") {
+    const running = listRunningRuntimeInstances(db).some((instance) => instance.app_id === appId);
+    if (running && record.status !== "running") {
+      updateAppStatus(db, appId, "running");
+      return getAppById(db, appId);
+    }
+    if (!running && record.status === "running") {
+      updateAppStatus(db, appId, "stopped");
+      return getAppById(db, appId);
+    }
+  }
+
+  return record;
+}
+
+function withAppLifecycleQueue(appId, task) {
+  const previous = lifecycleQueues.get(appId) || Promise.resolve();
+  const run = previous.catch(() => {}).then(task);
+  const cleanup = run.finally(() => {
+    if (lifecycleQueues.get(appId) === cleanup) {
+      lifecycleQueues.delete(appId);
+    }
+  });
+  lifecycleQueues.set(appId, cleanup);
+  return run;
 }
 
 function findAppOrReply(request, reply) {
@@ -654,6 +688,10 @@ function redactForApp(appRecord, value) {
   return redactSecrets(value, secretValuesForApp(appRecord));
 }
 
+function appToPublicDtoWithoutEnv(appRecord) {
+  return { ...appToPublicDto(appRecord), env: {} };
+}
+
 function appendDeploymentLogForApp(appRecord, deploymentId, input) {
   return appendDeploymentLog(db, deploymentId, {
     ...input,
@@ -662,6 +700,11 @@ function appendDeploymentLogForApp(appRecord, deploymentId, input) {
 }
 
 function queueDeploymentForApp(appRecord, source = {}) {
+  const active = getActiveDeploymentForApp(db, appRecord.id);
+  if (active) {
+    return { created: false, deployment: active };
+  }
+
   const latest = getLatestSuccessfulDeploymentForApp(db, appRecord.id);
   const deployment = createDeployment(db, {
     appId: appRecord.id,
@@ -683,7 +726,7 @@ function queueDeploymentForApp(appRecord, source = {}) {
       : `queued deployment for ${appRecord.name}`
   });
   void runDockerfileDeployment(appRecord, deployment.id);
-  return deployment;
+  return { created: true, deployment };
 }
 
 function serverPublicIp() {
@@ -723,6 +766,33 @@ function currentTraefikConfig() {
     return buildTraefikRoute({ domain, deployment, app: appRecord });
   }).filter(Boolean);
   return buildTraefikDynamicConfig(routes);
+}
+
+function createDomainForPayload(payload = {}) {
+  const appId = Number(payload.appId);
+  const appName = payload.appName ? String(payload.appName) : null;
+  const appRecord = Number.isInteger(appId) ? getAppById(db, appId) : appName ? listApps(db).find((item) => item.name === appName) : null;
+  const hostname = validateHostname(payload.hostname);
+
+  if (!appRecord) {
+    return { ok: false, status: 404, error: "Target app was not found." };
+  }
+  if (appRecord.internal || appRecord.type === "database") {
+    return { ok: false, status: 400, error: `${appRecord.name} is internal and cannot be exposed through the public proxy.` };
+  }
+  if (getDomainByHostname(db, hostname)) {
+    return { ok: false, status: 409, error: `${hostname} is already registered.` };
+  }
+
+  const latest = getLatestSuccessfulDeploymentForApp(db, appRecord.id);
+  const domain = createDomain(db, {
+    appId: appRecord.id,
+    hostname,
+    targetPort: latest?.host_port || null,
+    verificationMessage: `Create an A record for ${hostname} pointing to ${serverPublicIp() || "this server's public IP"}.`
+  });
+  materializeProxyRouteForDomain(domain);
+  return { ok: true, domain: publicDomainDto(getDomainByHostname(db, hostname)) };
 }
 
 async function runHealthcheck(appRecord, deployment) {
@@ -1386,30 +1456,11 @@ app.post("/domains/root", async (request, reply) => {
 
 app.post("/domains", async (request, reply) => {
   try {
-    const appId = Number(request.body?.appId);
-    const appName = request.body?.appName ? String(request.body.appName) : null;
-    const appRecord = Number.isInteger(appId) ? getAppById(db, appId) : appName ? listApps(db).find((item) => item.name === appName) : null;
-    const hostname = validateHostname(request.body?.hostname);
-
-    if (!appRecord) {
-      return reply.code(404).send({ error: "Target app was not found." });
+    const result = createDomainForPayload(request.body || {});
+    if (!result.ok) {
+      return reply.code(result.status).send({ error: result.error });
     }
-    if (appRecord.internal || appRecord.type === "database") {
-      return reply.code(400).send({ error: `${appRecord.name} is internal and cannot be exposed through the public proxy.` });
-    }
-    if (getDomainByHostname(db, hostname)) {
-      return reply.code(409).send({ error: `${hostname} is already registered.` });
-    }
-
-    const latest = getLatestSuccessfulDeploymentForApp(db, appRecord.id);
-    const domain = createDomain(db, {
-      appId: appRecord.id,
-      hostname,
-      targetPort: latest?.host_port || null,
-      verificationMessage: `Create an A record for ${hostname} pointing to ${serverPublicIp() || "this server's public IP"}.`
-    });
-    materializeProxyRouteForDomain(domain);
-    return reply.code(201).send({ domain: publicDomainDto(getDomainByHostname(db, hostname)) });
+    return reply.code(201).send({ domain: result.domain });
   } catch (error) {
     return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid domain payload." });
   }
@@ -1424,11 +1475,15 @@ app.get("/apps/:id/domains", async (request, reply) => {
 app.post("/apps/:id/domains", async (request, reply) => {
   const record = findAppOrReply(request, reply);
   if (!record) return;
-  request.body = { ...(request.body || {}), appId: record.id };
-  return app.inject({ method: "POST", url: "/domains", payload: request.body, headers: request.headers }).then((response) => {
-    reply.code(response.statusCode);
-    return JSON.parse(response.body || "{}");
-  });
+  try {
+    const result = createDomainForPayload({ ...(request.body || {}), appId: record.id });
+    if (!result.ok) {
+      return reply.code(result.status).send({ error: result.error });
+    }
+    return reply.code(201).send({ domain: result.domain });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid domain payload." });
+  }
 });
 
 app.post("/domains/:hostname/verify", async (request, reply) => {
@@ -1484,49 +1539,64 @@ app.get("/apps/:id", async (request, reply) => {
 });
 
 app.post("/apps/:id/start", async (request, reply) => {
-  const record = findAppOrReply(request, reply);
-  if (!record) return;
+  const id = Number(request.params.id);
 
-  const result = await startLocalApp(record);
+  const result = await withAppLifecycleQueue(id, async () => {
+    const record = findAppOrReply(request, reply);
+    if (!record) return null;
+    return startLocalApp(reconcileAppRuntimeState(record.id) || record);
+  });
+  if (!result) return;
   if (!result.ok) {
     return reply.code(result.status).send({ error: result.error });
   }
 
-  return reply.code(200).send({ app: appToPublicDto(result.app), pid: result.pid });
+  const reconciled = reconcileAppRuntimeState(result.app.id) || result.app;
+  return reply.code(200).send({ app: appToPublicDto(reconciled), pid: result.pid });
 });
 
 app.post("/apps/:id/stop", async (request, reply) => {
-  const record = findAppOrReply(request, reply);
-  if (!record) return;
+  const id = Number(request.params.id);
 
-  const result = await stopLocalApp(record);
+  const result = await withAppLifecycleQueue(id, async () => {
+    const record = findAppOrReply(request, reply);
+    if (!record) return null;
+    return stopLocalApp(reconcileAppRuntimeState(record.id) || record);
+  });
+  if (!result) return;
   if (!result.ok) {
     return reply.code(result.status).send({ error: result.error });
   }
-  return reply.code(200).send({ app: appToPublicDto(result.app), stopped: result.stopped });
+  const reconciled = reconcileAppRuntimeState(result.app.id) || result.app;
+  return reply.code(200).send({ app: appToPublicDto(reconciled), stopped: result.stopped });
 });
 
 app.post("/apps/:id/restart", async (request, reply) => {
-  const record = findAppOrReply(request, reply);
-  if (!record) return;
+  const id = Number(request.params.id);
 
-  const validationError = validateStartableApp(record);
-  if (validationError) {
-    return reply.code(400).send({ error: validationError });
-  }
+  const result = await withAppLifecycleQueue(id, async () => {
+    const record = findAppOrReply(request, reply);
+    if (!record) return null;
+    const current = reconcileAppRuntimeState(record.id) || record;
+    const validationError = validateStartableApp(current);
+    if (validationError) {
+      return { ok: false, status: 400, error: validationError };
+    }
 
-  const stopResult = await stopLocalApp(record, "restart");
-  if (!stopResult.ok) {
-    return reply.code(stopResult.status).send({ error: stopResult.error });
-  }
-  const refreshed = getAppById(db, record.id);
-  const result = await startLocalApp(refreshed);
+    const stopResult = await stopLocalApp(current, "restart");
+    if (!stopResult.ok) {
+      return stopResult;
+    }
+    return startLocalApp(getAppById(db, current.id));
+  });
 
+  if (!result) return;
   if (!result.ok) {
     return reply.code(result.status).send({ error: result.error });
   }
 
-  return reply.code(200).send({ app: appToPublicDto(result.app), pid: result.pid });
+  const reconciled = reconcileAppRuntimeState(result.app.id) || result.app;
+  return reply.code(200).send({ app: appToPublicDto(reconciled), pid: result.pid });
 });
 
 app.get("/apps/:id/env", async (request, reply) => {
@@ -1656,7 +1726,7 @@ app.post("/databases", async (request, reply) => {
       volumeName: savedApp.volumes?.[0]?.split(":")?.[0] || `${savedApp.name}_data`,
       env: savedApp.env || {}
     });
-    return reply.code(201).send({ app: appToPublicDto(savedApp), database: databaseToPublicDto(databaseRecord) });
+    return reply.code(201).send({ app: appToPublicDtoWithoutEnv(savedApp), database: databaseToPublicDto(databaseRecord) });
   } catch (error) {
     return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid database payload." });
   }
@@ -1798,8 +1868,16 @@ app.post("/apps/:id/deployments", async (request, reply) => {
     return reply.code(400).send({ error: `${record.name} is disabled.` });
   }
 
-  const deployment = queueDeploymentForApp(record);
-  return reply.code(202).send({ app: appToPublicDto(record), deployment: deploymentToPublicDto(getDeploymentById(db, deployment.id)) });
+  const queued = queueDeploymentForApp(record);
+  const deployment = getDeploymentById(db, queued.deployment.id);
+  if (!queued.created) {
+    return reply.code(409).send({
+      error: `Deployment ${deployment.id} is already ${deployment.status} for ${record.name}.`,
+      app: appToPublicDto(record),
+      deployment: deploymentToPublicDto(deployment)
+    });
+  }
+  return reply.code(202).send({ app: appToPublicDto(record), deployment: deploymentToPublicDto(deployment) });
 });
 
 app.get("/github/status", async () => {
@@ -1937,21 +2015,25 @@ app.post("/github/webhook", async (request, reply) => {
   }
 
   const target = matches[0];
-  const deployment = queueDeploymentForApp(target, { type: "github", repo: push.repo, branch: push.branch, commitSha: push.commitSha });
+  const queued = queueDeploymentForApp(target, { type: "github", repo: push.repo, branch: push.branch, commitSha: push.commitSha });
+  const deployment = getDeploymentById(db, queued.deployment.id);
   const updated = updateGithubWebhookDelivery(db, delivery, {
-    status: "deployment_queued",
+    status: queued.created ? "deployment_queued" : "deployment_active",
     action: "push",
     appId: target.id,
     deploymentId: deployment.id,
     repo: push.repo,
     branch: push.branch,
     commitSha: push.commitSha,
-    message: `Queued deployment ${deployment.id} for ${target.name}.`,
+    message: queued.created
+      ? `Queued deployment ${deployment.id} for ${target.name}.`
+      : `Deployment ${deployment.id} is already ${deployment.status} for ${target.name}.`,
     processedAt: new Date().toISOString()
   });
 
   return reply.code(202).send({
     ok: true,
+    queued: queued.created,
     deployment: deploymentToPublicDto(getDeploymentById(db, deployment.id)),
     app: appToPublicDto(target),
     delivery: publicGithubDeliveryDto(updated)

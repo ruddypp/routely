@@ -8,6 +8,7 @@ import {
   listRunningRuntimeInstances,
   reconcileStaleRuntimeInstances,
   recordRuntimeStart,
+  recordRuntimeStop,
   upsertApp
 } from "@routely/db";
 
@@ -56,6 +57,23 @@ describe("runtime reconciliation", () => {
 
     expect(stale).toEqual([]);
     expect(listRunningRuntimeInstances(db)).toHaveLength(1);
+    expect(getAppByName(db, "api")?.status).toBe("running");
+    db.close();
+  });
+
+  it("does not let an old stopped PID overwrite a newer running PID", () => {
+    const { db } = initializeRoutely(tempDir());
+    const app = upsertApp(db, {
+      name: "api",
+      command: "npm run dev",
+      status: "stopped"
+    });
+    recordRuntimeStart(db, app.id, 111);
+    recordRuntimeStart(db, app.id, 222);
+
+    recordRuntimeStop(db, app.id, 111, null, "stopped");
+
+    expect(listRunningRuntimeInstances(db).map((instance) => instance.pid)).toEqual([222]);
     expect(getAppByName(db, "api")?.status).toBe("running");
     db.close();
   });

@@ -1,15 +1,10 @@
-import { daemonFetch, type DaemonApp } from "@/lib/daemon";
+import { daemonFetch, daemonProxyResponse, type DaemonApp } from "@/lib/daemon";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   const result = await daemonFetch<{ apps: DaemonApp[] }>("/apps");
-
-  if (!result.ok) {
-    return Response.json({ apps: [], error: result.error }, { status: 200 });
-  }
-
-  return Response.json({ apps: result.data.apps || [], error: null });
+  return daemonProxyResponse(result);
 }
 
 export async function POST(request: Request) {

@@ -1,5 +1,6 @@
+import { randomUUID } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { POST } from "../../app/api/apps/route";
+import { GET, POST } from "../../app/api/apps/route";
 import { PATCH } from "../../app/api/apps/[id]/route";
 
 const app = {
@@ -21,6 +22,48 @@ const app = {
 
 afterEach(() => {
   vi.restoreAllMocks();
+  delete process.env.ROUTELY_ADMIN_TOKEN;
+});
+
+describe("GET /api/apps", () => {
+  it("preserves upstream auth failures instead of returning empty success", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Routely production API requires an admin token." }), {
+        status: 401,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toBe("Routely production API requires an admin token.");
+    expect(body.apps).toBeUndefined();
+  });
+
+  it("forwards the server-side admin token when configured", async () => {
+    const token = randomUUID();
+    process.env.ROUTELY_ADMIN_TOKEN = token;
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ apps: [app] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.apps).toHaveLength(1);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:9977/apps",
+      expect.objectContaining({
+        headers: expect.objectContaining({ authorization: `Bearer ${token}` })
+      })
+    );
+  });
 });
 
 describe("POST /api/apps", () => {

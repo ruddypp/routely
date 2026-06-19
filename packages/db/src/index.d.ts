@@ -79,6 +79,7 @@ export function getDeploymentById(db: Database.Database, deploymentId: number): 
 export function listDeployments(db: Database.Database, options?: { limit?: number }): RoutelyDeploymentRecord[];
 export function listDeploymentsForApp(db: Database.Database, appId: number, options?: { limit?: number }): RoutelyDeploymentRecord[];
 export function getLatestSuccessfulDeploymentForApp(db: Database.Database, appId: number): RoutelyDeploymentRecord | null;
+export function getActiveDeploymentForApp(db: Database.Database, appId: number): RoutelyDeploymentRecord | null;
 export function updateDeployment(
   db: Database.Database,
   deploymentId: number,

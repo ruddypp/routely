@@ -1644,7 +1644,8 @@ async function serverInitCommand(args: string[]): Promise<void> {
   const ports = serverPortsFromFlags(flags);
   const token = generateAdminToken();
   const hashed = hashAdminToken(token);
-  const doctor = await runServerDoctorChecks({ workspaceRoot, dataDir, ports, createDataDir: true });
+  const dashboardPort = Number(flags["dashboard-port"] || process.env.ROUTELY_DASHBOARD_PORT || DEFAULT_DASHBOARD_PORT);
+  const doctor = await runServerDoctorChecks({ workspaceRoot, dataDir, ports, dashboardPort, createDataDir: true });
   const { db, databasePath } = initializeRoutely(workspaceRoot);
   const initializedAt = new Date().toISOString();
 
@@ -1677,7 +1678,8 @@ async function serverDoctorCommand(args: string[]): Promise<void> {
   const { flags } = parseFlags(args);
   const dataDir = resolve(invocationCwd, String(flags["data-dir"] || defaultProductionDataDir(workspaceRoot)));
   const ports = serverPortsFromFlags(flags);
-  const doctor = await runServerDoctorChecks({ workspaceRoot, dataDir, ports, createDataDir: false });
+  const dashboardPort = Number(flags["dashboard-port"] || process.env.ROUTELY_DASHBOARD_PORT || DEFAULT_DASHBOARD_PORT);
+  const doctor = await runServerDoctorChecks({ workspaceRoot, dataDir, ports, dashboardPort, createDataDir: false });
   const { db } = initializeRoutely(workspaceRoot);
 
   saveServerFoundationState(db, { lastDoctor: doctor as unknown as Record<string, unknown> });

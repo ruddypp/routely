@@ -53,6 +53,7 @@ export function verifyAdminToken(token, salt, expectedHash) {
 
 export async function runServerDoctorChecks(options = {}) {
   const dataDir = resolve(options.dataDir || defaultProductionDataDir(options.workspaceRoot));
+  const dashboardPort = Number(options.dashboardPort || process.env.ROUTELY_DASHBOARD_PORT || SERVER_DEFAULT_DASHBOARD_PORT);
   const ports = Array.isArray(options.ports) && options.ports.length > 0
     ? options.ports.map(Number).filter((port) => Number.isInteger(port) && port > 0)
     : DEFAULT_PRODUCTION_PORTS;
@@ -63,7 +64,7 @@ export async function runServerDoctorChecks(options = {}) {
     commandCheck("node", ["-v"], { required: true }),
     commandCheck("npm", ["-v"], { required: true }),
     dataDirCheck(dataDir, options.createDataDir === true),
-    ...ports.map((port) => portCheck(port))
+    ...ports.map((port) => portCheck(port, { dashboardPort }))
   ]);
 
   const disk = diskCheck(dataDir);
@@ -188,7 +189,26 @@ function memoryCheck() {
   };
 }
 
-function portCheck(port) {
+async function expectedDashboardCheck(port) {
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/health`, { signal: AbortSignal.timeout(1000) });
+    const data = await response.json().catch(() => null);
+    if (response.ok && data && typeof data === "object" && ("connected" in data || "daemonUrl" in data)) {
+      return {
+        id: `port-${port}`,
+        label: `Port ${port}`,
+        status: "ok",
+        message: `Port ${port} is already serving the Routely dashboard`,
+        detail: "expected dashboard process"
+      };
+    }
+  } catch {
+    // Fall through to the generic occupied-port error.
+  }
+  return null;
+}
+
+function portCheck(port, options = {}) {
   return new Promise((resolvePort) => {
     const probe = net.createServer();
     let settled = false;
@@ -206,6 +226,16 @@ function portCheck(port) {
     };
 
     probe.once("error", (error) => {
+      if (port === options.dashboardPort) {
+        expectedDashboardCheck(port).then((dashboard) => {
+          if (dashboard) {
+            finish(dashboard.status, dashboard.message, dashboard.detail);
+          } else {
+            finish(error.code === "EACCES" ? "warn" : "error", `Port ${port} is not available`, error.message);
+          }
+        });
+        return;
+      }
       finish(error.code === "EACCES" ? "warn" : "error", `Port ${port} is not available`, error.message);
     });
     probe.once("listening", () => {

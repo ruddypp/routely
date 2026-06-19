@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST } from "../../app/api/apps/[id]/deployments/route";
+import { GET as GET_DEPLOYMENTS } from "../../app/api/deployments/route";
 import { GET as GET_LOGS } from "../../app/api/deployments/[id]/logs/route";
 
 const app = {
@@ -68,6 +69,22 @@ describe("deployment route handlers", () => {
       "http://127.0.0.1:9977/apps/7/deployments",
       expect.objectContaining({ method: "POST", cache: "no-store" })
     );
+  });
+
+  it("preserves upstream deployment list auth failures", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Routely production API requires an admin token." }), {
+        status: 401,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const response = await GET_DEPLOYMENTS(new Request("http://localhost/api/deployments"));
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.deployments).toBeUndefined();
+    expect(body.error).toContain("admin token");
   });
 
   it("proxies incremental deployment logs", async () => {

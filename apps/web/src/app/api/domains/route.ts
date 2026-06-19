@@ -4,11 +4,6 @@ export const dynamic = "force-dynamic";
 
 export async function GET() {
   const result = await daemonFetch<{ rootDomain: string | null; serverPublicIp: string | null; domains: DaemonDomain[] }>("/domains");
-
-  if (!result.ok) {
-    return Response.json({ rootDomain: null, serverPublicIp: null, domains: [], error: result.error }, { status: 200 });
-  }
-
   return daemonProxyResponse(result);
 }
 

@@ -861,7 +861,12 @@ export function recordRuntimeStop(db, appId, pid, exitCode, status = "stopped") 
     SET status = ?, stopped_at = CURRENT_TIMESTAMP, exit_code = ?, updated_at = CURRENT_TIMESTAMP
     WHERE app_id = ? AND pid = ? AND stopped_at IS NULL
   `).run(status, exitCode, appId, pid);
-  updateAppStatus(db, appId, status);
+  const remaining = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM runtime_instances
+    WHERE app_id = ? AND stopped_at IS NULL AND status = 'running'
+  `).get(appId);
+  updateAppStatus(db, appId, Number(remaining?.count || 0) > 0 ? "running" : status);
 }
 
 export function createDeployment(db, input) {
@@ -925,6 +930,19 @@ export function getLatestSuccessfulDeploymentForApp(db, appId) {
     JOIN apps ON apps.id = deployments.app_id
     WHERE deployments.app_id = ? AND deployments.status = 'succeeded'
     ORDER BY deployments.finished_at DESC, deployments.id DESC
+    LIMIT 1
+  `).get(appId) || null;
+  return row ? parseDeploymentRecord(row) : null;
+}
+
+export function getActiveDeploymentForApp(db, appId) {
+  const row = db.prepare(`
+    SELECT deployments.*, apps.name AS app_name
+    FROM deployments
+    JOIN apps ON apps.id = deployments.app_id
+    WHERE deployments.app_id = ?
+      AND deployments.status IN ('queued', 'preparing', 'building', 'starting', 'healthchecking')
+    ORDER BY deployments.created_at ASC, deployments.id ASC
     LIMIT 1
   `).get(appId) || null;
   return row ? parseDeploymentRecord(row) : null;

@@ -39,6 +39,22 @@ describe("domain route handlers", () => {
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9977/domains", expect.objectContaining({ cache: "no-store" }));
   });
 
+  it("preserves upstream domain list auth failures", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "Routely production API requires an admin token." }), {
+        status: 401,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.domains).toBeUndefined();
+    expect(body.error).toContain("admin token");
+  });
+
   it("adds a domain through the daemon proxy", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({ domain }), {

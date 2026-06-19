@@ -570,5 +570,6 @@ export function runServerDoctorChecks(options?: {
   workspaceRoot?: string;
   dataDir?: string;
   ports?: number[];
+  dashboardPort?: number;
   createDataDir?: boolean;
 }): Promise<RoutelyServerDoctorResult>;
