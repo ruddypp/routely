@@ -222,6 +222,11 @@ type AppMetricsResponse = {
   error?: string | null;
 };
 
+type MetricsResponse = {
+  metrics: DaemonMetricSample[];
+  error?: string | null;
+};
+
 type DaemonAppEnvVar = {
   id: number;
   appId: number;
@@ -427,6 +432,7 @@ type NotificationsResponse = {
 type AppAction = "start" | "stop" | "restart";
 type FormMode = "create" | "edit";
 type ModuleKey = "overview" | "apps" | "deployments" | "domains" | "github" | "env" | "logs" | "health" | "metrics" | "databases" | "backups" | "settings";
+type InspectorTab = "overview" | "health" | "metrics" | "deployments" | "domains" | "proxy" | "github" | "env" | "logs" | "config";
 
 type AppFormState = {
   name: string;
@@ -459,6 +465,20 @@ const POLL_INTERVAL_MS = 4000;
 const APP_TYPES = ["app", "database", "compose", "static", "worker"];
 const APP_DRIVERS = ["command", "compose", "dockerfile", "buildpack", "static"];
 const APP_PRESETS = ["custom", "nextjs", "vite", "laravel", "express", "nestjs", "django", "fastapi", "go", "static", "php", "postgres", "mysql", "mariadb", "redis", "mongodb"];
+const MODULES: Array<{ key: ModuleKey; label: string; summary: string }> = [
+  { key: "overview", label: "Overview", summary: "Readiness and next actions" },
+  { key: "apps", label: "Apps", summary: "Local registry and lifecycle" },
+  { key: "deployments", label: "Deployments", summary: "Dockerfile deploy history" },
+  { key: "domains", label: "Domains", summary: "DNS, proxy, and HTTPS" },
+  { key: "github", label: "GitHub", summary: "Repos and webhook deliveries" },
+  { key: "env", label: "Env", summary: "Secrets and runtime env" },
+  { key: "logs", label: "Logs", summary: "Runtime and deploy output" },
+  { key: "health", label: "Health", summary: "Checks and failures" },
+  { key: "metrics", label: "Metrics", summary: "Host and container samples" },
+  { key: "databases", label: "Databases", summary: "Internal database services" },
+  { key: "backups", label: "Backups", summary: "Jobs and run history" },
+  { key: "settings", label: "Settings", summary: "Notifications and auth notes" }
+];
 const PANEL_SHADOW = "shadow-[rgba(0,0,0,0.5)_0px_8px_24px]";
 const INSET_RING = "shadow-[rgb(18,18,18)_0px_1px_0px,rgb(124,124,124)_0px_0px_0px_1px_inset]";
 const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
@@ -666,6 +686,8 @@ export default function DashboardClient() {
   const [proxyError, setProxyError] = useState<string | null>(null);
   const [github, setGithub] = useState<DaemonGithubStatus | null>(null);
   const [githubError, setGithubError] = useState<string | null>(null);
+  const [hostMetrics, setHostMetrics] = useState<DaemonMetricSample[]>([]);
+  const [hostMetricsError, setHostMetricsError] = useState<string | null>(null);
   const [githubSaving, setGithubSaving] = useState(false);
   const [githubForm, setGithubForm] = useState({ appId: "", fullName: "", branch: "main", autoDeploy: true });
   const [databases, setDatabases] = useState<DaemonDatabase[]>([]);
@@ -712,7 +734,7 @@ export default function DashboardClient() {
     if (showRefresh) setRefreshing(true);
 
     try {
-      const [healthRes, appsRes, serverRes, deploymentsRes, domainsRes, proxyRes, githubRes, databasesRes, backupsRes, notificationsRes] = await Promise.all([
+      const [healthRes, appsRes, serverRes, deploymentsRes, domainsRes, proxyRes, githubRes, metricsRes, databasesRes, backupsRes, notificationsRes] = await Promise.all([
         fetch("/api/health", { cache: "no-store" }),
         fetch("/api/apps", { cache: "no-store" }),
         fetch("/api/server/status", { cache: "no-store" }),
@@ -720,6 +742,7 @@ export default function DashboardClient() {
         fetch("/api/domains", { cache: "no-store" }),
         fetch("/api/proxy/routes", { cache: "no-store" }),
         fetch("/api/github/status", { cache: "no-store" }),
+        fetch("/api/metrics?refresh=false", { cache: "no-store" }),
         fetch("/api/databases", { cache: "no-store" }),
         fetch("/api/backups", { cache: "no-store" }),
         fetch("/api/notifications", { cache: "no-store" })
@@ -732,6 +755,7 @@ export default function DashboardClient() {
       const domainsData = (await domainsRes.json().catch(() => ({ rootDomain: null, serverPublicIp: null, domains: [], error: "Domains unavailable." }))) as DomainsResponse;
       const proxyData = (await proxyRes.json().catch(() => ({ routes: [], config: {}, error: "Proxy routes unavailable." }))) as ProxyRoutesResponse;
       const githubData = (await githubRes.json().catch(() => ({ github: null, error: "GitHub status unavailable." }))) as GithubStatusResponse;
+      const metricsData = (await metricsRes.json().catch(() => ({ metrics: [], error: "Metrics unavailable." }))) as MetricsResponse;
       const databasesData = (await databasesRes.json().catch(() => ({ databases: [], error: "Databases unavailable." }))) as DatabasesResponse;
       const backupsData = (await backupsRes.json().catch(() => ({ jobs: [], runs: [], error: "Backups unavailable." }))) as BackupsResponse;
       const notificationsData = (await notificationsRes.json().catch(() => ({ channels: [], attempts: [], error: "Notifications unavailable." }))) as NotificationsResponse;
@@ -752,6 +776,8 @@ export default function DashboardClient() {
       setProxyError(proxyData.error || null);
       setGithub(githubData.github || null);
       setGithubError(githubData.error || null);
+      setHostMetrics(metricsData.metrics || []);
+      setHostMetricsError(metricsData.error || null);
       setDatabases(databasesData.databases || []);
       setDatabasesError(databasesData.error || null);
       setBackupJobs(backupsData.jobs || []);
@@ -775,6 +801,7 @@ export default function DashboardClient() {
       setDomainsError("Dashboard could not reach its API.");
       setProxyError("Dashboard could not reach its API.");
       setGithubError("Dashboard could not reach its API.");
+      setHostMetricsError("Dashboard could not reach its API.");
       setDatabasesError("Dashboard could not reach its API.");
       setBackupsError("Dashboard could not reach its API.");
       setNotificationsError("Dashboard could not reach its API.");
@@ -1285,18 +1312,7 @@ export default function DashboardClient() {
   const workspace = health?.health?.workspace || "local workspace";
   const stoppedCount = Math.max(0, apps.length - runningCount);
   const dockerfileApps = appResources.filter((app) => app.driver === "dockerfile");
-  const showOverview = activeModule === "overview";
-  const showApps = activeModule === "apps";
-  const showDeployments = activeModule === "deployments";
-  const showDomains = activeModule === "domains";
-  const showGithub = activeModule === "github";
-  const showEnv = activeModule === "env";
-  const showLogs = activeModule === "logs";
-  const showHealth = activeModule === "health";
-  const showMetrics = activeModule === "metrics";
-  const showDatabases = activeModule === "databases";
-  const showBackups = activeModule === "backups";
-  const showSettings = activeModule === "settings";
+  const appModuleTabs: Record<"env" | "logs" | "health", InspectorTab> = { env: "env", logs: "logs", health: "health" };
 
   return (
     <main className="min-h-screen bg-background text-foreground">
@@ -1314,8 +1330,8 @@ export default function DashboardClient() {
             onRefresh={() => void poll(true)}
           />
 
-          <div className="grid gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:px-5 xl:grid-cols-[minmax(0,1fr)_410px]">
-            {showOverview ? (
+          <div className="grid gap-3 px-3 py-3 sm:px-4 lg:px-5">
+            {activeModule === "overview" ? (
               <OverviewPanel
                 apps={apps}
                 backupJobs={backupJobs}
@@ -1327,7 +1343,7 @@ export default function DashboardClient() {
               />
             ) : null}
 
-            {showOverview ? (
+            {activeModule === "overview" ? (
               <ServerFoundationPanel
                 connected={connected}
                 error={serverError}
@@ -1335,61 +1351,17 @@ export default function DashboardClient() {
               />
             ) : null}
 
-            {showDeployments || showDomains || showGithub ? <ProductionDeployPanel
-              apps={dockerfileApps}
-              connected={connected}
-              deployments={deployments}
-              domains={domains}
-              domainsByAppId={domainsByAppId}
-              domainsError={domainsError || proxyError}
-              domainsMeta={domainsMeta}
-              domainActionByHostname={domainActionByHostname}
-              domainForm={domainForm}
-              domainSaving={domainSaving}
-              error={deployError || deploymentsError}
-              github={github}
-              githubError={githubError}
-              githubForm={githubForm}
-              githubSaving={githubSaving}
-              latestByAppId={latestDeploymentByAppId}
-              proxyRoutes={proxyRoutes}
-              rootDomainInput={rootDomainInput}
-              server={serverStatus}
-              onAddDomain={() => void addDomain()}
-              deployingByAppId={deployingByAppId}
-              onDomainFormChange={setDomainForm}
-              onDeploy={(app) => void deployApp(app)}
-              onGithubConnect={() => void connectGithubRepository()}
-              onGithubFormChange={setGithubForm}
-              onRemoveDomain={(domain) => void removeDomain(domain)}
-              onRootDomainChange={setRootDomainInput}
-              onSaveRootDomain={() => void saveRootDomain()}
-              onVerifyDomain={(domain) => void verifyDomain(domain)}
-              onLogs={(deployment) => void loadDeploymentLogs(deployment)}
-            /> : null}
+            {activeModule === "deployments" ? <DeploymentsModule apps={dockerfileApps} connected={connected} deployments={deployments} deployingByAppId={deployingByAppId} error={deployError || deploymentsError} latestByAppId={latestDeploymentByAppId} server={serverStatus} onDeploy={(app) => void deployApp(app)} onLogs={(deployment) => void loadDeploymentLogs(deployment)} /> : null}
 
-            {showDatabases || showBackups ? <DatabaseBackupPanel
-              backupActionById={backupActionById}
-              backupForm={backupForm}
-              backupJobs={backupJobs}
-              backupRuns={backupRuns}
-              backupsError={backupsError}
-              connected={connected}
-              databaseActionById={databaseActionById}
-              databaseForm={databaseForm}
-              databaseSaving={databaseSaving}
-              databases={databases}
-              databasesError={databasesError}
-              onBackupFormChange={setBackupForm}
-              onCreateDatabase={() => void createDatabase()}
-              onDatabaseAction={(database, action) => void runDatabaseAction(database, action)}
-              onDatabaseFormChange={setDatabaseForm}
-              onEnableBackup={() => void enableBackup()}
-              onRunBackup={(job) => void runBackup(job)}
-              onToggleBackup={(job, enabled) => void toggleBackup(job, enabled)}
-            /> : null}
+            {activeModule === "domains" ? <DomainsModule apps={dockerfileApps} connected={connected} domains={domains} domainsError={domainsError || proxyError} domainsMeta={domainsMeta} domainActionByHostname={domainActionByHostname} domainForm={domainForm} domainSaving={domainSaving} proxyRoutes={proxyRoutes} rootDomainInput={rootDomainInput} onAddDomain={() => void addDomain()} onDomainFormChange={setDomainForm} onRemoveDomain={(domain) => void removeDomain(domain)} onRootDomainChange={setRootDomainInput} onSaveRootDomain={() => void saveRootDomain()} onVerifyDomain={(domain) => void verifyDomain(domain)} /> : null}
 
-            {showSettings ? (
+            {activeModule === "github" ? <GithubModule apps={dockerfileApps} connected={connected} github={github} githubError={githubError} githubForm={githubForm} githubSaving={githubSaving} onGithubConnect={() => void connectGithubRepository()} onGithubFormChange={setGithubForm} /> : null}
+
+            {activeModule === "databases" ? <DatabasesModule connected={connected} databaseActionById={databaseActionById} databaseForm={databaseForm} databaseSaving={databaseSaving} databases={databases} databasesError={databasesError} onCreateDatabase={() => void createDatabase()} onDatabaseAction={(database, action) => void runDatabaseAction(database, action)} onDatabaseFormChange={setDatabaseForm} /> : null}
+
+            {activeModule === "backups" ? <BackupsModule backupActionById={backupActionById} backupForm={backupForm} backupJobs={backupJobs} backupRuns={backupRuns} backupsError={backupsError} connected={connected} databases={databases} onBackupFormChange={setBackupForm} onEnableBackup={() => void enableBackup()} onRunBackup={(job) => void runBackup(job)} onToggleBackup={(job, enabled) => void toggleBackup(job, enabled)} /> : null}
+
+            {activeModule === "settings" ? (
               <NotificationsPanel
                 channels={notificationChannels}
                 attempts={notificationAttempts}
@@ -1404,100 +1376,11 @@ export default function DashboardClient() {
               />
             ) : null}
 
-            {showApps ? <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-              <div className="flex flex-col gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.035] to-transparent px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Local runner</p>
-                  <h1 className="text-xl font-bold leading-tight">Apps & services</h1>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <MetricPill label="running" value={`${runningCount}/${apps.length}`} accent />
-                  <MetricPill label="services" value={String(serviceResources.length)} />
-                  <MetricPill label="stopped" value={String(stoppedCount)} />
-                  <MetricPill label="disabled" value={String(disabledCount)} />
-                  <PillButton onClick={openCreateForm} strong disabled={!connected}>
-                    Add resource
-                  </PillButton>
-                </div>
-              </div>
+            {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} disabledCount={disabledCount} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} serviceResources={serviceResources} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onSelect={setSelectedAppId} /> : null}
 
-              {!connected && health ? <Alert title="Daemon offline" message={health.error || "Start Routely from the CLI to bring the local control plane online."} /> : null}
-              {actionError ? <Alert title="Action failed" message={actionError} /> : null}
-              {appsError ? <Alert title="Registry unavailable" message={appsError} /> : null}
+            {activeModule === "apps" || activeModule === "env" || activeModule === "logs" || activeModule === "health" ? <AppOperationsModule activeTab={activeModule === "apps" ? undefined : appModuleTabs[activeModule]} apps={apps} appResources={appResources} app={selectedApp} selectedAppId={selectedAppId} connected={connected} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} logs={logs} logsLoading={logsLoading} logsError={logsError} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} module={activeModule} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onLogs={(app) => void loadLogs(app)} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} /> : null}
 
-              {formMode ? (
-                <AppForm
-                  mode={formMode}
-                  form={form}
-                  error={formError}
-                  saving={formSaving}
-                  onChange={setForm}
-                  onCancel={() => setFormMode(null)}
-                  onSubmit={submitForm}
-                />
-              ) : null}
-
-              <div className="bg-black/10">
-                {loading ? (
-                  <LoadingRows />
-                ) : apps.length === 0 ? (
-                  <EmptyState connected={connected} onAdd={openCreateForm} />
-                ) : (
-                  <>
-                    <ResourceSection title="Apps" count={appResources.length} />
-                    {appResources.map((app) => (
-                      <AppRow
-                        key={app.id}
-                        app={app}
-                        active={selectedAppId === app.id}
-                        connected={connected}
-                        currentAction={actionByAppId[app.id]}
-                        onSelect={() => setSelectedAppId(app.id)}
-                        onLogs={() => void loadLogs(app)}
-                        onEdit={() => openEditForm(app)}
-                        onAction={(action) => void runAction(app, action)}
-                      />
-                    ))}
-                    <ResourceSection title="Services & databases" count={serviceResources.length} />
-                    {serviceResources.length === 0 ? <ServiceEmpty /> : null}
-                    {serviceResources.map((app) => (
-                      <AppRow
-                        key={app.id}
-                        app={app}
-                        active={selectedAppId === app.id}
-                        connected={connected}
-                        currentAction={actionByAppId[app.id]}
-                        onSelect={() => setSelectedAppId(app.id)}
-                        onLogs={() => void loadLogs(app)}
-                        onEdit={() => openEditForm(app)}
-                        onAction={(action) => void runAction(app, action)}
-                      />
-                    ))}
-                  </>
-                )}
-              </div>
-            </section> : null}
-
-            {showApps || showEnv || showLogs || showHealth || showMetrics ? <DetailPanel
-              app={selectedApp}
-              connected={connected}
-              deployments={selectedDeployments}
-              domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []}
-              github={github}
-              deploymentLogs={deploymentLogs}
-              deploymentLogsError={deploymentLogsError}
-              deploymentLogsLoading={deploymentLogsLoading}
-              deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false}
-              logs={logs}
-              loading={logsLoading}
-              error={logsError}
-              currentAction={selectedApp ? actionByAppId[selectedApp.id] : null}
-              onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined}
-              onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined}
-              onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)}
-              onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined}
-              onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined}
-            /> : null}
+            {activeModule === "metrics" ? <MetricsModule app={selectedApp} apps={apps} appResources={appResources} connected={connected} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} github={github} hostMetrics={hostMetrics} hostMetricsError={hostMetricsError} logs={logs} logsError={logsError} logsLoading={logsLoading} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} selectedAppId={selectedAppId} /> : null}
           </div>
         </section>
 
@@ -1518,25 +1401,220 @@ function Sidebar({ activeModule, connected, onSelect }: { activeModule: ModuleKe
         </div>
       </div>
       <nav className="mt-7 space-y-1">
-        <NavItem active={activeModule === "overview"} label="Overview" dot={connected} onClick={() => onSelect("overview")} />
-        <NavItem active={activeModule === "apps"} label="Apps" dot={connected} onClick={() => onSelect("apps")} />
-        <NavItem active={activeModule === "deployments"} label="Deployments" onClick={() => onSelect("deployments")} />
-        <NavItem active={activeModule === "domains"} label="Domains" dot={connected} onClick={() => onSelect("domains")} />
-        <NavItem active={activeModule === "github"} label="GitHub" dot={connected} onClick={() => onSelect("github")} />
-        <NavItem active={activeModule === "env"} label="Env" onClick={() => onSelect("env")} />
-        <NavItem active={activeModule === "logs"} label="Logs" onClick={() => onSelect("logs")} />
-        <NavItem active={activeModule === "health"} label="Health" onClick={() => onSelect("health")} />
-        <NavItem active={activeModule === "metrics"} label="Metrics" onClick={() => onSelect("metrics")} />
-        <NavItem active={activeModule === "databases"} label="Databases" dot={connected} onClick={() => onSelect("databases")} />
-        <NavItem active={activeModule === "backups"} label="Backups" dot={connected} onClick={() => onSelect("backups")} />
+        {MODULES.map((module) => (
+          <NavItem key={module.key} active={activeModule === module.key} label={module.label} dot={connected && ["overview", "apps", "domains", "databases", "backups", "settings"].includes(module.key)} onClick={() => onSelect(module.key)} />
+        ))}
       </nav>
-      <div className="mt-7 border-t border-white/5 pt-4">
-        <p className="px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Later</p>
-        <nav className="mt-2 space-y-1">
-          <NavItem active={activeModule === "settings"} label="Settings" dot onClick={() => onSelect("settings")} />
-        </nav>
-      </div>
     </aside>
+  );
+}
+
+function ModuleHeader({ actions, module, stats }: { actions?: ReactNode; module: ModuleKey; stats?: ReactNode }) {
+  const meta = MODULES.find((item) => item.key === module) || MODULES[0];
+  return (
+    <div className="flex flex-col gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{meta.summary}</p>
+        <h1 className="text-xl font-bold leading-tight">{meta.label}</h1>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">{stats}{actions}</div>
+    </div>
+  );
+}
+
+function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, disabledCount, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onSelect, runningCount, selectedAppId, serviceResources, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; disabledCount: number; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: () => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onSelect: (id: number) => void; runningCount: number; selectedAppId: number | null; serviceResources: DaemonApp[]; stoppedCount: number }) {
+  return (
+    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
+      <ModuleHeader module="apps" stats={<><MetricPill label="running" value={`${runningCount}/${apps.length}`} accent /><MetricPill label="services" value={String(serviceResources.length)} /><MetricPill label="stopped" value={String(stoppedCount)} /><MetricPill label="disabled" value={String(disabledCount)} /></>} actions={<PillButton onClick={onCreate} strong disabled={!connected}>Add resource</PillButton>} />
+
+      {!connected && health ? <Alert title="Daemon offline" message={health.error || "Start Routely from the CLI to bring the local control plane online."} /> : null}
+      {actionError ? <Alert title="Action failed" message={actionError} /> : null}
+      {appsError ? <Alert title="Registry unavailable" message={appsError} /> : null}
+
+      {formMode ? <AppForm mode={formMode} form={form} error={formError} saving={formSaving} onChange={onFormChange} onCancel={onFormCancel} onSubmit={onFormSubmit} /> : null}
+
+      <div className="bg-black/10">
+        {loading ? <LoadingRows /> : apps.length === 0 ? <EmptyState connected={connected} onAdd={onCreate} /> : (
+          <>
+            <ResourceSection title="Apps" count={appResources.length} />
+            {appResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+            <ResourceSection title="Services & databases" count={serviceResources.length} />
+            {serviceResources.length === 0 ? <ServiceEmpty /> : null}
+            {serviceResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+          </>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function AppOperationsModule({ activeTab, appResources, apps, app, connected, currentAction, deploying, deploymentLogs, deploymentLogsError, deploymentLogsLoading, deployments, domains, github, logs, logsError, logsLoading, module, onAction, onDeploy, onDeploymentLogs, onEdit, onLogs, onReload, onSelect, selectedAppId }: { activeTab?: InspectorTab; appResources: DaemonApp[]; apps: DaemonApp[]; app: DaemonApp | null; connected: boolean; currentAction?: AppAction | null; deploying: boolean; deploymentLogs: DeploymentLogsResponse | null; deploymentLogsError: string | null; deploymentLogsLoading: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; github: DaemonGithubStatus | null; logs: DaemonAppLogsResponse | null; logsError: string | null; logsLoading: boolean; module: ModuleKey; onAction?: (action: AppAction) => void; onDeploy?: () => void; onDeploymentLogs: (deployment: DaemonDeployment) => void; onEdit?: () => void; onLogs: (app: DaemonApp) => void; onReload?: () => void; onSelect: (id: number) => void; selectedAppId: number | null }) {
+  useEffect(() => {
+    if (module === "logs" && app && !logsLoading && logs?.app.id !== app.id) {
+      onLogs(app);
+    }
+  }, [app, logs?.app.id, logsLoading, module, onLogs]);
+
+  if (module === "apps") {
+    return <DetailPanel activeTab={activeTab} app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />;
+  }
+  const candidates = [...(appResources.length ? appResources : apps)].sort((a, b) => {
+    if (module !== "health") return a.name.localeCompare(b.name);
+    const aProblem = a.status !== "running" || Boolean(a.needsRestart || a.needsRedeploy);
+    const bProblem = b.status !== "running" || Boolean(b.needsRestart || b.needsRedeploy);
+    return Number(bProblem) - Number(aProblem) || a.name.localeCompare(b.name);
+  });
+
+  return (
+    <section className="grid min-w-0 gap-3 xl:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.28fr)] xl:items-start">
+      <div className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
+        <ModuleHeader module={module} stats={<MetricPill label="resources" value={String(candidates.length)} accent />} />
+        <ResourceSection title="Choose app" count={candidates.length} />
+        {candidates.length === 0 ? <p className="px-4 py-5 text-sm text-muted">No app resources are registered yet. Add one from Apps to populate this module.</p> : null}
+        {candidates.map((item) => (
+          <button key={item.id} type="button" onClick={() => { onSelect(item.id); if (module === "logs") onLogs(item); }} className={`block w-full border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/[0.035] ${FOCUS_RING} ${selectedAppId === item.id ? "bg-white/[0.055] shadow-[3px_0_0_0_var(--accent)_inset]" : ""}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold">{item.name}</p>
+                <p className="mt-1 truncate font-mono text-[11px] text-muted">{item.driver} · {item.port ? `:${item.port}` : "no port"}</p>
+              </div>
+              <StatusBadge status={item.status} />
+            </div>
+          </button>
+        ))}
+      </div>
+      <DetailPanel activeTab={activeTab} app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />
+    </section>
+  );
+}
+
+function MetricsModule({ app, apps, appResources, connected, currentAction, deploying, deploymentLogs, deploymentLogsError, deploymentLogsLoading, deployments, domains, github, hostMetrics, hostMetricsError, logs, logsError, logsLoading, onAction, onDeploy, onDeploymentLogs, onEdit, onReload, onSelect, selectedAppId }: { app: DaemonApp | null; apps: DaemonApp[]; appResources: DaemonApp[]; connected: boolean; currentAction?: AppAction | null; deploying: boolean; deploymentLogs: DeploymentLogsResponse | null; deploymentLogsError: string | null; deploymentLogsLoading: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; github: DaemonGithubStatus | null; hostMetrics: DaemonMetricSample[]; hostMetricsError: string | null; logs: DaemonAppLogsResponse | null; logsError: string | null; logsLoading: boolean; onAction?: (action: AppAction) => void; onDeploy?: () => void; onDeploymentLogs: (deployment: DaemonDeployment) => void; onEdit?: () => void; onReload?: () => void; onSelect: (id: number) => void; selectedAppId: number | null }) {
+  const latestHostMetric = hostMetrics[0] || null;
+  const candidates = [...(appResources.length ? appResources : apps)].sort((a, b) => a.name.localeCompare(b.name));
+
+  return (
+    <section className="grid min-w-0 gap-3 xl:grid-cols-[minmax(300px,0.78fr)_minmax(0,1.22fr)] xl:items-start">
+      <div className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
+        <ModuleHeader module="metrics" stats={<><ReadinessCard label="Host samples" value={String(hostMetrics.length)} status={hostMetrics.length ? "ok" : "warn"} /><ReadinessCard label="CPU" value={latestHostMetric?.cpuPercent == null ? "-" : `${latestHostMetric.cpuPercent.toFixed(1)}%`} status="ok" /><ReadinessCard label="RAM" value={latestHostMetric ? formatBytes(latestHostMetric.memoryBytes) : "-"} status="ok" /></>} />
+        {hostMetricsError ? <Alert title="Metrics unavailable" message={hostMetricsError} /> : null}
+        <ResourceSection title="Host samples" count={hostMetrics.length} />
+        {hostMetrics.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No host metric samples are available yet. App metrics load from the selected app panel.</div> : null}
+        {hostMetrics.slice(0, 6).map((sample) => <MetricSampleRow key={sample.id} sample={sample} />)}
+        <ResourceSection title="App samples" count={candidates.length} />
+        {candidates.map((item) => (
+          <button key={item.id} type="button" onClick={() => onSelect(item.id)} className={`block w-full border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/[0.035] ${FOCUS_RING} ${selectedAppId === item.id ? "bg-white/[0.055] shadow-[3px_0_0_0_var(--accent)_inset]" : ""}`}>
+            <div className="flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold">{item.name}</p>
+                <p className="mt-1 truncate font-mono text-[11px] text-muted">{item.driver} · {item.port ? `:${item.port}` : "no port"}</p>
+              </div>
+              <StatusBadge status={item.status} />
+            </div>
+          </button>
+        ))}
+      </div>
+      <DetailPanel activeTab="metrics" app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />
+    </section>
+  );
+}
+
+function MetricSampleRow({ sample }: { sample: DaemonMetricSample }) {
+  return (
+    <div className="border-b border-white/5 px-4 py-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-sm font-bold capitalize">{sample.scope}</p>
+        <p className="text-[11px] text-muted">{timeAgo(sample.sampledAt)}</p>
+      </div>
+      <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-muted sm:grid-cols-4">
+        <span>CPU <strong className="text-foreground">{sample.cpuPercent == null ? "-" : `${sample.cpuPercent.toFixed(1)}%`}</strong></span>
+        <span>RAM <strong className="text-foreground">{formatBytes(sample.memoryBytes)}</strong></span>
+        <span>Disk <strong className="text-foreground">{formatBytes(sample.diskUsedBytes)}</strong></span>
+        <span>Net <strong className="text-foreground">{formatBytes(sample.networkRxBytes)} / {formatBytes(sample.networkTxBytes)}</strong></span>
+      </div>
+      {sample.message ? <p className="mt-2 truncate text-[11px] text-muted">{sample.message}</p> : null}
+    </div>
+  );
+}
+
+function DeploymentsModule({ apps, connected, deployments, deployingByAppId, error, latestByAppId, onDeploy, onLogs, server }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; deployingByAppId: Record<number, boolean>; error: string | null; latestByAppId: Map<number, DaemonDeployment>; onDeploy: (app: DaemonApp) => void; onLogs: (deployment: DaemonDeployment) => void; server: DaemonServerStatus | null }) {
+  const dockerReady = Boolean(server?.readiness?.checks.some((check) => check.id === "docker" && check.status === "ok"));
+  const ready = connected && dockerReady && Boolean(server?.dataDir) && Boolean(!server?.auth.required || server.auth.configured);
+  return (
+    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
+      <ModuleHeader module="deployments" stats={<><ReadinessCard label="Docker" value={dockerReady ? "ready" : "check"} status={dockerReady ? "ok" : "warn"} /><ReadinessCard label="History" value={String(deployments.length)} status={deployments.length ? "ok" : "warn"} /><ReadinessCard label="Failed" value={String(deployments.filter((item) => item.status === "failed").length)} status={deployments.some((item) => item.status === "failed") ? "error" : "ok"} /></>} />
+      {error ? <Alert title="Deployment action failed" message={error} /> : null}
+      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
+        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
+          <ResourceSection title="Deployable Dockerfile apps" count={apps.length} />
+          {apps.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No app uses the Dockerfile driver yet. Edit an app in Apps when its Dockerfile path is stable.</div> : null}
+          {apps.map((app) => {
+            const latest = latestByAppId.get(app.id);
+            const deploying = Boolean(deployingByAppId[app.id]);
+            return <div key={app.id} className="grid gap-3 border-b border-white/5 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-bold">{app.name}</p>{latest ? <StatusBadge status={latest.status} /> : <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">never deployed</span>}</div><p className="mt-1 truncate font-mono text-[11px] text-muted">{shortPath(app.path)} · {latest?.hostPort ? `http://127.0.0.1:${latest.hostPort}` : "temporary URL after deploy"}</p></div><div className="flex flex-wrap gap-2 md:justify-end">{latest ? <PillButton onClick={() => onLogs(latest)}>Logs</PillButton> : null}<PillButton strong onClick={() => onDeploy(app)} disabled={!ready || deploying || !app.enabled}>{deploying ? "Deploying" : "Deploy"}</PillButton></div></div>;
+          })}
+        </div>
+        <div className="min-w-0"><ResourceSection title="Deployment history" count={deployments.length} />{deployments.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Deployment history appears after the first Dockerfile deploy.</div> : deployments.map((deployment) => <DeploymentSummaryRow key={deployment.id} deployment={deployment} onLogs={() => onLogs(deployment)} />)}</div>
+      </div>
+    </section>
+  );
+}
+
+function DomainsModule({ apps, connected, domains, domainsError, domainsMeta, domainActionByHostname, domainForm, domainSaving, onAddDomain, onDomainFormChange, onRemoveDomain, onRootDomainChange, onSaveRootDomain, onVerifyDomain, proxyRoutes, rootDomainInput }: { apps: DaemonApp[]; connected: boolean; domains: DaemonDomain[]; domainsError: string | null; domainsMeta: { rootDomain: string | null; serverPublicIp: string | null }; domainActionByHostname: Record<string, string | null>; domainForm: { appId: string; hostname: string }; domainSaving: boolean; onAddDomain: () => void; onDomainFormChange: (form: { appId: string; hostname: string }) => void; onRemoveDomain: (domain: DaemonDomain) => void; onRootDomainChange: (value: string) => void; onSaveRootDomain: () => void; onVerifyDomain: (domain: DaemonDomain) => void; proxyRoutes: DaemonProxyRoute[]; rootDomainInput: string }) {
+  return (
+    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
+      <ModuleHeader module="domains" stats={<><ReadinessCard label="Root" value={domainsMeta.rootDomain || "unset"} status={domainsMeta.rootDomain ? "ok" : "warn"} /><ReadinessCard label="Hosts" value={String(domains.length)} status={domains.length ? "ok" : "warn"} /><ReadinessCard label="Routes" value={String(proxyRoutes.filter((route) => route.enabled).length)} status={proxyRoutes.some((route) => route.enabled) ? "ok" : "warn"} /></>} />
+      {domainsError ? <Alert title="Domain or proxy action failed" message={domainsError} /> : null}
+      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.85fr)_minmax(340px,1.15fr)]">
+        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
+          <ResourceSection title="Root domain" count={domainsMeta.rootDomain ? 1 : 0} />
+          <div className="border-b border-white/5 px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"><Field label="Root domain" value={rootDomainInput} onChange={onRootDomainChange} placeholder="example.com" disabled={!connected || domainSaving} /><div className="flex items-end"><PillButton onClick={onSaveRootDomain} disabled={!connected || domainSaving || !rootDomainInput.trim()} strong>Save root</PillButton></div></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Server IP" value={domainsMeta.serverPublicIp || "set ROUTELY_SERVER_PUBLIC_IP"} mono /><Meta label="Wildcard" value={domainsMeta.rootDomain ? `*.${domainsMeta.rootDomain}` : "set root domain"} mono /></div></div>
+          <ResourceSection title="Add hostname" count={apps.length} />
+          <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]"><label><span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">App</span><select value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</select></label><Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} /><div className="flex items-end"><PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton></div></div></div>
+        </div>
+        <div className="min-w-0"><ResourceSection title="Hostnames" count={domains.length} />{domains.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS verification creates proxy route state.</div> : domains.map((domain) => { const action = domainActionByHostname[domain.hostname]; const route = proxyRoutes.find((item) => item.domainId === domain.id); return <div key={domain.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{domain.hostname}</p><p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {route?.targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p></div><StatusBadge status={domain.status} /></div><div className="mt-3 grid grid-cols-3 gap-2"><ReadinessCard label="DNS" value={domain.dnsStatus} status={domain.dnsStatus === "verified" ? "ok" : "warn"} /><ReadinessCard label="TLS" value={domain.tlsStatus} status={domain.tlsStatus === "active" || domain.tlsStatus === "issuing" ? "ok" : "warn"} /><ReadinessCard label="Proxy" value={route?.enabled ? "ready" : "pending"} status={route?.enabled ? "ok" : "warn"} /></div>{domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton><ActionLink href={domain.status === "ready" ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink><PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton></div></div>; })}</div>
+      </div>
+    </section>
+  );
+}
+
+function GithubModule({ apps, connected, github, githubError, githubForm, githubSaving, onGithubConnect, onGithubFormChange }: { apps: DaemonApp[]; connected: boolean; github: DaemonGithubStatus | null; githubError: string | null; githubForm: { appId: string; fullName: string; branch: string; autoDeploy: boolean }; githubSaving: boolean; onGithubConnect: () => void; onGithubFormChange: (form: { appId: string; fullName: string; branch: string; autoDeploy: boolean }) => void }) {
+  return (
+    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
+      <ModuleHeader module="github" stats={<><ReadinessCard label="App" value={github?.configured ? "configured" : "missing"} status={github?.configured ? "ok" : "warn"} /><ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} /><ReadinessCard label="Repos" value={String(github?.repositories.length || 0)} status={github?.repositories.length ? "ok" : "warn"} /></>} />
+      {githubError ? <Alert title="GitHub action failed" message={githubError} /> : null}
+      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]"><div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Connect repository" count={apps.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_110px_auto]"><label><span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">App</span><select value={githubForm.appId} onChange={(event) => onGithubFormChange({ ...githubForm, appId: event.target.value })} disabled={!connected || githubSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</select></label><Field label="Repository" value={githubForm.fullName} onChange={(value) => onGithubFormChange({ ...githubForm, fullName: value })} placeholder="owner/repo" disabled={!connected || githubSaving} /><Field label="Branch" value={githubForm.branch} onChange={(value) => onGithubFormChange({ ...githubForm, branch: value })} placeholder="main" disabled={!connected || githubSaving} /><div className="flex items-end"><PillButton onClick={onGithubConnect} disabled={!connected || githubSaving || !githubForm.appId || !githubForm.fullName.trim()} strong>{githubSaving ? "Saving" : "Connect"}</PillButton></div></div><label className="mt-3 flex items-center justify-between gap-3 rounded-md bg-black/20 px-3 py-2 text-xs"><span><span className="font-bold">Auto deploy on push</span><span className="block text-muted">Only matching branch push events queue deployments.</span></span><input type="checkbox" checked={githubForm.autoDeploy} onChange={(event) => onGithubFormChange({ ...githubForm, autoDeploy: event.target.checked })} disabled={githubSaving} className="h-4 w-4 accent-[var(--accent)]" /></label></div></div><div className="min-w-0"><ResourceSection title="Repositories" count={github?.repositories.length || 0} />{github?.repositories.length ? github.repositories.map((repo) => <div key={repo.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{repo.fullName}</p><p className="mt-1 text-[11px] text-muted">{repo.connectedAppName || "not connected"} · {repo.selectedBranch || repo.defaultBranch || "branch not set"} · {repo.private ? "private" : "public"}</p></div><StatusBadge status={repo.autoDeployEnabled ? "running" : "stopped"} /></div></div>) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Connect a repository to store source metadata and enable signed push-to-deploy.</div>}<ResourceSection title="Webhook deliveries" count={github?.deliveries.length || 0} />{github?.deliveries.length ? github.deliveries.slice(0, 12).map((delivery) => <TimelineRow key={delivery.deliveryId} title={delivery.repo || delivery.event} detail={`${delivery.status} · ${delivery.branch || "-"} · ${delivery.commitSha?.slice(0, 7) || "no commit"} · ${timeAgo(delivery.receivedAt)}`} tone={delivery.status === "accepted" || delivery.status === "deployed" ? "ok" : delivery.status === "failed" ? "error" : "warn"} />) : <div className="px-4 py-5 text-sm text-muted">Signed push deliveries appear here after GitHub sends webhooks.</div>}</div></div>
+    </section>
+  );
+}
+
+function DatabasesModule({ connected, databaseActionById, databaseForm, databaseSaving, databases, databasesError, onCreateDatabase, onDatabaseAction, onDatabaseFormChange }: { connected: boolean; databaseActionById: Record<number, string | null>; databaseForm: { type: string; name: string }; databaseSaving: boolean; databases: DaemonDatabase[]; databasesError: string | null; onCreateDatabase: () => void; onDatabaseAction: (database: DaemonDatabase, action: "start" | "stop") => void; onDatabaseFormChange: (form: { type: string; name: string }) => void }) {
+  return (
+    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
+      <ModuleHeader module="databases" stats={<><ReadinessCard label="Records" value={String(databases.length)} status={databases.length ? "ok" : "warn"} /><ReadinessCard label="Running" value={String(databases.filter((database) => database.status === "running").length)} status={databases.some((database) => database.status === "running") ? "ok" : "warn"} /><ReadinessCard label="Network" value="internal" status="ok" /></>} />
+      {databasesError ? <Alert title="Database action failed" message={databasesError} /> : null}
+      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.72fr)_minmax(340px,1.28fr)]">
+        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
+          <ResourceSection title="Create database" count={5} />
+          <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]"><label><span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Type</span><select value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>{["postgres", "mysql", "mariadb", "redis", "mongodb"].map((type) => <option key={type} value={type}>{type}</option>)}</select></label><Field label="Name" value={databaseForm.name} onChange={(value) => onDatabaseFormChange({ ...databaseForm, name: value })} placeholder="postgres" disabled={!connected || databaseSaving} /><div className="flex items-end"><PillButton strong onClick={onCreateDatabase} disabled={!connected || databaseSaving || !databaseForm.name.trim()}>{databaseSaving ? "Creating" : "Create"}</PillButton></div></div><p className="mt-3 text-xs text-muted">Database services are Compose-backed and internal-only by default. The UI shows env key names, never raw values.</p></div>
+        </div>
+        <div className="min-w-0"><ResourceSection title="Database services" count={databases.length} />{databases.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No production database records yet. Create one to add a Compose-backed internal service.</div> : databases.map((database) => { const busy = databaseActionById[database.id]; const running = database.status === "running"; return <div key={database.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{database.name}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{database.image || database.type} · {database.composeService || "compose"} · {database.volumeName || "volume pending"}</p></div><StatusBadge status={database.status} /></div><div className="mt-2 grid grid-cols-3 gap-2"><ReadinessCard label="Network" value={database.internal ? "internal" : "public"} status={database.internal ? "ok" : "error"} /><ReadinessCard label="Port" value={database.port ? `:${database.port}` : "none"} status="ok" /><ReadinessCard label="Env" value={`${database.envKeys.length} keys`} status="ok" /></div>{database.envKeys.length ? <p className="mt-2 break-all font-mono text-[11px] text-muted">{database.envKeys.join(", ")}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onDatabaseAction(database, "start")} disabled={!connected || Boolean(busy) || running}>{busy === "start" ? "Starting" : "Start"}</PillButton><PillButton onClick={() => onDatabaseAction(database, "stop")} disabled={!connected || Boolean(busy) || !running}>{busy === "stop" ? "Stopping" : "Stop"}</PillButton></div></div>; })}</div>
+      </div>
+    </section>
+  );
+}
+
+function BackupsModule({ backupActionById, backupForm, backupJobs, backupRuns, backupsError, connected, databases, onBackupFormChange, onEnableBackup, onRunBackup, onToggleBackup }: { backupActionById: Record<number, string | null>; backupForm: { databaseId: string; schedule: string; retentionDays: string }; backupJobs: DaemonBackupJob[]; backupRuns: DaemonBackupRun[]; backupsError: string | null; connected: boolean; databases: DaemonDatabase[]; onBackupFormChange: (form: { databaseId: string; schedule: string; retentionDays: string }) => void; onEnableBackup: () => void; onRunBackup: (job: DaemonBackupJob) => void; onToggleBackup: (job: DaemonBackupJob, enabled: boolean) => void }) {
+  const latestRun = backupRuns[0] || null;
+  const failedRuns = backupRuns.filter((run) => run.status === "failed");
+  return (
+    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
+      <ModuleHeader module="backups" stats={<><ReadinessCard label="Jobs" value={String(backupJobs.length)} status={backupJobs.length ? "ok" : "warn"} /><ReadinessCard label="Latest" value={latestRun?.status || "never"} status={latestRun?.status === "succeeded" ? "ok" : latestRun?.status === "failed" ? "error" : "warn"} /><ReadinessCard label="Failed" value={String(failedRuns.length)} status={failedRuns.length ? "error" : "ok"} /></>} />
+      {backupsError ? <Alert title="Backup action failed" message={backupsError} /> : null}
+      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]">
+        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Enable backup job" count={databases.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.9fr)_minmax(0,1fr)_100px_auto]"><label><span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Database</span><select value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}><option value="">Choose</option>{databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}</select></label><Field label="Schedule" value={backupForm.schedule} onChange={(value) => onBackupFormChange({ ...backupForm, schedule: value })} placeholder="0 2 * * *" disabled={!connected} mono /><Field label="Keep days" value={backupForm.retentionDays} onChange={(value) => onBackupFormChange({ ...backupForm, retentionDays: value })} placeholder="7" disabled={!connected} type="number" /><div className="flex items-end"><PillButton strong onClick={onEnableBackup} disabled={!connected || !backupForm.databaseId}>Enable</PillButton></div></div><p className="mt-3 text-xs text-muted">Backups write local files only. Restore automation and external storage are later checkpoint scope.</p></div><ResourceSection title="Backup jobs" count={backupJobs.length} />{backupJobs.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Enable backups for a database to schedule local backup files and run manual backups.</div> : backupJobs.map((job) => { const busy = backupActionById[job.id]; return <div key={job.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{job.databaseName || `database ${job.databaseId}`}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{job.schedule || "manual only"} · retain {job.retentionDays}d · {job.localDir || "default backup dir"}</p></div><StatusBadge status={job.enabled ? "running" : "stopped"} /></div>{job.lastRunMessage ? <p className="mt-2 text-xs text-muted">Last run: {job.lastRunStatus || "unknown"} · {job.lastRunAt ? timeAgo(job.lastRunAt) : "never"} · {job.lastRunMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onRunBackup(job)} disabled={!connected || Boolean(busy)}>{busy === "run" ? "Running" : "Run now"}</PillButton><PillButton onClick={() => onToggleBackup(job, !job.enabled)} disabled={!connected || Boolean(busy)}>{job.enabled ? "Disable" : "Enable"}</PillButton></div></div>; })}</div>
+        <div className="min-w-0"><ResourceSection title="Backup runs" count={backupRuns.length} />{backupRuns.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Backup run history appears after a manual or scheduled run.</div> : backupRuns.map((run) => <div key={run.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">#{run.id} {run.databaseName || `database ${run.databaseId}`}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{run.trigger} · {run.finishedAt ? timeAgo(run.finishedAt) : timeAgo(run.createdAt)} · {formatBytes(run.sizeBytes)}</p></div><StatusBadge status={run.status} /></div><p className="mt-2 break-all text-xs text-muted">{run.filePath || run.message || "no backup file"}</p></div>)}</div>
+      </div>
+    </section>
   );
 }
 
@@ -1779,11 +1857,12 @@ function CheckRow({ check }: { check: DaemonServerCheck }) {
 
 function MobileNav({ activeModule, connected, onSelect }: { activeModule: ModuleKey; connected: boolean; onSelect: (module: ModuleKey) => void }) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 gap-1 border-t border-white/5 bg-[#121212]/95 px-2 py-2 shadow-[rgba(0,0,0,0.5)_0px_-8px_24px] backdrop-blur lg:hidden">
-      <MobileNavItem active={activeModule === "overview"} label="Home" onClick={() => onSelect("overview")} />
-      <MobileNavItem active={activeModule === "apps" || activeModule === "logs"} label="Apps" onClick={() => onSelect("apps")} />
-      <MobileNavItem active={activeModule === "deployments" || activeModule === "domains" || activeModule === "github"} label="Prod" onClick={() => onSelect("deployments")} />
-      <MobileNavItem active={activeModule === "settings"} label={connected ? "Settings" : "Offline"} onClick={() => onSelect("settings")} status={connected} />
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/5 bg-[#121212]/95 px-2 py-2 shadow-[rgba(0,0,0,0.5)_0px_-8px_24px] backdrop-blur lg:hidden">
+      <div className="flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {MODULES.map((module) => (
+          <MobileNavItem key={module.key} active={activeModule === module.key} label={module.label} onClick={() => onSelect(module.key)} status={module.key === "settings" ? connected : undefined} />
+        ))}
+      </div>
     </nav>
   );
 }
@@ -1889,6 +1968,8 @@ function AppRow({
   );
 }
 
+// Kept during the IA split as reference for the older combined production panel.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function ProductionDeployPanel({
   apps,
   connected,
@@ -2157,6 +2238,8 @@ function DeploymentSummaryRow({ deployment, onLogs }: { deployment: DaemonDeploy
   );
 }
 
+// Kept during the IA split as reference for the older combined data panel.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function DatabaseBackupPanel({
   backupActionById,
   backupForm,
@@ -2315,6 +2398,7 @@ function DatabaseBackupPanel({
 }
 
 function DetailPanel({
+  activeTab,
   app,
   connected,
   currentAction,
@@ -2334,6 +2418,7 @@ function DetailPanel({
   onEdit,
   onReload
 }: {
+  activeTab?: InspectorTab;
   app: DaemonApp | null;
   connected: boolean;
   currentAction?: AppAction | null;
@@ -2353,7 +2438,7 @@ function DetailPanel({
   onEdit?: () => void;
   onReload?: () => void;
 }) {
-  const [tab, setTab] = useState<"overview" | "health" | "deployments" | "domains" | "proxy" | "github" | "env" | "logs" | "config">("overview");
+  const [tab, setTab] = useState<InspectorTab>(activeTab || "overview");
   const [appEnv, setAppEnv] = useState<AppEnvResponse["env"] | null>(null);
   const [appHealth, setAppHealth] = useState<AppHealthResponse["health"] | null>(null);
   const [healthError, setHealthError] = useState<string | null>(null);
@@ -2365,6 +2450,7 @@ function DetailPanel({
   const [envLoading, setEnvLoading] = useState(false);
   const [envSaving, setEnvSaving] = useState(false);
   const [envForm, setEnvForm] = useState({ key: "", value: "", isSecret: true, scope: "all" });
+  const selectedTab = activeTab || tab;
 
   const loadEnv = useCallback(async (target: DaemonApp) => {
     setEnvLoading(true);
@@ -2498,12 +2584,12 @@ function DetailPanel({
       </div>
 
       <div className="grid grid-cols-3 gap-1 border-b border-white/5 bg-black/20 px-2 py-2 sm:grid-cols-4">
-        {(["overview", "health", "deployments", "domains", "proxy", "github", "env", "logs", "config"] as const).map((item) => (
-          <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-full px-2 py-1.5 text-[11px] font-bold capitalize ${FOCUS_RING} ${tab === item ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground"}`}>{item}</button>
+        {(["overview", "health", "metrics", "deployments", "domains", "proxy", "github", "env", "logs", "config"] as const).map((item) => (
+          <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-full px-2 py-1.5 text-[11px] font-bold capitalize ${FOCUS_RING} ${selectedTab === item ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground"}`}>{item}</button>
         ))}
       </div>
 
-      {tab === "overview" ? (
+      {selectedTab === "overview" ? (
         <div className="px-4 py-4">
           <div className="mb-4 grid grid-cols-3 gap-2">
             <ReadinessCard label="Health" value={healthStatus} status={healthStatus === "healthy" ? "ok" : healthStatus === "unknown" ? "warn" : "error"} />
@@ -2526,18 +2612,17 @@ function DetailPanel({
         </div>
       ) : null}
 
-      {tab === "health" ? (
+      {selectedTab === "health" ? (
         <div>
           <div className="border-b border-white/5 px-4 py-3">
             <div className="grid grid-cols-3 gap-2">
               <ReadinessCard label="State" value={healthStatus} status={healthStatus === "healthy" ? "ok" : healthStatus === "unknown" ? "warn" : "error"} />
               <ReadinessCard label="Response" value={appHealth?.checks[0]?.responseTimeMs == null ? "-" : `${appHealth.checks[0].responseTimeMs}ms`} status="ok" />
-              <ReadinessCard label="Samples" value={String(appMetrics.length)} status={appMetrics.length ? "ok" : "warn"} />
+              <ReadinessCard label="Checks" value={String(appHealth?.checks.length || 0)} status={appHealth?.checks.length ? "ok" : "warn"} />
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <PillButton onClick={() => void loadHealthAndMetrics(app)} disabled={!connected || healthLoading || metricsLoading}>{healthLoading || metricsLoading ? "Refreshing" : "Refresh health"}</PillButton>
               {healthError ? <span className="text-xs text-negative">{healthError}</span> : null}
-              {metricsError && metricsError !== healthError ? <span className="text-xs text-negative">{metricsError}</span> : null}
             </div>
           </div>
 
@@ -2559,32 +2644,33 @@ function DetailPanel({
               </div>
             </div>
           ))}
+        </div>
+      ) : null}
 
+      {selectedTab === "metrics" ? (
+        <div>
           <div className="border-b border-white/5 px-4 py-3">
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Metrics samples</p>
+            <div className="grid grid-cols-3 gap-2">
+              <ReadinessCard label="Samples" value={String(appMetrics.length)} status={appMetrics.length ? "ok" : "warn"} />
+              <ReadinessCard label="CPU" value={latestMetric?.cpuPercent == null ? "-" : `${latestMetric.cpuPercent.toFixed(1)}%`} status="ok" />
+              <ReadinessCard label="Memory" value={latestMetric ? formatBytes(latestMetric.memoryBytes) : "-"} status="ok" />
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <PillButton onClick={() => void loadHealthAndMetrics(app)} disabled={!connected || healthLoading || metricsLoading}>{metricsLoading ? "Refreshing" : "Refresh metrics"}</PillButton>
+              {metricsError ? <span className="text-xs text-negative">{metricsError}</span> : null}
+            </div>
+          </div>
+          <div className="border-b border-white/5 px-4 py-3">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Container and app samples</p>
             <div className="mt-3 grid gap-2">
-              {appMetrics.length === 0 ? <p className="text-sm text-muted">No metrics sampled yet.</p> : null}
-              {appMetrics.slice(0, 6).map((sample) => (
-                <div key={sample.id} className="rounded-md bg-black/25 px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.045)_inset]">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-xs font-bold capitalize">{sample.scope}</p>
-                    <p className="text-[11px] text-muted">{timeAgo(sample.sampledAt)}</p>
-                  </div>
-                  <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-muted">
-                    <span>CPU <strong className="text-foreground">{sample.cpuPercent == null ? "-" : `${sample.cpuPercent.toFixed(1)}%`}</strong></span>
-                    <span>RAM <strong className="text-foreground">{formatBytes(sample.memoryBytes)} / {formatBytes(sample.memoryLimitBytes)}</strong></span>
-                    <span>Disk <strong className="text-foreground">{formatBytes(sample.diskUsedBytes)} / {formatBytes(sample.diskTotalBytes)}</strong></span>
-                    <span>Net <strong className="text-foreground">{formatBytes(sample.networkRxBytes)} / {formatBytes(sample.networkTxBytes)}</strong></span>
-                  </div>
-                  {sample.message ? <p className="mt-2 truncate text-[11px] text-muted">{sample.message}</p> : null}
-                </div>
-              ))}
+              {appMetrics.length === 0 ? <p className="text-sm text-muted">No metrics sampled yet. Refresh metrics to collect available host or container data for this app.</p> : null}
+              {appMetrics.slice(0, 10).map((sample) => <MetricSampleRow key={sample.id} sample={sample} />)}
             </div>
           </div>
         </div>
       ) : null}
 
-      {tab === "deployments" ? (
+      {selectedTab === "deployments" ? (
         <div>
           {deployments.length === 0 ? <div className="px-4 py-6 text-sm text-muted">No deployments recorded for this app.</div> : deployments.map((deployment) => (
             <DeploymentTimeline key={deployment.id} deployment={deployment} onLogs={onDeploymentLogs ? () => onDeploymentLogs(deployment) : undefined} />
@@ -2592,7 +2678,7 @@ function DetailPanel({
         </div>
       ) : null}
 
-      {tab === "domains" ? (
+      {selectedTab === "domains" ? (
         <div>
           {domains.length === 0 ? <div className="px-4 py-6 text-sm text-muted">No domains are attached to this app.</div> : domains.map((domain) => (
             <div key={domain.id} className="border-b border-white/5 px-4 py-3">
@@ -2608,7 +2694,7 @@ function DetailPanel({
         </div>
       ) : null}
 
-      {tab === "proxy" ? (
+      {selectedTab === "proxy" ? (
         <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
           <Meta label="Proxy exposure" value={app.internal || app.type === "database" ? "blocked" : "allowed after DNS verification"} />
           <Meta label="HTTPS" value={domains.some((domain) => domain.tlsStatus === "issuing" || domain.tlsStatus === "active") ? "route generated" : "pending"} />
@@ -2616,7 +2702,7 @@ function DetailPanel({
         </dl>
       ) : null}
 
-      {tab === "github" ? (
+      {selectedTab === "github" ? (
         <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
           <Meta label="GitHub App" value={github?.configured ? "configured" : "not configured"} />
           <Meta label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing secret"} />
@@ -2627,7 +2713,7 @@ function DetailPanel({
         </dl>
       ) : null}
 
-      {tab === "env" ? (
+      {selectedTab === "env" ? (
         <div>
           <div className="border-b border-white/5 px-4 py-3">
             <div className="grid grid-cols-3 gap-2">
@@ -2686,7 +2772,7 @@ function DetailPanel({
         </div>
       ) : null}
 
-      {tab === "config" ? (
+      {selectedTab === "config" ? (
         <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
           <Meta label="Enabled" value={app.enabled ? "yes" : "no"} />
           <Meta label="Internal" value={app.internal ? "yes" : "no"} />
@@ -2704,7 +2790,7 @@ function DetailPanel({
         </dl>
       ) : null}
 
-      {tab === "logs" ? <div className="border-t border-white/5">
+      {selectedTab === "logs" ? <div className="border-t border-white/5">
         <div className="flex items-center justify-between gap-3 px-4 py-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Recent logs</p>
@@ -2963,7 +3049,7 @@ function NavItem({ active, disabled, dot, label, onClick }: { active?: boolean; 
 
 function MobileNavItem({ active, disabled, label, onClick, status }: { active?: boolean; disabled?: boolean; label: string; onClick?: () => void; status?: boolean }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`flex h-10 items-center justify-center rounded-full text-xs font-bold transition disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised text-foreground" : disabled ? "text-muted/50" : "text-muted"}`}>
+    <button type="button" onClick={onClick} disabled={disabled} className={`flex h-10 shrink-0 items-center justify-center rounded-full px-3 text-xs font-bold transition disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised text-foreground" : disabled ? "text-muted/50" : "text-muted"}`}>
       {status != null ? <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${status ? "bg-accent" : "bg-negative"}`} aria-hidden="true" /> : null}
       {label}
     </button>

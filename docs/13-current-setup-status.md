@@ -2,7 +2,7 @@
 
 Version: 0.1  
 Status: Active setup note  
-Last updated: 2026-06-18
+Last updated: 2026-06-19
 Environment: Fedora Linux, npm, Node.js via NVM
 
 ## English
@@ -138,6 +138,12 @@ Product references for future work:
 - CLI notification operations now include `routely notify ls`, `routely notify add <webhook|discord|telegram>`, `routely notify test <channel-id>`, and `routely notify disable <channel-id>`.
 - Next.js same-origin route handlers proxy notification endpoints under `/api/*`; browser code still does not call the daemon directly.
 - The dashboard now has clickable sidebar/mobile feature modules, an overview-only home, and a real Settings -> Notifications panel backed by daemon/storage data.
+- The latest dashboard UI/IA pass splits the implemented operational surface into clear modules: Overview, Apps, Deployments, Domains, GitHub, Env, Logs, Health, Metrics, Databases, Backups, and Settings.
+- Overview is now summary-only: server readiness, fleet counts, recent deployment/health/backup status, notification-adjacent next actions, and links into modules. Full workflows live in their modules.
+- Apps keeps the local registry, lifecycle controls, add/edit form, dense rows, and selected app inspector. App-scoped Env, Logs, Health, and Metrics are reachable as dedicated navigation modules backed by the existing app inspector data.
+- Metrics now has a metrics-first module view backed by the real `/api/metrics` host sample route plus selected-app metric samples. Logs auto-load the selected app runtime log when entering the Logs module.
+- Production and data operations are no longer crowded into mixed panels: Deployments, Domains, GitHub, Databases, and Backups each render their own real-data module with focused headers, status cards, rows, empty states, and row-local actions.
+- Mobile navigation is now a swipeable module rail exposing every required module instead of grouping features under broad shortcuts.
 - Restore automation, external backup storage, full rollback, marketplace templates, email notifications, and broad VPS operations remain deferred.
 
 ## Current Structure

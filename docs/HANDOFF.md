@@ -177,6 +177,12 @@ Checkpoint 11 is now implemented as a conservative notifications and release-pol
 - CLI additions are backed by daemon/storage data: `routely notify ls`, `routely notify add ...`, `routely notify test <channel-id>`, and `routely notify disable <channel-id>`.
 - Next.js same-origin route handlers proxy notification endpoints under `/api/*`.
 - The dashboard now has clickable sidebar/mobile modules and keeps the home as an overview. Settings includes a real Notifications panel with channel creation, enable/disable, test delivery, and delivery attempt history.
+- The dashboard UI/IA has been refactored into distinct operational modules for the implemented surface: Overview, Apps, Deployments, Domains, GitHub, Env, Logs, Health, Metrics, Databases, Backups, and Settings.
+- Overview is intentionally summary-only: server readiness, fleet counts, recent deployments, health failures, backup status, and urgent next actions with links into the feature modules.
+- Feature workflows are separated into module screens backed by existing same-origin `/api/*` data. Apps owns local registry/lifecycle/add-edit/inspector; Deployments owns Dockerfile deploy actions/history/log access; Domains owns root domain, hostnames, DNS/proxy/HTTPS state; GitHub owns repo connections and webhook deliveries; Databases and Backups are separate; Settings owns notifications.
+- App-scoped Env, Logs, Health, and Metrics are reachable from navigation and reuse the selected-app inspector data rather than being hidden inside the Apps view.
+- Metrics has a metrics-first module backed by the existing `/api/metrics` host samples plus selected-app metric samples; Logs auto-loads the selected app runtime log on module entry.
+- Mobile navigation now exposes all modules through a compact horizontal module rail.
 - Generic webhook, Discord webhook, and Telegram are supported. Email, rollback, marketplace templates, destructive restore automation, external backup storage, and broad VPS operations remain deferred.
 
 Verification performed for Checkpoint 11:
@@ -186,6 +192,8 @@ Verification performed for Checkpoint 11:
 - `npm run build --workspace apps/cli` passed.
 - `npm run test --workspace apps/web` passed: 11 files, 30 tests.
 - `npx tsc --noEmit --project apps/web/tsconfig.json` passed.
+- For the dashboard UI/IA refactor, `npm run lint`, `npm run test --workspace apps/web`, and `npx tsc --noEmit --project apps/web/tsconfig.json` passed again.
+- Headless Chrome screenshot smoke checks were captured at desktop, tablet, and mobile widths against the running dashboard on `http://localhost:3030`; the overview remained summary-only, module navigation was visible, and the mobile module rail no longer exposed a visible horizontal scrollbar.
 - `node --check apps/daemon/src/server.js` passed.
 - `npm run build --workspace apps/web` was attempted and reached the known partial Turbopack output after successful compile and TypeScript (`Finished TypeScript...`) without a final exit marker; no `next build`/Turbopack process remained afterward.
 
