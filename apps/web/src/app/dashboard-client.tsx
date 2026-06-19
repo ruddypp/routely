@@ -2,6 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import { Alert as UiAlert } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { EmptyState as UiEmptyState } from "@/components/ui/empty-state";
+import { Field as UiField, TextAreaField as UiTextAreaField } from "@/components/ui/field";
+import { Select as UiSelect } from "@/components/ui/select";
+import { SkeletonRows } from "@/components/ui/skeleton";
 
 type DaemonApp = {
   id: number;
@@ -479,23 +486,9 @@ const MODULES: Array<{ key: ModuleKey; label: string; summary: string }> = [
   { key: "backups", label: "Backups", summary: "Jobs and run history" },
   { key: "settings", label: "Settings", summary: "Notifications and auth notes" }
 ];
-const PANEL_SHADOW = "shadow-[rgba(0,0,0,0.5)_0px_8px_24px]";
-const INSET_RING = "shadow-[rgb(18,18,18)_0px_1px_0px,rgb(124,124,124)_0px_0px_0px_1px_inset]";
+const PANEL_SHADOW = "shadow-[var(--panel-shadow)]";
+const INSET_RING = "shadow-[var(--inset-border)]";
 const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
-
-const STATUS_STYLES: Record<string, string> = {
-  running: "bg-accent/15 text-accent shadow-[0_0_0_1px_rgba(30,215,96,0.22)_inset]",
-  starting: "bg-info/15 text-info shadow-[0_0_0_1px_rgba(83,157,245,0.2)_inset]",
-  queued: "bg-info/15 text-info shadow-[0_0_0_1px_rgba(83,157,245,0.2)_inset]",
-  preparing: "bg-info/15 text-info shadow-[0_0_0_1px_rgba(83,157,245,0.2)_inset]",
-  building: "bg-warning/15 text-warning shadow-[0_0_0_1px_rgba(255,164,43,0.2)_inset]",
-  healthchecking: "bg-warning/15 text-warning shadow-[0_0_0_1px_rgba(255,164,43,0.2)_inset]",
-  succeeded: "bg-accent/15 text-accent shadow-[0_0_0_1px_rgba(30,215,96,0.22)_inset]",
-  failed: "bg-negative/15 text-negative shadow-[0_0_0_1px_rgba(243,114,127,0.2)_inset]",
-  stopped: "bg-white/10 text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]",
-  crashed: "bg-negative/15 text-negative shadow-[0_0_0_1px_rgba(243,114,127,0.2)_inset]",
-  unknown: "bg-white/10 text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.08)_inset]"
-};
 
 const blankForm: AppFormState = {
   name: "",
@@ -554,13 +547,7 @@ function formFromApp(app: DaemonApp): AppFormState {
 }
 
 function StatusBadge({ status }: { status: string }) {
-  const style = STATUS_STYLES[status] || STATUS_STYLES.unknown;
-  return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10.5px] font-bold capitalize ${style}`}>
-      <span className="h-1.5 w-1.5 rounded-full bg-current" aria-hidden="true" />
-      {status}
-    </span>
-  );
+  return <Badge status={status} variant="status">{status}</Badge>;
 }
 
 function timeAgo(iso: string | null): string {
@@ -1414,7 +1401,7 @@ export default function DashboardClient() {
 
 function Sidebar({ activeModule, connected, onSelect }: { activeModule: ModuleKey; connected: boolean; onSelect: (module: ModuleKey) => void }) {
   return (
-    <aside className={`hidden border-r border-white/5 bg-[#121212] px-3 py-4 ${PANEL_SHADOW} md:block`}>
+    <aside className={`hidden border-r border-white/5 bg-background px-3 py-4 ${PANEL_SHADOW} md:block`}>
       <div className="flex items-center gap-3 px-2">
         <div className="grid h-9 w-9 place-items-center rounded-full bg-accent text-sm font-black text-black">R</div>
         <div>
@@ -1591,7 +1578,7 @@ function DomainsModule({ apps, connected, domains, domainsError, domainsMeta, do
           <ResourceSection title="Root domain" count={domainsMeta.rootDomain ? 1 : 0} />
           <div className="border-b border-white/5 px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"><Field label="Root domain" value={rootDomainInput} onChange={onRootDomainChange} placeholder="example.com" disabled={!connected || domainSaving} /><div className="flex items-end"><PillButton onClick={onSaveRootDomain} disabled={!connected || domainSaving || !rootDomainInput.trim()} strong>Save root</PillButton></div></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Server IP" value={domainsMeta.serverPublicIp || "set ROUTELY_SERVER_PUBLIC_IP"} mono /><Meta label="Wildcard" value={domainsMeta.rootDomain ? `*.${domainsMeta.rootDomain}` : "set root domain"} mono /></div></div>
           <ResourceSection title="Add hostname" count={apps.length} />
-          <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]"><label><span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">App</span><select value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</select></label><Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} /><div className="flex items-end"><PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton></div></div></div>
+          <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]"><UiSelect value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} label="App"><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</UiSelect><Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} /><div className="flex items-end"><PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton></div></div></div>
         </div>
         <div className="min-w-0"><ResourceSection title="Hostnames" count={domains.length} />{domains.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS verification creates proxy route state.</div> : domains.map((domain) => { const action = domainActionByHostname[domain.hostname]; const route = proxyRoutes.find((item) => item.domainId === domain.id); return <div key={domain.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{domain.hostname}</p><p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {route?.targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p></div><StatusBadge status={domain.status} /></div><div className="mt-3 grid grid-cols-3 gap-2"><ReadinessCard label="DNS" value={domain.dnsStatus} status={domain.dnsStatus === "verified" ? "ok" : "warn"} /><ReadinessCard label="TLS" value={domain.tlsStatus} status={domain.tlsStatus === "active" || domain.tlsStatus === "issuing" ? "ok" : "warn"} /><ReadinessCard label="Proxy" value={route?.enabled ? "ready" : "pending"} status={route?.enabled ? "ok" : "warn"} /></div>{domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton><ActionLink href={domain.status === "ready" ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink><PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton></div></div>; })}</div>
       </div>
@@ -1604,7 +1591,7 @@ function GithubModule({ apps, connected, github, githubError, githubForm, github
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
       <ModuleHeader module="github" stats={<><ReadinessCard label="App" value={github?.configured ? "configured" : "missing"} status={github?.configured ? "ok" : "warn"} /><ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} /><ReadinessCard label="Repos" value={String(github?.repositories.length || 0)} status={github?.repositories.length ? "ok" : "warn"} /></>} />
       {githubError ? <Alert title="GitHub action failed" message={githubError} /> : null}
-      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]"><div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Connect repository" count={apps.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_110px_auto]"><label><span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">App</span><select value={githubForm.appId} onChange={(event) => onGithubFormChange({ ...githubForm, appId: event.target.value })} disabled={!connected || githubSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</select></label><Field label="Repository" value={githubForm.fullName} onChange={(value) => onGithubFormChange({ ...githubForm, fullName: value })} placeholder="owner/repo" disabled={!connected || githubSaving} /><Field label="Branch" value={githubForm.branch} onChange={(value) => onGithubFormChange({ ...githubForm, branch: value })} placeholder="main" disabled={!connected || githubSaving} /><div className="flex items-end"><PillButton onClick={onGithubConnect} disabled={!connected || githubSaving || !githubForm.appId || !githubForm.fullName.trim()} strong>{githubSaving ? "Saving" : "Connect"}</PillButton></div></div><label className="mt-3 flex items-center justify-between gap-3 rounded-md bg-black/20 px-3 py-2 text-xs"><span><span className="font-bold">Auto deploy on push</span><span className="block text-muted">Only matching branch push events queue deployments.</span></span><input type="checkbox" checked={githubForm.autoDeploy} onChange={(event) => onGithubFormChange({ ...githubForm, autoDeploy: event.target.checked })} disabled={githubSaving} className="h-4 w-4 accent-[var(--accent)]" /></label></div></div><div className="min-w-0"><ResourceSection title="Repositories" count={github?.repositories.length || 0} />{github?.repositories.length ? github.repositories.map((repo) => <div key={repo.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{repo.fullName}</p><p className="mt-1 text-[11px] text-muted">{repo.connectedAppName || "not connected"} · {repo.selectedBranch || repo.defaultBranch || "branch not set"} · {repo.private ? "private" : "public"}</p></div><StatusBadge status={repo.autoDeployEnabled ? "running" : "stopped"} /></div></div>) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Connect a repository to store source metadata and enable signed push-to-deploy.</div>}<ResourceSection title="Webhook deliveries" count={github?.deliveries.length || 0} />{github?.deliveries.length ? github.deliveries.slice(0, 12).map((delivery) => <TimelineRow key={delivery.deliveryId} title={delivery.repo || delivery.event} detail={`${delivery.status} · ${delivery.branch || "-"} · ${delivery.commitSha?.slice(0, 7) || "no commit"} · ${timeAgo(delivery.receivedAt)}`} tone={delivery.status === "accepted" || delivery.status === "deployed" ? "ok" : delivery.status === "failed" ? "error" : "warn"} />) : <div className="px-4 py-5 text-sm text-muted">Signed push deliveries appear here after GitHub sends webhooks.</div>}</div></div>
+      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]"><div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Connect repository" count={apps.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_110px_auto]"><UiSelect value={githubForm.appId} onChange={(event) => onGithubFormChange({ ...githubForm, appId: event.target.value })} disabled={!connected || githubSaving} label="App"><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</UiSelect><Field label="Repository" value={githubForm.fullName} onChange={(value) => onGithubFormChange({ ...githubForm, fullName: value })} placeholder="owner/repo" disabled={!connected || githubSaving} /><Field label="Branch" value={githubForm.branch} onChange={(value) => onGithubFormChange({ ...githubForm, branch: value })} placeholder="main" disabled={!connected || githubSaving} /><div className="flex items-end"><PillButton onClick={onGithubConnect} disabled={!connected || githubSaving || !githubForm.appId || !githubForm.fullName.trim()} strong>{githubSaving ? "Saving" : "Connect"}</PillButton></div></div><label className="mt-3 flex items-center justify-between gap-3 rounded-md bg-black/20 px-3 py-2 text-xs"><span><span className="font-bold">Auto deploy on push</span><span className="block text-muted">Only matching branch push events queue deployments.</span></span><input type="checkbox" checked={githubForm.autoDeploy} onChange={(event) => onGithubFormChange({ ...githubForm, autoDeploy: event.target.checked })} disabled={githubSaving} className="h-4 w-4 accent-[var(--accent)]" /></label></div></div><div className="min-w-0"><ResourceSection title="Repositories" count={github?.repositories.length || 0} />{github?.repositories.length ? github.repositories.map((repo) => <div key={repo.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{repo.fullName}</p><p className="mt-1 text-[11px] text-muted">{repo.connectedAppName || "not connected"} · {repo.selectedBranch || repo.defaultBranch || "branch not set"} · {repo.private ? "private" : "public"}</p></div><StatusBadge status={repo.autoDeployEnabled ? "running" : "stopped"} /></div></div>) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Connect a repository to store source metadata and enable signed push-to-deploy.</div>}<ResourceSection title="Webhook deliveries" count={github?.deliveries.length || 0} />{github?.deliveries.length ? github.deliveries.slice(0, 12).map((delivery) => <TimelineRow key={delivery.deliveryId} title={delivery.repo || delivery.event} detail={`${delivery.status} · ${delivery.branch || "-"} · ${delivery.commitSha?.slice(0, 7) || "no commit"} · ${timeAgo(delivery.receivedAt)}`} tone={delivery.status === "accepted" || delivery.status === "deployed" ? "ok" : delivery.status === "failed" ? "error" : "warn"} />) : <div className="px-4 py-5 text-sm text-muted">Signed push deliveries appear here after GitHub sends webhooks.</div>}</div></div>
     </section>
   );
 }
@@ -1617,7 +1604,7 @@ function DatabasesModule({ connected, databaseActionById, databaseForm, database
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.72fr)_minmax(340px,1.28fr)]">
         <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
           <ResourceSection title="Create database" count={5} />
-          <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]"><label><span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Type</span><select value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>{["postgres", "mysql", "mariadb", "redis", "mongodb"].map((type) => <option key={type} value={type}>{type}</option>)}</select></label><Field label="Name" value={databaseForm.name} onChange={(value) => onDatabaseFormChange({ ...databaseForm, name: value })} placeholder="postgres" disabled={!connected || databaseSaving} /><div className="flex items-end"><PillButton strong onClick={onCreateDatabase} disabled={!connected || databaseSaving || !databaseForm.name.trim()}>{databaseSaving ? "Creating" : "Create"}</PillButton></div></div><p className="mt-3 text-xs text-muted">Database services are Compose-backed and internal-only by default. The UI shows env key names, never raw values.</p></div>
+          <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]"><UiSelect value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} label="Type" options={["postgres", "mysql", "mariadb", "redis", "mongodb"]} /><Field label="Name" value={databaseForm.name} onChange={(value) => onDatabaseFormChange({ ...databaseForm, name: value })} placeholder="postgres" disabled={!connected || databaseSaving} /><div className="flex items-end"><PillButton strong onClick={onCreateDatabase} disabled={!connected || databaseSaving || !databaseForm.name.trim()}>{databaseSaving ? "Creating" : "Create"}</PillButton></div></div><p className="mt-3 text-xs text-muted">Database services are Compose-backed and internal-only by default. The UI shows env key names, never raw values.</p></div>
         </div>
         <div className="min-w-0"><ResourceSection title="Database services" count={databases.length} />{databases.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No production database records yet. Create one to add a Compose-backed internal service.</div> : databases.map((database) => { const busy = databaseActionById[database.id]; const running = database.status === "running"; return <div key={database.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{database.name}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{database.image || database.type} · {database.composeService || "compose"} · {database.volumeName || "volume pending"}</p></div><StatusBadge status={database.status} /></div><div className="mt-2 grid grid-cols-3 gap-2"><ReadinessCard label="Network" value={database.internal ? "internal" : "public"} status={database.internal ? "ok" : "error"} /><ReadinessCard label="Port" value={database.port ? `:${database.port}` : "none"} status="ok" /><ReadinessCard label="Env" value={`${database.envKeys.length} keys`} status="ok" /></div>{database.envKeys.length ? <p className="mt-2 break-all font-mono text-[11px] text-muted">{database.envKeys.join(", ")}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onDatabaseAction(database, "start")} disabled={!connected || Boolean(busy) || running}>{busy === "start" ? "Starting" : "Start"}</PillButton><PillButton onClick={() => onDatabaseAction(database, "stop")} disabled={!connected || Boolean(busy) || !running}>{busy === "stop" ? "Stopping" : "Stop"}</PillButton></div></div>; })}</div>
       </div>
@@ -1633,7 +1620,7 @@ function BackupsModule({ backupActionById, backupForm, backupJobs, backupRuns, b
       <ModuleHeader module="backups" stats={<><ReadinessCard label="Jobs" value={String(backupJobs.length)} status={backupJobs.length ? "ok" : "warn"} /><ReadinessCard label="Latest" value={latestRun?.status || "never"} status={latestRun?.status === "succeeded" ? "ok" : latestRun?.status === "failed" ? "error" : "warn"} /><ReadinessCard label="Failed" value={String(failedRuns.length)} status={failedRuns.length ? "error" : "ok"} /></>} />
       {backupsError ? <Alert title="Backup action failed" message={backupsError} /> : null}
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]">
-        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Enable backup job" count={databases.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.9fr)_minmax(0,1fr)_100px_auto]"><label><span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Database</span><select value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}><option value="">Choose</option>{databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}</select></label><Field label="Schedule" value={backupForm.schedule} onChange={(value) => onBackupFormChange({ ...backupForm, schedule: value })} placeholder="0 2 * * *" disabled={!connected} mono /><Field label="Keep days" value={backupForm.retentionDays} onChange={(value) => onBackupFormChange({ ...backupForm, retentionDays: value })} placeholder="7" disabled={!connected} type="number" /><div className="flex items-end"><PillButton strong onClick={onEnableBackup} disabled={!connected || !backupForm.databaseId}>Enable</PillButton></div></div><p className="mt-3 text-xs text-muted">Backups write local files only. Restore automation and external storage are later checkpoint scope.</p></div><ResourceSection title="Backup jobs" count={backupJobs.length} />{backupJobs.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Enable backups for a database to schedule local backup files and run manual backups.</div> : backupJobs.map((job) => { const busy = backupActionById[job.id]; return <div key={job.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{job.databaseName || `database ${job.databaseId}`}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{job.schedule || "manual only"} · retain {job.retentionDays}d · {job.localDir || "default backup dir"}</p></div><StatusBadge status={job.enabled ? "running" : "stopped"} /></div>{job.lastRunMessage ? <p className="mt-2 text-xs text-muted">Last run: {job.lastRunStatus || "unknown"} · {job.lastRunAt ? timeAgo(job.lastRunAt) : "never"} · {job.lastRunMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onRunBackup(job)} disabled={!connected || Boolean(busy)}>{busy === "run" ? "Running" : "Run now"}</PillButton><PillButton onClick={() => onToggleBackup(job, !job.enabled)} disabled={!connected || Boolean(busy)}>{job.enabled ? "Disable" : "Enable"}</PillButton></div></div>; })}</div>
+        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Enable backup job" count={databases.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.9fr)_minmax(0,1fr)_100px_auto]"><UiSelect value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} label="Database"><option value="">Choose</option>{databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}</UiSelect><Field label="Schedule" value={backupForm.schedule} onChange={(value) => onBackupFormChange({ ...backupForm, schedule: value })} placeholder="0 2 * * *" disabled={!connected} mono /><Field label="Keep days" value={backupForm.retentionDays} onChange={(value) => onBackupFormChange({ ...backupForm, retentionDays: value })} placeholder="7" disabled={!connected} type="number" /><div className="flex items-end"><PillButton strong onClick={onEnableBackup} disabled={!connected || !backupForm.databaseId}>Enable</PillButton></div></div><p className="mt-3 text-xs text-muted">Backups write local files only. Restore automation and external storage are later checkpoint scope.</p></div><ResourceSection title="Backup jobs" count={backupJobs.length} />{backupJobs.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Enable backups for a database to schedule local backup files and run manual backups.</div> : backupJobs.map((job) => { const busy = backupActionById[job.id]; return <div key={job.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{job.databaseName || `database ${job.databaseId}`}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{job.schedule || "manual only"} · retain {job.retentionDays}d · {job.localDir || "default backup dir"}</p></div><StatusBadge status={job.enabled ? "running" : "stopped"} /></div>{job.lastRunMessage ? <p className="mt-2 text-xs text-muted">Last run: {job.lastRunStatus || "unknown"} · {job.lastRunAt ? timeAgo(job.lastRunAt) : "never"} · {job.lastRunMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onRunBackup(job)} disabled={!connected || Boolean(busy)}>{busy === "run" ? "Running" : "Run now"}</PillButton><PillButton onClick={() => onToggleBackup(job, !job.enabled)} disabled={!connected || Boolean(busy)}>{job.enabled ? "Disable" : "Enable"}</PillButton></div></div>; })}</div>
         <div className="min-w-0"><ResourceSection title="Backup runs" count={backupRuns.length} />{backupRuns.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Backup run history appears after a manual or scheduled run.</div> : backupRuns.map((run) => <div key={run.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">#{run.id} {run.databaseName || `database ${run.databaseId}`}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{run.trigger} · {run.finishedAt ? timeAgo(run.finishedAt) : timeAgo(run.createdAt)} · {formatBytes(run.sizeBytes)}</p></div><StatusBadge status={run.status} /></div><p className="mt-2 break-all text-xs text-muted">{run.filePath || run.message || "no backup file"}</p></div>)}</div>
       </div>
     </section>
@@ -1879,7 +1866,7 @@ function CheckRow({ check }: { check: DaemonServerCheck }) {
 
 function MobileNav({ activeModule, connected, onSelect }: { activeModule: ModuleKey; connected: boolean; onSelect: (module: ModuleKey) => void }) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/5 bg-[#121212]/95 px-2 py-2 shadow-[rgba(0,0,0,0.5)_0px_-8px_24px] backdrop-blur md:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/5 bg-background/95 px-2 py-2 shadow-[rgba(0,0,0,0.5)_0px_-8px_24px] backdrop-blur md:hidden">
       <div className="flex snap-x gap-1 overflow-x-auto pb-1 pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {MODULES.map((module) => (
           <MobileNavItem key={module.key} active={activeModule === module.key} label={module.label} onClick={() => onSelect(module.key)} status={module.key === "settings" ? connected : undefined} />
@@ -2130,13 +2117,10 @@ function ProductionDeployPanel({
 
           <div className="border-b border-white/5 px-4 py-3">
             <div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]">
-              <label>
-                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">App</span>
-                <select value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>
-                  <option value="">Choose app</option>
-                  {apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}
-                </select>
-              </label>
+              <UiSelect value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} label="App">
+                <option value="">Choose app</option>
+                {apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}
+              </UiSelect>
               <Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} />
               <div className="flex items-end">
                 <PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton>
@@ -2182,13 +2166,10 @@ function ProductionDeployPanel({
               <ReadinessCard label="Repos" value={String(github?.repositories.length || 0)} status={github?.repositories.length ? "ok" : "warn"} />
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_110px_auto]">
-              <label>
-                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">App</span>
-                <select value={githubForm.appId} onChange={(event) => onGithubFormChange({ ...githubForm, appId: event.target.value })} disabled={!connected || githubSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>
-                  <option value="">Choose app</option>
-                  {apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}
-                </select>
-              </label>
+              <UiSelect value={githubForm.appId} onChange={(event) => onGithubFormChange({ ...githubForm, appId: event.target.value })} disabled={!connected || githubSaving} label="App">
+                <option value="">Choose app</option>
+                {apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}
+              </UiSelect>
               <Field label="Repository" value={githubForm.fullName} onChange={(value) => onGithubFormChange({ ...githubForm, fullName: value })} placeholder="owner/repo" disabled={!connected || githubSaving} />
               <Field label="Branch" value={githubForm.branch} onChange={(value) => onGithubFormChange({ ...githubForm, branch: value })} placeholder="main" disabled={!connected || githubSaving} />
               <div className="flex items-end">
@@ -2326,12 +2307,7 @@ function DatabaseBackupPanel({
           <ResourceSection title="Database services" count={databases.length} />
           <div className="border-b border-white/5 px-4 py-3">
             <div className="grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]">
-              <label>
-                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Type</span>
-                <select value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>
-                  {['postgres', 'mysql', 'mariadb', 'redis', 'mongodb'].map((type) => <option key={type} value={type}>{type}</option>)}
-                </select>
-              </label>
+              <UiSelect value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} label="Type" options={["postgres", "mysql", "mariadb", "redis", "mongodb"]} />
               <Field label="Name" value={databaseForm.name} onChange={(value) => onDatabaseFormChange({ ...databaseForm, name: value })} placeholder="postgres" disabled={!connected || databaseSaving} />
               <div className="flex items-end"><PillButton strong onClick={onCreateDatabase} disabled={!connected || databaseSaving || !databaseForm.name.trim()}>{databaseSaving ? "Creating" : "Create"}</PillButton></div>
             </div>
@@ -2367,13 +2343,10 @@ function DatabaseBackupPanel({
           <ResourceSection title="Backup jobs" count={backupJobs.length} />
           <div className="border-b border-white/5 px-4 py-3">
             <div className="grid gap-2 sm:grid-cols-[minmax(120px,0.9fr)_minmax(0,1fr)_100px_auto]">
-              <label>
-                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Database</span>
-                <select value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>
-                  <option value="">Choose</option>
-                  {databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}
-                </select>
-              </label>
+              <UiSelect value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} label="Database">
+                <option value="">Choose</option>
+                {databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}
+              </UiSelect>
               <Field label="Schedule" value={backupForm.schedule} onChange={(value) => onBackupFormChange({ ...backupForm, schedule: value })} placeholder="0 2 * * *" disabled={!connected} mono />
               <Field label="Keep days" value={backupForm.retentionDays} onChange={(value) => onBackupFormChange({ ...backupForm, retentionDays: value })} placeholder="7" disabled={!connected} type="number" />
               <div className="flex items-end"><PillButton strong onClick={onEnableBackup} disabled={!connected || !backupForm.databaseId}>Enable</PillButton></div>
@@ -2755,14 +2728,11 @@ function DetailPanel({
               <Field label="Value" value={envForm.value} onChange={(value) => setEnvForm((current) => ({ ...current, value }))} placeholder="stored outside routely.yml" disabled={!connected || envSaving} mono />
             </div>
             <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(110px,0.8fr)_minmax(0,1fr)_auto] sm:items-end">
-              <label>
-                <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">Scope</span>
-                <select value={envForm.scope} onChange={(event) => setEnvForm((current) => ({ ...current, scope: event.target.value }))} disabled={!connected || envSaving} className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING}`}>
-                  <option value="all">all</option>
-                  <option value="local">local</option>
-                  <option value="production">production</option>
-                </select>
-              </label>
+              <UiSelect value={envForm.scope} onChange={(event) => setEnvForm((current) => ({ ...current, scope: event.target.value }))} disabled={!connected || envSaving} label="Scope">
+                <option value="all">all</option>
+                <option value="local">local</option>
+                <option value="production">production</option>
+              </UiSelect>
               <label className={`flex min-h-10 items-center justify-between rounded-full bg-surface-raised px-3 ${INSET_RING} ${!connected || envSaving ? "opacity-60" : ""}`}>
                 <span className="text-xs font-bold">Secret value</span>
                 <input type="checkbox" checked={envForm.isSecret} onChange={(event) => setEnvForm((current) => ({ ...current, isSecret: event.target.checked }))} disabled={!connected || envSaving} className="h-4 w-4 accent-[var(--accent)]" />
@@ -2947,17 +2917,15 @@ function AppForm({
 
 function TextAreaField({ disabled, label, mono, onChange, placeholder, value }: { disabled?: boolean; label: string; mono?: boolean; onChange: (value: string) => void; placeholder?: string; value: string }) {
   return (
-    <label className="md:col-span-2">
-      <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">{label}</span>
-      <textarea
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-        placeholder={placeholder}
-        rows={3}
-        className={`w-full resize-y rounded-xl bg-surface-raised px-3 py-2 text-sm text-foreground outline-none ${INSET_RING} transition focus:shadow-[rgb(18,18,18)_0px_1px_0px,rgb(30,215,96)_0px_0px_0px_1px_inset] disabled:opacity-55 ${mono ? "font-mono text-xs" : ""}`}
-      />
-    </label>
+    <UiTextAreaField
+      disabled={disabled}
+      label={label}
+      mono={mono}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      rows={3}
+      value={value}
+    />
   );
 }
 
@@ -2985,66 +2953,46 @@ function Field({
   wide?: boolean;
 }) {
   return (
-    <label className={wide ? "md:col-span-2" : undefined}>
-      <span className="mb-1 flex items-center justify-between gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-muted">
-        <span>{label}</span>
-        {error ? <span className="normal-case tracking-normal text-negative">{error}</span> : null}
-      </span>
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-        required={required}
-        placeholder={placeholder}
-        aria-invalid={Boolean(error)}
-        type={type}
-        className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${error ? "shadow-[rgb(18,18,18)_0px_1px_0px,rgb(243,114,127)_0px_0px_0px_1px_inset]" : INSET_RING} transition focus:shadow-[rgb(18,18,18)_0px_1px_0px,rgb(30,215,96)_0px_0px_0px_1px_inset] disabled:opacity-55 ${mono ? "font-mono text-xs" : ""}`}
-      />
-    </label>
+    <UiField
+      disabled={disabled}
+      error={error}
+      label={label}
+      mono={mono}
+      onChange={(event) => onChange(event.target.value)}
+      placeholder={placeholder}
+      required={required}
+      type={type}
+      value={value}
+      wide={wide}
+    />
   );
 }
 
 function SelectField({ disabled, label, onChange, value, values }: { disabled?: boolean; label: string; onChange: (value: string) => void; value: string; values: string[] }) {
   return (
-    <label>
-      <span className="mb-1 block text-[11px] font-bold uppercase tracking-[0.12em] text-muted">{label}</span>
-      <select
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        disabled={disabled}
-        className={`h-10 w-full rounded-full bg-surface-raised px-3 text-sm text-foreground outline-none ${INSET_RING} transition focus:shadow-[rgb(18,18,18)_0px_1px_0px,rgb(30,215,96)_0px_0px_0px_1px_inset] disabled:opacity-55`}
-      >
-        {values.map((item) => (
-          <option key={item} value={item}>{item}</option>
-        ))}
-      </select>
-    </label>
+    <UiSelect
+      disabled={disabled}
+      label={label}
+      onChange={(event) => onChange(event.target.value)}
+      options={values}
+      value={value}
+    />
   );
 }
 
 function RoundAction({ active, disabled, label, onClick }: { active?: boolean; disabled?: boolean; label: string; onClick: () => void }) {
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      className={`min-h-8 rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_RING} ${active ? "bg-accent text-black" : "bg-surface-raised text-foreground hover:text-accent"}`}
-    >
+    <Button onClick={onClick} disabled={disabled} loading={active} loadingLabel="Working" variant={active ? "primary" : "secondary"}>
       {active ? "Working" : label}
-    </button>
+    </Button>
   );
 }
 
 function PillButton({ children, disabled, onClick, strong, type = "button" }: { children: ReactNode; disabled?: boolean; onClick?: () => void; strong?: boolean; type?: "button" | "submit" }) {
   return (
-    <button
-      type={type}
-      onClick={onClick}
-      disabled={disabled}
-      className={`min-h-8 rounded-full px-3 py-1.5 text-xs font-bold uppercase tracking-[0.12em] transition active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-40 ${FOCUS_RING} ${strong ? "bg-accent text-black hover:scale-[1.02]" : "bg-surface-raised text-foreground hover:text-accent"}`}
-    >
+    <Button type={type} onClick={onClick} disabled={disabled} variant={strong ? "primary" : "secondary"}>
       {children}
-    </button>
+    </Button>
   );
 }
 
@@ -3064,7 +3012,7 @@ function ActionLink({ children, href }: { children: ReactNode; href: string | nu
 
 function NavItem({ active, disabled, dot, label, onClick }: { active?: boolean; disabled?: boolean; dot?: boolean; label: string; onClick?: () => void }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`flex min-h-9 w-full items-center justify-between rounded-full px-3 py-2 text-left text-sm transition active:scale-[0.99] disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised font-bold text-foreground" : disabled ? "text-muted/45" : "text-muted hover:bg-white/[0.035] hover:text-foreground"}`}>
+    <button type="button" onClick={onClick} disabled={disabled} className={`flex min-h-9 w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition active:translate-y-px disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised font-bold text-foreground shadow-[var(--inset-border)]" : disabled ? "text-muted/45" : "text-muted hover:bg-white/[0.035] hover:text-foreground"}`}>
       <span>{label}</span>
       {dot ? <span className="h-2 w-2 rounded-full bg-accent" aria-hidden="true" /> : null}
     </button>
@@ -3073,7 +3021,7 @@ function NavItem({ active, disabled, dot, label, onClick }: { active?: boolean; 
 
 function MobileNavItem({ active, disabled, label, onClick, status }: { active?: boolean; disabled?: boolean; label: string; onClick?: () => void; status?: boolean }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`flex h-10 shrink-0 snap-start items-center justify-center rounded-full px-3 text-xs font-bold transition disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised text-foreground" : disabled ? "text-muted/50" : "text-muted"}`}>
+    <button type="button" onClick={onClick} disabled={disabled} className={`flex h-8 shrink-0 snap-start items-center justify-center rounded-md px-3 text-xs font-bold transition active:translate-y-px disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised text-foreground shadow-[var(--inset-border)]" : disabled ? "text-muted/50" : "text-muted"}`}>
       {status != null ? <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${status ? "bg-accent" : "bg-negative"}`} aria-hidden="true" /> : null}
       {label}
     </button>
@@ -3117,42 +3065,23 @@ function Meta({ label, mono, value, wide }: { label: string; mono?: boolean; val
 
 function Alert({ message, title }: { message: string; title: string }) {
   return (
-    <div className="border-b border-negative/20 bg-negative/10 px-4 py-3">
-      <p className="text-sm font-bold text-negative">{title}</p>
-      <p className="mt-0.5 text-sm text-[#d0d0d0]">{message}</p>
-    </div>
+    <UiAlert className="border-x-0 border-t-0" title={title} variant="danger">
+      {message}
+    </UiAlert>
   );
 }
 
 function LoadingRows() {
-  return (
-    <div className="space-y-2 p-3 sm:p-4">
-      {[0, 1, 2].map((item) => (
-        <div key={item} className="grid h-[104px] animate-pulse gap-3 rounded-md bg-white/[0.035] p-3 sm:h-[76px] sm:grid-cols-[minmax(210px,1fr)_100px_1fr]">
-          <div className="flex items-center gap-3">
-            <span className="h-9 w-9 rounded-full bg-white/[0.07]" />
-            <span className="space-y-2">
-              <span className="block h-3 w-32 rounded-full bg-white/[0.07]" />
-              <span className="block h-2 w-44 rounded-full bg-white/[0.05]" />
-            </span>
-          </div>
-          <span className="h-7 rounded-full bg-white/[0.06]" />
-          <span className="h-7 rounded-full bg-white/[0.05]" />
-        </div>
-      ))}
-    </div>
-  );
+  return <SkeletonRows />;
 }
 
 function EmptyState({ connected, onAdd }: { connected: boolean; onAdd: () => void }) {
   return (
-    <div className="px-4 py-12 text-center">
-      <div className="mx-auto grid h-10 w-10 place-items-center rounded-full bg-surface-raised text-sm font-black text-muted">R</div>
-      <p className="mt-3 text-sm font-bold">No local apps registered</p>
-      <p className="mx-auto mt-1 max-w-md text-sm text-muted">Create a command app here or sync an existing `routely.yml` registry.</p>
-      <div className="mt-4 flex justify-center">
-        <PillButton onClick={onAdd} strong disabled={!connected}>Add app</PillButton>
-      </div>
-    </div>
+    <UiEmptyState
+      action={<PillButton onClick={onAdd} strong disabled={!connected}>Add app</PillButton>}
+      icon="R"
+      message="Create a command app here or sync an existing `routely.yml` registry."
+      title="No local apps registered"
+    />
   );
 }

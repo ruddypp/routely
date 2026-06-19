@@ -1,23 +1,81 @@
 @import "tailwindcss";
 
 /*
- * Routely dashboard theme — Spotify-inspired "content-first darkness".
- * See DESIGN.md. Near-black surfaces, single green functional accent.
+ * Routely operational theme.
+ * Three-layer tokens: primitive values, semantic aliases, component defaults.
  */
 :root {
-  --background: #121212;
-  --background-soft: #151515;
-  --surface: #181818;
-  --surface-raised: #1f1f1f;
-  --surface-card: #252525;
-  --foreground: #ffffff;
-  --muted: #b3b3b3;
-  --border: #4d4d4d;
-  --accent: #1ed760;
-  --accent-border: #1db954;
-  --negative: #f3727f;
-  --warning: #ffa42b;
-  --info: #539df5;
+  /* Primitive color tokens */
+  --color-base-950: #090b0a;
+  --color-base-900: #0d100f;
+  --color-base-850: #121614;
+  --color-base-800: #171c19;
+  --color-base-750: #1b221d;
+  --color-base-700: #202821;
+  --color-line-subtle: #263029;
+  --color-line-strong: #354238;
+  --color-text-primary: #f4f7f3;
+  --color-text-secondary: #aeb8ae;
+  --color-text-muted: #6f7b71;
+  --color-green-500: #27d86f;
+  --color-green-600: #1fb75d;
+  --color-green-soft: rgba(39, 216, 111, 0.13);
+  --color-blue-500: #64a8ff;
+  --color-blue-soft: rgba(100, 168, 255, 0.14);
+  --color-orange-500: #f6b24b;
+  --color-orange-soft: rgba(246, 178, 75, 0.14);
+  --color-red-500: #ff6b7d;
+  --color-red-soft: rgba(255, 107, 125, 0.14);
+
+  /* Primitive scale tokens */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --radius-xs: 0.25rem;
+  --radius-sm: 0.375rem;
+  --radius-md: 0.5rem;
+  --radius-pill: 9999px;
+  --duration-fast: 150ms;
+  --duration-normal: 180ms;
+
+  /* Semantic color tokens */
+  --background: var(--color-base-950);
+  --background-soft: var(--color-base-900);
+  --surface: var(--color-base-850);
+  --surface-raised: var(--color-base-800);
+  --surface-card: var(--color-base-750);
+  --surface-hover: var(--color-base-700);
+  --foreground: var(--color-text-primary);
+  --foreground-secondary: var(--color-text-secondary);
+  --muted: var(--color-text-muted);
+  --border: var(--color-line-subtle);
+  --border-strong: var(--color-line-strong);
+  --accent: var(--color-green-500);
+  --accent-hover: var(--color-green-600);
+  --accent-soft: var(--color-green-soft);
+  --accent-border: var(--color-green-600);
+  --negative: var(--color-red-500);
+  --negative-soft: var(--color-red-soft);
+  --warning: var(--color-orange-500);
+  --warning-soft: var(--color-orange-soft);
+  --info: var(--color-blue-500);
+  --info-soft: var(--color-blue-soft);
+  --ring: var(--accent);
+
+  /* Component tokens */
+  --control-height-xs: 28px;
+  --control-height-sm: 32px;
+  --control-height-md: 36px;
+  --control-radius: var(--radius-sm);
+  --control-radius-pill: var(--radius-pill);
+  --control-bg: var(--surface-raised);
+  --control-bg-hover: var(--surface-hover);
+  --control-border: var(--border);
+  --panel-bg: var(--surface);
+  --panel-border: var(--border);
+  --panel-shadow: rgba(0, 0, 0, 0.42) 0 12px 30px;
+  --inset-border: rgb(9, 11, 10) 0 1px 0, var(--border-strong) 0 0 0 1px inset;
 }
 
 @theme inline {
@@ -26,14 +84,24 @@
   --color-surface: var(--surface);
   --color-surface-raised: var(--surface-raised);
   --color-surface-card: var(--surface-card);
+  --color-surface-hover: var(--surface-hover);
   --color-foreground: var(--foreground);
+  --color-foreground-secondary: var(--foreground-secondary);
   --color-muted: var(--muted);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
   --color-accent-border: var(--accent-border);
   --color-negative: var(--negative);
+  --color-negative-soft: var(--negative-soft);
   --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
   --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --color-panel-bg: var(--panel-bg);
+  --color-panel-border: var(--panel-border);
   --font-sans: var(--font-geist-sans), "Helvetica Neue", Helvetica, Arial, sans-serif;
   --font-mono: var(--font-geist-mono), ui-monospace, monospace;
 }
@@ -54,7 +122,7 @@ body {
 }
 
 ::selection {
-  background: rgba(30, 215, 96, 0.28);
+  background: var(--accent-soft);
   color: var(--foreground);
 }
 
@@ -91,7 +159,7 @@ textarea:disabled {
 
 input::placeholder,
 textarea::placeholder {
-  color: color-mix(in srgb, var(--muted) 58%, transparent);
+  color: color-mix(in srgb, var(--muted) 68%, transparent);
 }
 
 select {
@@ -104,11 +172,11 @@ select {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #4d4d4d;
-  border: 2px solid #121212;
+  background: var(--border-strong);
+  border: 2px solid var(--background);
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #121212;
+  background: var(--background);
 }
