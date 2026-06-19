@@ -1987,7 +1987,14 @@ app.post("/github/webhook", async (request, reply) => {
   });
 
   if (!recorded.inserted) {
-    return reply.code(200).send({ ok: true, duplicate: true, delivery: publicGithubDeliveryDto(recorded.delivery) });
+    return reply.code(200).send({
+      ok: true,
+      duplicate: true,
+      alreadyProcessed: true,
+      status: "duplicate",
+      message: `GitHub delivery ${delivery} was already processed.`,
+      delivery: publicGithubDeliveryDto(recorded.delivery)
+    });
   }
 
   if (!filtered.supported || !push) {

@@ -7,6 +7,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { runServerDoctorChecks } from "@routely/core";
+import { signGithubWebhookPayload } from "@routely/github";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const daemonPath = resolve(repoRoot, "apps/daemon/src/server.js");
@@ -210,5 +211,32 @@ describe("QA regression fixes", () => {
 
     expect(check?.status).toBe("ok");
     expect(check?.message).toContain("Routely dashboard");
+  });
+
+  it("reports duplicate GitHub webhook deliveries as already processed", async () => {
+    const workspace = await createWorkspace();
+    const webhookSecret = randomUUID();
+    const { baseUrl } = await startDaemon(workspace, { ROUTELY_GITHUB_WEBHOOK_SECRET: webhookSecret });
+    const payload = JSON.stringify({
+      ref: "refs/heads/main",
+      after: "abc123",
+      repository: { full_name: "acme/web" },
+      head_commit: { message: "ship" }
+    });
+    const headers = {
+      "content-type": "application/json",
+      "x-github-delivery": randomUUID(),
+      "x-github-event": "push",
+      "x-hub-signature-256": signGithubWebhookPayload(payload, webhookSecret)
+    };
+
+    const first = await jsonRequest(baseUrl, "/github/webhook", { method: "POST", headers, body: payload });
+    const second = await jsonRequest(baseUrl, "/github/webhook", { method: "POST", headers, body: payload });
+
+    expect(first.response.status).toBe(202);
+    expect(second.response.status).toBe(200);
+    expect(second.body.duplicate).toBe(true);
+    expect(second.body.alreadyProcessed).toBe(true);
+    expect(second.body.status).toBe("duplicate");
   });
 });

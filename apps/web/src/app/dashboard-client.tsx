@@ -577,6 +577,28 @@ function appUrl(app: DaemonApp): string | null {
   return app.port ? `http://localhost:${app.port}` : null;
 }
 
+function appCanRedeploy(app: DaemonApp): boolean {
+  return app.driver === "dockerfile";
+}
+
+function pendingStateLabel(app: DaemonApp): string {
+  const restart = app.needsRestart;
+  const redeploy = app.needsRedeploy && appCanRedeploy(app);
+  const localOnly = app.needsRedeploy && !appCanRedeploy(app);
+  if (restart && redeploy) return "restart + redeploy needed";
+  if (restart) return "restart needed";
+  if (redeploy) return "redeploy needed";
+  if (localOnly) return "local restart applies";
+  return "clean";
+}
+
+function envRedeployLabel(app: DaemonApp, needsRedeploy?: boolean): { label: string; status: "ok" | "warn" } {
+  if (!needsRedeploy) return { label: "clean", status: "ok" };
+  return appCanRedeploy(app)
+    ? { label: "needed", status: "warn" }
+    : { label: "not deployable", status: "ok" };
+}
+
 function shortPath(path: string | null): string {
   if (!path) return "-";
   const parts = path.split("/").filter(Boolean);
@@ -1316,10 +1338,10 @@ export default function DashboardClient() {
 
   return (
     <main className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen grid-rows-[1fr_auto] lg:grid-cols-[248px_1fr] lg:grid-rows-1">
+      <div className="grid min-h-screen grid-rows-[1fr_auto] md:grid-cols-[232px_1fr] md:grid-rows-1 xl:grid-cols-[248px_1fr]">
         <Sidebar activeModule={activeModule} connected={connected} onSelect={setActiveModule} />
 
-        <section className="min-w-0 pb-20 lg:pb-0">
+        <section className="min-w-0 pb-20 md:pb-0">
           <WorkspaceHeader
             connected={connected}
             daemonUrl={health?.daemonUrl || "-"}
@@ -1392,7 +1414,7 @@ export default function DashboardClient() {
 
 function Sidebar({ activeModule, connected, onSelect }: { activeModule: ModuleKey; connected: boolean; onSelect: (module: ModuleKey) => void }) {
   return (
-    <aside className={`hidden border-r border-white/5 bg-[#121212] px-3 py-4 ${PANEL_SHADOW} lg:block`}>
+    <aside className={`hidden border-r border-white/5 bg-[#121212] px-3 py-4 ${PANEL_SHADOW} md:block`}>
       <div className="flex items-center gap-3 px-2">
         <div className="grid h-9 w-9 place-items-center rounded-full bg-accent text-sm font-black text-black">R</div>
         <div>
@@ -1649,7 +1671,7 @@ function OverviewPanel({ apps, backupJobs, backupRuns, deployments, healthchecks
           {failedDeploys.map((deployment) => <TimelineRow key={deployment.id} title={deployment.appName || `deployment ${deployment.id}`} detail={deployment.errorMessage || deployment.phase} tone="error" />)}
         </OverviewList>
         <OverviewList title="Next actions" empty="No urgent actions." action="Settings" onAction={() => onSelect("settings")}>
-          {pendingApps.slice(0, 4).map((app) => <TimelineRow key={app.id} title={app.name} detail={app.needsRedeploy ? "Redeploy needed" : "Restart needed"} tone="warn" />)}
+          {pendingApps.slice(0, 4).map((app) => <TimelineRow key={app.id} title={app.name} detail={pendingStateLabel(app)} tone="warn" />)}
           {backupFailures.map((run) => <TimelineRow key={`backup-${run.id}`} title={run.databaseName || `backup ${run.id}`} detail={run.message || "Backup failed"} tone="error" />)}
         </OverviewList>
       </div>
@@ -1857,8 +1879,8 @@ function CheckRow({ check }: { check: DaemonServerCheck }) {
 
 function MobileNav({ activeModule, connected, onSelect }: { activeModule: ModuleKey; connected: boolean; onSelect: (module: ModuleKey) => void }) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/5 bg-[#121212]/95 px-2 py-2 shadow-[rgba(0,0,0,0.5)_0px_-8px_24px] backdrop-blur lg:hidden">
-      <div className="flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/5 bg-[#121212]/95 px-2 py-2 shadow-[rgba(0,0,0,0.5)_0px_-8px_24px] backdrop-blur md:hidden">
+      <div className="flex snap-x gap-1 overflow-x-auto pb-1 pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {MODULES.map((module) => (
           <MobileNavItem key={module.key} active={activeModule === module.key} label={module.label} onClick={() => onSelect(module.key)} status={module.key === "settings" ? connected : undefined} />
         ))}
@@ -2561,6 +2583,7 @@ function DetailPanel({
   const canDeploy = app.driver === "dockerfile" && Boolean(app.path) && app.enabled && connected;
   const healthStatus = appHealth?.status || "unknown";
   const latestMetric = appMetrics[0] || null;
+  const redeployPending = envRedeployLabel(app, appEnv?.pending.needsRedeploy);
 
   return (
     <aside className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:sticky lg:top-[84px]`}>
@@ -2603,7 +2626,7 @@ function DetailPanel({
           <Meta label="Port" value={app.port ? String(app.port) : "-"} mono />
           <Meta label="Updated" value={timeAgo(app.updatedAt)} />
           <Meta label="Latest deploy" value={latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : "never"} />
-          <Meta label="Settings state" value={app.needsRestart || app.needsRedeploy ? `${app.needsRestart ? "restart" : ""}${app.needsRestart && app.needsRedeploy ? " + " : ""}${app.needsRedeploy ? "redeploy" : ""} needed` : "clean"} />
+          <Meta label="Settings state" value={pendingStateLabel(app)} />
           <Meta label="Temporary URL" value={latestDeployment?.hostPort ? `http://127.0.0.1:${latestDeployment.hostPort}` : "-"} mono wide />
           <Meta label="Production domains" value={domains.map((domain) => `${domain.hostname} (${domain.status})`).join(", ") || "none"} mono wide />
           <Meta label="Path" value={app.path || "-"} mono wide />
@@ -2719,7 +2742,7 @@ function DetailPanel({
             <div className="grid grid-cols-3 gap-2">
               <ReadinessCard label="Stored" value={String(appEnv?.pending.count || 0)} status={appEnv?.pending.count ? "ok" : "warn"} />
               <ReadinessCard label="Restart" value={appEnv?.pending.needsRestart ? "needed" : "clean"} status={appEnv?.pending.needsRestart ? "warn" : "ok"} />
-              <ReadinessCard label="Redeploy" value={appEnv?.pending.needsRedeploy ? "needed" : "clean"} status={appEnv?.pending.needsRedeploy ? "warn" : "ok"} />
+              <ReadinessCard label="Redeploy" value={redeployPending.label} status={redeployPending.status} />
             </div>
             <p className="mt-3 text-xs text-muted">Stored env values override portable `routely.yml` env at runtime. Secret values are hidden after save and injected into local starts and Dockerfile deployments.</p>
           </div>
@@ -2764,7 +2787,8 @@ function DetailPanel({
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 {row.needsRestart ? <span className="rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">restart needed</span> : null}
-                {row.needsRedeploy ? <span className="rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">redeploy needed</span> : null}
+                {row.needsRedeploy && appCanRedeploy(app) ? <span className="rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">redeploy needed</span> : null}
+                {row.needsRedeploy && !appCanRedeploy(app) ? <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">local only</span> : null}
                 <PillButton onClick={() => void unsetEnv(row.key)} disabled={!connected || envSaving}>Unset</PillButton>
               </div>
             </div>
@@ -3049,7 +3073,7 @@ function NavItem({ active, disabled, dot, label, onClick }: { active?: boolean; 
 
 function MobileNavItem({ active, disabled, label, onClick, status }: { active?: boolean; disabled?: boolean; label: string; onClick?: () => void; status?: boolean }) {
   return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`flex h-10 shrink-0 items-center justify-center rounded-full px-3 text-xs font-bold transition disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised text-foreground" : disabled ? "text-muted/50" : "text-muted"}`}>
+    <button type="button" onClick={onClick} disabled={disabled} className={`flex h-10 shrink-0 snap-start items-center justify-center rounded-full px-3 text-xs font-bold transition disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised text-foreground" : disabled ? "text-muted/50" : "text-muted"}`}>
       {status != null ? <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${status ? "bg-accent" : "bg-negative"}`} aria-hidden="true" /> : null}
       {label}
     </button>

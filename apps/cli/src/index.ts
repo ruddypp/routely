@@ -53,7 +53,7 @@ import { createDatabaseService, detectPreset, getAppPreset } from "@routely/pres
 import { validateHostname } from "@routely/proxy";
 import { DependencyCycleError, sortByDependencies } from "./dependencies.js";
 import { resolveInstallRoot, resolveWorkspaceRoot } from "./paths.js";
-import { findUnavailablePorts } from "./ports.js";
+import { findExistingRoutelyDashboard, findUnavailablePorts } from "./ports.js";
 
 type ChildProcess = ReturnType<typeof spawn>;
 type RunningApp = { app: RoutelyAppRecord; child: ChildProcess };
@@ -899,12 +899,12 @@ function stopProcess(child: ChildProcess): void {
   stopPid(child.pid);
 }
 
-async function preflightPorts(apps: RoutelyAppRecord[], includeSystemPorts = true): Promise<boolean> {
+async function preflightPorts(apps: RoutelyAppRecord[], includeSystemPorts = true, options: { skipDashboard?: boolean } = {}): Promise<boolean> {
   const dashboardPort = Number(process.env.ROUTELY_DASHBOARD_PORT || DEFAULT_DASHBOARD_PORT);
   const daemonPort = Number(process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT);
   const systemPorts = includeSystemPorts
     ? [
-        { name: "dashboard", port: dashboardPort },
+        ...(options.skipDashboard ? [] : [{ name: "dashboard", port: dashboardPort }]),
         { name: "daemon", port: daemonPort }
       ]
     : [];
@@ -927,6 +927,7 @@ async function upCommand(): Promise<void> {
   reconcileRuntimeState(db);
   const dashboardPort = process.env.ROUTELY_DASHBOARD_PORT || String(DEFAULT_DASHBOARD_PORT);
   const daemonPort = process.env.ROUTELY_DAEMON_PORT || String(DEFAULT_DAEMON_PORT);
+  const existingDashboardUrl = await findExistingRoutelyDashboard([Number(dashboardPort), DEFAULT_DASHBOARD_PORT]);
   let apps: RoutelyAppRecord[];
   const runningApps: RunningApp[] = [];
   let shuttingDown = false;
@@ -943,14 +944,14 @@ async function upCommand(): Promise<void> {
     process.exit(1);
   }
 
-  if (!(await preflightPorts(apps))) {
+  if (!(await preflightPorts(apps, true, { skipDashboard: Boolean(existingDashboardUrl) }))) {
     db.close();
     process.exit(1);
   }
 
   console.log("Routely starting...");
   console.log(`Workspace: ${workspaceRoot}`);
-  console.log(`Dashboard: http://localhost:${dashboardPort}`);
+  console.log(`Dashboard: ${existingDashboardUrl || `http://localhost:${dashboardPort}`}`);
   console.log(`Daemon:    http://127.0.0.1:${daemonPort}`);
   console.log(`Apps:      ${apps.length === 0 ? "none registered yet" : `${apps.length} local resource(s)`}`);
   console.log("");
@@ -958,10 +959,15 @@ async function upCommand(): Promise<void> {
   const daemon = run("daemon", "npm", ["run", "dev", "--workspace", "apps/daemon"], {
     ROUTELY_DAEMON_PORT: daemonPort
   });
-  const web = run("dashboard", "npm", ["run", "dev", "--workspace", "apps/web"], {
-    PORT: dashboardPort,
-    ROUTELY_DAEMON_URL: process.env.ROUTELY_DAEMON_URL || `http://127.0.0.1:${daemonPort}`
-  });
+  const web = existingDashboardUrl
+    ? null
+    : run("dashboard", "npm", ["run", "dev", "--workspace", "apps/web"], {
+        PORT: dashboardPort,
+        ROUTELY_DAEMON_URL: process.env.ROUTELY_DAEMON_URL || `http://127.0.0.1:${daemonPort}`
+      });
+  if (existingDashboardUrl) {
+    console.log(`Dashboard already running at ${existingDashboardUrl}; reusing it for this workspace.`);
+  }
 
   for (const app of apps) {
     try {
@@ -1011,7 +1017,7 @@ async function upCommand(): Promise<void> {
     }
 
     daemon.kill("SIGTERM");
-    web.kill("SIGTERM");
+    web?.kill("SIGTERM");
 
     setTimeout(() => {
       db.close();
