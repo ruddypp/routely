@@ -162,7 +162,39 @@ Verification caveat:
 
 ## Current Checkpoint Status
 
-Checkpoint 10 is now implemented as a conservative database services and backups slice:
+Checkpoint 11 is now implemented as a conservative notifications and release-polish slice:
+
+- SQLite migrations now create `notification_channels` and `notification_delivery_attempts` tables.
+- Shared core helpers normalize notification channels, build generic/Discord/Telegram payloads, and redact public webhook/token targets.
+- The daemon exposes authenticated notification endpoints:
+  - `GET /notifications`
+  - `POST /notifications`
+  - `PATCH /notifications/:id`
+  - `DELETE /notifications/:id`
+  - `POST /notifications/:id/test`
+- Notification delivery is audited in SQLite, uses bounded outbound requests, rejects non-HTTP(S), credentialed, loopback, private, and link-local targets after DNS lookup, and stores redacted public targets in API responses.
+- Deploy succeeded, deploy failed, and backup failed events now queue delivery attempts for enabled subscribed channels.
+- CLI additions are backed by daemon/storage data: `routely notify ls`, `routely notify add ...`, `routely notify test <channel-id>`, and `routely notify disable <channel-id>`.
+- Next.js same-origin route handlers proxy notification endpoints under `/api/*`.
+- The dashboard now has clickable sidebar/mobile modules and keeps the home as an overview. Settings includes a real Notifications panel with channel creation, enable/disable, test delivery, and delivery attempt history.
+- Generic webhook, Discord webhook, and Telegram are supported. Email, rollback, marketplace templates, destructive restore automation, external backup storage, and broad VPS operations remain deferred.
+
+Verification performed for Checkpoint 11:
+
+- `npm run lint` passed.
+- `npm run test --workspace apps/cli` passed: 13 files, 42 tests.
+- `npm run build --workspace apps/cli` passed.
+- `npm run test --workspace apps/web` passed: 11 files, 30 tests.
+- `npx tsc --noEmit --project apps/web/tsconfig.json` passed.
+- `node --check apps/daemon/src/server.js` passed.
+- `npm run build --workspace apps/web` was attempted and reached the known partial Turbopack output after successful compile and TypeScript (`Finished TypeScript...`) without a final exit marker; no `next build`/Turbopack process remained afterward.
+
+Recommended next step:
+
+- Prepare public alpha release docs and examples if continuing Checkpoint 11 release polish, or move to the next explicit checkpoint only after README/install/example gaps are addressed.
+- Keep rollback, marketplace templates, destructive restore automation, external backup storage, and broad VPS operations deferred.
+
+Checkpoint 10 is implemented as a conservative database services and backups slice:
 
 - SQLite migrations now create `databases`, `backup_jobs`, and `backup_runs` tables.
 - Shared core helpers cover supported database type validation, backup schedule parsing, due-schedule checks, retention selection, and public database/backup DTOs that expose env key names but not raw env values.

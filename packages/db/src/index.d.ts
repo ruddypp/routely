@@ -12,6 +12,8 @@ import type {
   RoutelyDatabaseRecord,
   RoutelyBackupJobRecord,
   RoutelyBackupRunRecord,
+  RoutelyNotificationAttemptRecord,
+  RoutelyNotificationChannelRecord,
   RoutelyDeploymentStatus
 } from "@routely/core";
 
@@ -183,6 +185,22 @@ export function getBackupRunById(db: Database.Database, backupRunId: number): Ro
 export function listBackupRuns(db: Database.Database, options?: { limit?: number }): RoutelyBackupRunRecord[];
 export function listBackupRunsForJob(db: Database.Database, backupJobId: number, options?: { limit?: number }): RoutelyBackupRunRecord[];
 export function markBackupRunsPruned(db: Database.Database, runIds?: number[]): RoutelyBackupRunRecord[];
+export function listNotificationChannels(db: Database.Database): RoutelyNotificationChannelRecord[];
+export function listEnabledNotificationChannelsForEvent(db: Database.Database, event: string): RoutelyNotificationChannelRecord[];
+export function getNotificationChannelById(db: Database.Database, channelId: number): RoutelyNotificationChannelRecord | null;
+export function upsertNotificationChannel(db: Database.Database, input?: Record<string, unknown>): RoutelyNotificationChannelRecord;
+export function deleteNotificationChannel(db: Database.Database, channelId: number): boolean;
+export function createNotificationAttempt(
+  db: Database.Database,
+  input?: { channelId?: number | null; channel_id?: number | null; event?: string; target?: string | null; resourceType?: string | null; resource_type?: string | null; resourceId?: number | null; resource_id?: number | null; message?: string | null }
+): RoutelyNotificationAttemptRecord;
+export function updateNotificationAttempt(
+  db: Database.Database,
+  attemptId: number,
+  patch?: { status?: string; httpStatus?: number | null; http_status?: number | null; message?: string | null; finishedAt?: string | null; finished_at?: string | null }
+): RoutelyNotificationAttemptRecord | null;
+export function getNotificationAttemptById(db: Database.Database, attemptId: number): RoutelyNotificationAttemptRecord | null;
+export function listNotificationAttempts(db: Database.Database, options?: { limit?: number }): RoutelyNotificationAttemptRecord[];
 export interface RoutelyDomainRecord {
   id: number;
   app_id: number;

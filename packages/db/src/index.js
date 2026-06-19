@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { normalizeAppEnvInput, normalizeAppInput, normalizeBackupSchedule, normalizeDatabaseType } from "@routely/core";
+import { normalizeAppEnvInput, normalizeAppInput, normalizeBackupSchedule, normalizeDatabaseType, normalizeNotificationChannelInput } from "@routely/core";
 
 export const routelyDbVersion = "0.1.0";
 
@@ -189,6 +189,31 @@ export function migrate(db) {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS notification_channels (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      type TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      events TEXT NOT NULL DEFAULT '[]',
+      config TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_delivery_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      channel_id INTEGER REFERENCES notification_channels(id) ON DELETE SET NULL,
+      event TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'queued',
+      http_status INTEGER,
+      message TEXT,
+      target TEXT,
+      resource_type TEXT,
+      resource_id INTEGER,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      finished_at TEXT
+    );
+
     CREATE TABLE IF NOT EXISTS deployments (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       app_id INTEGER NOT NULL REFERENCES apps(id) ON DELETE CASCADE,
@@ -365,6 +390,9 @@ export function migrate(db) {
   addColumnIfMissing(db, "databases", "env", "TEXT NOT NULL DEFAULT '{}'");
   addColumnIfMissing(db, "backup_jobs", "local_dir", "TEXT");
   addColumnIfMissing(db, "backup_runs", "trigger", "TEXT NOT NULL DEFAULT 'manual'");
+  addColumnIfMissing(db, "notification_delivery_attempts", "target", "TEXT");
+  addColumnIfMissing(db, "notification_delivery_attempts", "resource_type", "TEXT");
+  addColumnIfMissing(db, "notification_delivery_attempts", "resource_id", "INTEGER");
   try {
     db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_healthchecks_app_target ON healthchecks(app_id, target)");
   } catch {
@@ -1096,6 +1124,24 @@ function parseBackupRunRecord(row) {
   };
 }
 
+function parseNotificationChannelRecord(row) {
+  return {
+    ...row,
+    enabled: Boolean(row.enabled),
+    events: parseJsonArray(row.events),
+    config: parseJsonObject(row.config)
+  };
+}
+
+function parseNotificationAttemptRecord(row) {
+  return {
+    ...row,
+    channel_id: row.channel_id == null ? null : Number(row.channel_id),
+    http_status: row.http_status == null ? null : Number(row.http_status),
+    resource_id: row.resource_id == null ? null : Number(row.resource_id)
+  };
+}
+
 export function listDatabases(db) {
   return db.prepare(`
     SELECT databases.*, apps.name AS app_name
@@ -1323,6 +1369,98 @@ export function markBackupRunsPruned(db, runIds = []) {
   const apply = db.transaction((items) => items.forEach((id) => mark.run(id)));
   apply(ids);
   return ids.map((id) => getBackupRunById(db, id)).filter(Boolean);
+}
+
+export function listNotificationChannels(db) {
+  return db.prepare("SELECT * FROM notification_channels ORDER BY enabled DESC, name ASC").all().map(parseNotificationChannelRecord);
+}
+
+export function listEnabledNotificationChannelsForEvent(db, event) {
+  return listNotificationChannels(db).filter((channel) => channel.enabled && channel.events.includes(String(event)));
+}
+
+export function getNotificationChannelById(db, channelId) {
+  const row = db.prepare("SELECT * FROM notification_channels WHERE id = ?").get(Number(channelId)) || null;
+  return row ? parseNotificationChannelRecord(row) : null;
+}
+
+export function upsertNotificationChannel(db, input = {}) {
+  const channel = normalizeNotificationChannelInput(input);
+  const id = Number(input.id || input.channelId || input.channel_id);
+  const existing = Number.isInteger(id) ? getNotificationChannelById(db, id) : db.prepare("SELECT * FROM notification_channels WHERE name = ?").get(channel.name);
+
+  if (existing) {
+    db.prepare(`
+      UPDATE notification_channels
+      SET name = ?, type = ?, enabled = ?, events = ?, config = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(channel.name, channel.type, channel.enabled ? 1 : 0, serializeJsonArray(channel.events), serializeJsonObject(channel.config) || "{}", existing.id);
+    return getNotificationChannelById(db, existing.id);
+  }
+
+  const result = db.prepare(`
+    INSERT INTO notification_channels (name, type, enabled, events, config)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(channel.name, channel.type, channel.enabled ? 1 : 0, serializeJsonArray(channel.events), serializeJsonObject(channel.config) || "{}");
+  return getNotificationChannelById(db, Number(result.lastInsertRowid));
+}
+
+export function deleteNotificationChannel(db, channelId) {
+  const result = db.prepare("DELETE FROM notification_channels WHERE id = ?").run(Number(channelId));
+  return result.changes > 0;
+}
+
+export function createNotificationAttempt(db, input = {}) {
+  const result = db.prepare(`
+    INSERT INTO notification_delivery_attempts (channel_id, event, status, target, resource_type, resource_id, message)
+    VALUES (?, ?, 'queued', ?, ?, ?, ?)
+  `).run(
+    input.channelId || input.channel_id || null,
+    String(input.event || "unknown"),
+    input.target || null,
+    input.resourceType || input.resource_type || null,
+    input.resourceId || input.resource_id || null,
+    input.message || null
+  );
+  return getNotificationAttemptById(db, Number(result.lastInsertRowid));
+}
+
+export function updateNotificationAttempt(db, attemptId, patch = {}) {
+  const existing = getNotificationAttemptById(db, attemptId);
+  if (!existing) return null;
+  db.prepare(`
+    UPDATE notification_delivery_attempts
+    SET status = ?, http_status = ?, message = ?, finished_at = ?
+    WHERE id = ?
+  `).run(
+    patch.status || existing.status,
+    patch.httpStatus === undefined && patch.http_status === undefined ? existing.http_status : patch.httpStatus ?? patch.http_status,
+    patch.message === undefined ? existing.message : patch.message,
+    patch.finishedAt === undefined && patch.finished_at === undefined ? existing.finished_at : patch.finishedAt ?? patch.finished_at,
+    attemptId
+  );
+  return getNotificationAttemptById(db, attemptId);
+}
+
+export function getNotificationAttemptById(db, attemptId) {
+  const row = db.prepare(`
+    SELECT notification_delivery_attempts.*, notification_channels.name AS channel_name, notification_channels.type AS channel_type
+    FROM notification_delivery_attempts
+    LEFT JOIN notification_channels ON notification_channels.id = notification_delivery_attempts.channel_id
+    WHERE notification_delivery_attempts.id = ?
+  `).get(Number(attemptId)) || null;
+  return row ? parseNotificationAttemptRecord(row) : null;
+}
+
+export function listNotificationAttempts(db, options = {}) {
+  const limit = Number.isInteger(options.limit) ? options.limit : 50;
+  return db.prepare(`
+    SELECT notification_delivery_attempts.*, notification_channels.name AS channel_name, notification_channels.type AS channel_type
+    FROM notification_delivery_attempts
+    LEFT JOIN notification_channels ON notification_channels.id = notification_delivery_attempts.channel_id
+    ORDER BY notification_delivery_attempts.created_at DESC, notification_delivery_attempts.id DESC
+    LIMIT ?
+  `).all(limit).map(parseNotificationAttemptRecord);
 }
 
 function parseDeploymentRecord(row) {

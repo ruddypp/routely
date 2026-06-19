@@ -76,3 +76,9 @@ MVP rule:
 - Backup retention should be configurable.
 - Backup restore should require explicit confirmation.
 
+## 8. Outbound Notifications
+
+- Notification webhook URLs and Telegram bot tokens are secrets.
+- Public API responses must redact notification targets.
+- Outbound delivery should use short timeouts.
+- Outbound delivery should reject non-HTTP(S), URL credentials, and loopback/private/link-local targets after DNS resolution where practical.

@@ -90,3 +90,14 @@ POST   /api/backups/:id/run
 PATCH  /api/backups/:id
 ```
 
+## 9. Notification Endpoints
+
+```text
+GET    /api/notifications
+POST   /api/notifications
+PATCH  /api/notifications/:id
+DELETE /api/notifications/:id
+POST   /api/notifications/:id/test
+```
+
+Notification endpoints are production-authenticated through the daemon and same-origin dashboard API proxy. Public responses must redact webhook URLs, bot tokens, and other delivery secrets.

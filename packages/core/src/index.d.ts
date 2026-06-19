@@ -4,6 +4,11 @@ export type RoutelyAppStatus = "stopped" | "running" | "starting" | "crashed" | 
 export type RoutelyDeploymentStatus = "queued" | "preparing" | "building" | "starting" | "healthchecking" | "succeeded" | "failed";
 export type RoutelyDatabaseType = "postgres" | "mysql" | "mariadb" | "redis" | "mongodb";
 export type RoutelyBackupRunStatus = "queued" | "running" | "succeeded" | "failed" | "pruned";
+export type RoutelyNotificationChannelType = "webhook" | "discord" | "telegram";
+export type RoutelyNotificationEvent = "deploy_succeeded" | "deploy_failed" | "backup_failed";
+
+export const NOTIFICATION_CHANNEL_TYPES: RoutelyNotificationChannelType[];
+export const NOTIFICATION_EVENTS: RoutelyNotificationEvent[];
 
 export interface RoutelyDashboardConfig {
   port?: number;
@@ -220,6 +225,72 @@ export interface RoutelyDeploymentLogDto {
   message: string;
   createdAt: string;
 }
+
+export interface RoutelyNotificationChannelRecord {
+  id: number;
+  name: string;
+  type: RoutelyNotificationChannelType;
+  enabled: boolean | 0 | 1;
+  events: RoutelyNotificationEvent[];
+  config: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RoutelyNotificationChannelDto {
+  id: number;
+  name: string;
+  type: RoutelyNotificationChannelType;
+  enabled: boolean;
+  events: RoutelyNotificationEvent[];
+  target: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RoutelyNotificationAttemptRecord {
+  id: number;
+  channel_id: number | null;
+  channel_name?: string | null;
+  channel_type?: RoutelyNotificationChannelType | string | null;
+  event: RoutelyNotificationEvent | string;
+  status: string;
+  http_status: number | null;
+  message: string | null;
+  target: string | null;
+  resource_type: string | null;
+  resource_id: number | null;
+  created_at: string;
+  finished_at: string | null;
+}
+
+export interface RoutelyNotificationAttemptDto {
+  id: number;
+  channelId: number | null;
+  channelName: string | null;
+  channelType: string | null;
+  event: string;
+  status: string;
+  httpStatus: number | null;
+  message: string | null;
+  target: string | null;
+  resourceType: string | null;
+  resourceId: number | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export function normalizeNotificationChannelInput(input?: Record<string, unknown>): {
+  name: string;
+  type: RoutelyNotificationChannelType;
+  enabled: boolean;
+  events: RoutelyNotificationEvent[];
+  config: Record<string, string>;
+};
+export function notificationChannelToPublicDto(row: RoutelyNotificationChannelRecord): RoutelyNotificationChannelDto;
+export function notificationAttemptToPublicDto(row: RoutelyNotificationAttemptRecord): RoutelyNotificationAttemptDto;
+export function buildNotificationMessage(event: string, context?: Record<string, unknown>): string;
+export function buildNotificationPayload(channel: RoutelyNotificationChannelRecord, event: string, context?: Record<string, unknown>): Record<string, unknown>;
 
 export interface RoutelyHealthcheckRecord {
   id: number;

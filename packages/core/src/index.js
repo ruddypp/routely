@@ -9,6 +9,8 @@ export const APP_STATUSES = ["stopped", "running", "starting", "crashed", "unkno
 export const DEPLOYMENT_STATUSES = ["queued", "preparing", "building", "starting", "healthchecking", "succeeded", "failed"];
 export const DATABASE_TYPES = ["postgres", "mysql", "mariadb", "redis", "mongodb"];
 export const BACKUP_RUN_STATUSES = ["queued", "running", "succeeded", "failed", "pruned"];
+export const NOTIFICATION_CHANNEL_TYPES = ["webhook", "discord", "telegram"];
+export const NOTIFICATION_EVENTS = ["deploy_succeeded", "deploy_failed", "backup_failed"];
 
 const SECRET_ENV_PATTERN = /(SECRET|TOKEN|PASSWORD|PRIVATE|KEY)/i;
 const REDACTED_VALUE = "[redacted]";
@@ -21,6 +23,123 @@ function enumValue(value, allowed, fallback, label) {
   }
 
   return normalized;
+}
+
+function redactUrlSecret(value) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  try {
+    const url = new URL(text);
+    if (url.username) url.username = REDACTED_VALUE;
+    if (url.password) url.password = REDACTED_VALUE;
+    for (const key of [...url.searchParams.keys()]) {
+      if (SECRET_ENV_PATTERN.test(key) || /token|signature|key|secret/i.test(key)) {
+        url.searchParams.set(key, REDACTED_VALUE);
+      }
+    }
+    const parts = url.pathname.split("/").filter(Boolean);
+    if (parts.length > 2 && /webhook|bot|api/i.test(url.hostname + url.pathname)) {
+      url.pathname = `/${parts.slice(0, -1).join("/")}/${REDACTED_VALUE}`;
+    }
+    return url.toString();
+  } catch {
+    return text.length <= 8 ? REDACTED_VALUE : `${text.slice(0, 4)}...${REDACTED_VALUE}`;
+  }
+}
+
+export function normalizeNotificationChannelInput(input = {}) {
+  const type = enumValue(String(input.type || input.channelType || "").trim().toLowerCase(), NOTIFICATION_CHANNEL_TYPES, "webhook", "notification channel type");
+  const name = String(input.name || type).trim();
+  if (!name) throw new Error("Notification channel name is required.");
+  const events = normalizeStringArray(input.events || input.subscribedEvents || NOTIFICATION_EVENTS).filter((event) => NOTIFICATION_EVENTS.includes(event));
+  if (events.length === 0) throw new Error("At least one supported notification event is required.");
+
+  const config = input.config && typeof input.config === "object" && !Array.isArray(input.config) ? { ...input.config } : {};
+  if (input.url != null) config.url = String(input.url);
+  if (input.webhookUrl != null) config.url = String(input.webhookUrl);
+  if (input.botToken != null) config.botToken = String(input.botToken);
+  if (input.chatId != null) config.chatId = String(input.chatId);
+
+  if ((type === "webhook" || type === "discord") && !config.url) {
+    throw new Error(`${type} notification channel requires a webhook URL.`);
+  }
+  if (type === "telegram" && (!config.botToken || !config.chatId)) {
+    throw new Error("Telegram notification channel requires botToken and chatId.");
+  }
+
+  return {
+    name,
+    type,
+    enabled: input.enabled == null ? true : Boolean(input.enabled),
+    events,
+    config
+  };
+}
+
+export function notificationChannelToPublicDto(row) {
+  const config = row.config && typeof row.config === "object" ? row.config : {};
+  const target = row.type === "telegram"
+    ? `telegram:${config.chatId ? String(config.chatId).replace(/.(?=.{4})/g, "*") : REDACTED_VALUE}`
+    : redactUrlSecret(config.url);
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    enabled: Boolean(row.enabled),
+    events: Array.isArray(row.events) ? row.events : [],
+    target,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+export function notificationAttemptToPublicDto(row) {
+  return {
+    id: row.id,
+    channelId: row.channel_id,
+    channelName: row.channel_name || null,
+    channelType: row.channel_type || null,
+    event: row.event,
+    status: row.status,
+    httpStatus: row.http_status == null ? null : Number(row.http_status),
+    message: row.message || null,
+    target: row.target || null,
+    resourceType: row.resource_type || null,
+    resourceId: row.resource_id == null ? null : Number(row.resource_id),
+    createdAt: row.created_at,
+    finishedAt: row.finished_at || null
+  };
+}
+
+export function buildNotificationMessage(event, context = {}) {
+  const appName = context.appName || context.app?.name || "app";
+  if (event === "deploy_succeeded") return `Routely deploy succeeded for ${appName}.`;
+  if (event === "deploy_failed") return `Routely deploy failed for ${appName}: ${context.errorMessage || "see deployment logs"}.`;
+  if (event === "backup_failed") return `Routely backup failed for ${context.databaseName || "database"}: ${context.errorMessage || "see backup runs"}.`;
+  return `Routely event: ${event}.`;
+}
+
+export function buildNotificationPayload(channel, event, context = {}) {
+  const message = buildNotificationMessage(event, context);
+  const payload = {
+    source: "routely",
+    event,
+    message,
+    app: context.appName || null,
+    deploymentId: context.deploymentId || null,
+    backupRunId: context.backupRunId || null,
+    database: context.databaseName || null,
+    status: event.endsWith("failed") ? "failed" : "succeeded",
+    occurredAt: context.occurredAt || new Date().toISOString()
+  };
+
+  if (channel.type === "discord") {
+    return { content: message, embeds: [{ title: message, color: event.endsWith("failed") ? 15158332 : 3066993 }] };
+  }
+  if (channel.type === "telegram") {
+    return { chat_id: channel.config.chatId, text: message, disable_web_page_preview: true };
+  }
+  return payload;
 }
 
 export function normalizeWorkspaceConfig(input = {}) {

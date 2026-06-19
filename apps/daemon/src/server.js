@@ -2,6 +2,7 @@ import Fastify from "fastify";
 import "dotenv/config";
 import { config as loadDotenv } from "dotenv";
 import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, statSync, statfsSync, unlinkSync, writeFileSync } from "node:fs";
+import dns from "node:dns/promises";
 import net from "node:net";
 import os from "node:os";
 import { dirname, resolve } from "node:path";
@@ -13,6 +14,7 @@ import {
   backupJobToPublicDto,
   backupRunToPublicDto,
   backupScheduleDue,
+  buildNotificationPayload,
   databaseToPublicDto,
   defaultProductionDataDir,
   deploymentLogToPublicDto,
@@ -24,6 +26,8 @@ import {
   loadWorkspaceConfig,
   mergeAppEnv,
   metricSampleToPublicDto,
+  notificationAttemptToPublicDto,
+  notificationChannelToPublicDto,
   normalizeDatabaseType,
   redactSecrets,
   runServerDoctorChecks,
@@ -35,6 +39,7 @@ import {
   appendDeploymentLog,
   appEnvPendingState,
   createBackupRun,
+  createNotificationAttempt,
   clearAppEnvPendingFlags,
   connectAppToGithubRepository,
   createDeployment,
@@ -42,6 +47,7 @@ import {
   deleteApp,
   deleteDomain,
   deleteAppEnvVar,
+  deleteNotificationChannel,
   deleteProxyRouteForDomain,
   getDeploymentById,
   getBackupJobById,
@@ -62,6 +68,7 @@ import {
   listBackupRunsForJob,
   listDatabases,
   listDueBackupJobs,
+  listEnabledNotificationChannelsForEvent,
   listMetricSamplesForApp,
   initializeRoutely,
   listAppEnvVars,
@@ -75,6 +82,8 @@ import {
   listDomains,
   listDomainsForApp,
   listProxyRoutes,
+  listNotificationAttempts,
+  listNotificationChannels,
   listRunningRuntimeInstances,
   listSecretValuesForApp,
   listApps,
@@ -90,6 +99,7 @@ import {
   updateApp,
   updateDeployment,
   updateBackupRun,
+  updateNotificationAttempt,
   updateAppStatus,
   updateDatabaseStatus,
   updateDomainVerification,
@@ -101,6 +111,7 @@ import {
   upsertProxyRoute,
   upsertBackupJob,
   upsertDatabase,
+  upsertNotificationChannel,
   upsertApp
 } from "@routely/db";
 import {
@@ -207,7 +218,7 @@ function publicServerStatus() {
           checks: Array.isArray(lastDoctor.checks) ? lastDoctor.checks : []
         }
       : null,
-    disabledProductionActions: ["rollback", "notifications", "external backup storage"]
+    disabledProductionActions: ["rollback", "external backup storage"]
   };
 }
 
@@ -772,6 +783,13 @@ async function markDeploymentFailed(appRecord, deploymentId, phase, error, conta
     errorMessage: message,
     finishedAt: new Date().toISOString()
   });
+  void notifyEvent("deploy_failed", {
+    appName: appRecord.name,
+    deploymentId,
+    errorMessage: message,
+    resourceType: "deployment",
+    resourceId: deploymentId
+  });
   await removeContainerIfPresent(containerName, deploymentId, phase);
 }
 
@@ -836,6 +854,12 @@ async function runDockerfileDeployment(appRecord, deploymentId) {
       appendDeploymentLogForApp(appRecord, deploymentId, { phase: "succeeded", message: `refreshed ${routes.length} proxy route(s)` });
     }
     appendDeploymentLogForApp(appRecord, deploymentId, { phase: "succeeded", message: `deployment succeeded at ${deploymentUrl(getDeploymentById(db, deploymentId))}` });
+    void notifyEvent("deploy_succeeded", {
+      appName: appRecord.name,
+      deploymentId,
+      resourceType: "deployment",
+      resourceId: deploymentId
+    });
   } catch (error) {
     await markDeploymentFailed(appRecord, deploymentId, getDeploymentById(db, deploymentId)?.phase || "failed", error, containerName);
   }
@@ -1092,6 +1116,99 @@ function publicBackupPayload() {
   };
 }
 
+function publicNotificationsPayload() {
+  return {
+    channels: listNotificationChannels(db).map(notificationChannelToPublicDto),
+    attempts: listNotificationAttempts(db).map(notificationAttemptToPublicDto)
+  };
+}
+
+function isPrivateAddress(address) {
+  if (net.isIPv4(address)) {
+    const parts = address.split(".").map(Number);
+    return parts[0] === 10
+      || parts[0] === 127
+      || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+      || (parts[0] === 192 && parts[1] === 168)
+      || (parts[0] === 169 && parts[1] === 254)
+      || parts[0] === 0;
+  }
+  if (net.isIPv6(address)) {
+    const normalized = address.toLowerCase();
+    return normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:");
+  }
+  return true;
+}
+
+async function safeOutboundUrl(rawUrl) {
+  const url = new URL(String(rawUrl || ""));
+  if (url.protocol !== "https:" && url.protocol !== "http:") {
+    throw new Error("Notification URL must use http or https.");
+  }
+  if (url.username || url.password) {
+    throw new Error("Notification URL credentials are not allowed.");
+  }
+  const records = await dns.lookup(url.hostname, { all: true, verbatim: false });
+  if (records.length === 0 || records.some((record) => isPrivateAddress(record.address))) {
+    throw new Error("Notification URL must not resolve to a private, loopback, or link-local address.");
+  }
+  return url.toString();
+}
+
+function notificationTarget(channel) {
+  if (channel.type === "telegram") {
+    return `https://api.telegram.org/bot[redacted]/sendMessage`;
+  }
+  return notificationChannelToPublicDto(channel).target;
+}
+
+async function deliverNotification(channel, event, context = {}) {
+  const target = notificationTarget(channel);
+  const attempt = createNotificationAttempt(db, {
+    channelId: channel.id,
+    event,
+    target,
+    resourceType: context.resourceType || null,
+    resourceId: context.resourceId || null,
+    message: `queued ${event}`
+  });
+
+  try {
+    const url = channel.type === "telegram"
+      ? await safeOutboundUrl(`https://api.telegram.org/bot${channel.config.botToken}/sendMessage`)
+      : await safeOutboundUrl(channel.config.url);
+    const payload = buildNotificationPayload(channel, event, context);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json", "user-agent": "routely-notifications/0.1" },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(5000)
+    });
+    const text = await response.text().catch(() => "");
+    return updateNotificationAttempt(db, attempt.id, {
+      status: response.ok ? "succeeded" : "failed",
+      httpStatus: response.status,
+      message: response.ok ? "notification delivered" : (text.slice(0, 240) || `HTTP ${response.status}`),
+      finishedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    return updateNotificationAttempt(db, attempt.id, {
+      status: "failed",
+      message: error instanceof Error ? error.message : String(error),
+      finishedAt: new Date().toISOString()
+    });
+  }
+}
+
+async function notifyEvent(event, context = {}) {
+  const channels = listEnabledNotificationChannelsForEvent(db, event);
+  const attempts = [];
+  for (const channel of channels) {
+    attempts.push(await deliverNotification(channel, event, context));
+  }
+  return attempts.filter(Boolean);
+}
+
 function buildProductionDatabaseService(input) {
   const type = normalizeDatabaseType(input.type || input.preset);
   const name = String(input.name || type).trim();
@@ -1186,11 +1303,19 @@ async function runBackupJob(job, trigger = "manual") {
     try {
       if (existsSync(filePath)) unlinkSync(filePath);
     } catch {}
-    return updateBackupRun(db, run.id, {
+    const failed = updateBackupRun(db, run.id, {
       status: "failed",
       message: error instanceof Error ? error.message : String(error),
       finishedAt: new Date().toISOString()
     });
+    void notifyEvent("backup_failed", {
+      databaseName: databaseRecord.name,
+      backupRunId: failed.id,
+      errorMessage: failed.message,
+      resourceType: "backup_run",
+      resourceId: failed.id
+    });
+    return failed;
   }
 }
 
@@ -1561,6 +1686,50 @@ app.post("/databases/:id/stop", async (request, reply) => {
 
 app.get("/backups", async () => {
   return publicBackupPayload();
+});
+
+app.get("/notifications", async () => {
+  return publicNotificationsPayload();
+});
+
+app.post("/notifications", async (request, reply) => {
+  try {
+    const channel = upsertNotificationChannel(db, request.body || {});
+    return reply.code(201).send({ channel: notificationChannelToPublicDto(channel), ...publicNotificationsPayload() });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid notification channel payload." });
+  }
+});
+
+app.patch("/notifications/:id", async (request, reply) => {
+  const existing = listNotificationChannels(db).find((channel) => channel.id === Number(request.params.id));
+  if (!existing) return reply.code(404).send({ error: `Notification channel ${request.params.id} not found.` });
+  try {
+    const channel = upsertNotificationChannel(db, { ...existing, ...(request.body || {}), id: existing.id });
+    return reply.code(200).send({ channel: notificationChannelToPublicDto(channel), ...publicNotificationsPayload() });
+  } catch (error) {
+    return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid notification channel update." });
+  }
+});
+
+app.delete("/notifications/:id", async (request, reply) => {
+  const deleted = deleteNotificationChannel(db, Number(request.params.id));
+  if (!deleted) return reply.code(404).send({ error: `Notification channel ${request.params.id} not found.` });
+  return reply.code(200).send({ ok: true, ...publicNotificationsPayload() });
+});
+
+app.post("/notifications/:id/test", async (request, reply) => {
+  const channel = listNotificationChannels(db).find((item) => item.id === Number(request.params.id));
+  if (!channel) return reply.code(404).send({ error: `Notification channel ${request.params.id} not found.` });
+  const event = request.body?.event || "deploy_succeeded";
+  const attempt = await deliverNotification(channel, event, {
+    appName: request.body?.appName || "test-app",
+    databaseName: request.body?.databaseName || "test-db",
+    errorMessage: "test delivery",
+    resourceType: "notification_test",
+    resourceId: channel.id
+  });
+  return reply.code(attempt.status === "succeeded" ? 200 : 502).send({ attempt: notificationAttemptToPublicDto(attempt), ...publicNotificationsPayload() });
 });
 
 app.post("/backups", async (request, reply) => {

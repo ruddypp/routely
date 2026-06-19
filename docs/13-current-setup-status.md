@@ -130,7 +130,15 @@ Product references for future work:
 - CLI database/backup operations now include `routely db ls`, `routely backup enable <database>`, `routely backup disable <database>`, `routely backup run <database>`, and `routely backup ls`.
 - Next.js same-origin route handlers proxy database and backup endpoints under `/api/*`; browser code still does not call the daemon directly.
 - The dashboard now includes a real Databases & Backups operational panel with database create/start/stop controls, backup enable/run/toggle controls, schedule/retention state, and backup run history backed by daemon/storage data.
-- Restore automation, external backup storage, notifications, full rollback, marketplace templates, and broad VPS operations remain deferred.
+- Checkpoint 11 has added the first notifications slice.
+- SQLite now stores `notification_channels` and `notification_delivery_attempts`.
+- The daemon exposes authenticated notification endpoints at `/notifications` and `/notifications/:id/test` for generic webhook, Discord webhook, and Telegram channels.
+- Outbound notification delivery uses short timeouts and rejects non-HTTP(S), credentialed, loopback, private, and link-local targets after DNS lookup.
+- Deploy succeeded, deploy failed, and backup failed events now write delivery attempts for enabled subscribed channels.
+- CLI notification operations now include `routely notify ls`, `routely notify add <webhook|discord|telegram>`, `routely notify test <channel-id>`, and `routely notify disable <channel-id>`.
+- Next.js same-origin route handlers proxy notification endpoints under `/api/*`; browser code still does not call the daemon directly.
+- The dashboard now has clickable sidebar/mobile feature modules, an overview-only home, and a real Settings -> Notifications panel backed by daemon/storage data.
+- Restore automation, external backup storage, full rollback, marketplace templates, email notifications, and broad VPS operations remain deferred.
 
 ## Current Structure
 
@@ -252,6 +260,11 @@ routely db ls
 routely backup enable postgres --schedule "0 2 * * *" --retention-days 7
 routely backup run postgres
 routely backup ls
+routely notify add discord --name deploys --url https://discord.com/api/webhooks/...
+routely notify add webhook --name generic --url https://hooks.example/routely
+routely notify add telegram --name telegram --bot-token 123:abc --chat-id 456
+routely notify test 1
+routely notify ls
 routely domain root example.com
 routely domain add web web.example.com
 routely domain verify web.example.com
@@ -269,7 +282,7 @@ Command apps declared in `routely.yml` can use `depends_on` to control local sta
 
 Local Compose services declared in `services:` use `driver: compose`. Generated Compose files are written under `.routely/compose` unless `compose_file` is supplied. Database templates are local-development defaults and are internal by default where practical.
 
-Production server foundation now supports Dockerfile deployments, domain/proxy/HTTPS state, signed GitHub push-to-deploy for apps connected to a GitHub repository/branch, stored env/secrets injection, app health state, runtime/deployment log inspection, narrow host/container metric sampling, production database records, and local-file database backups. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API and CLI processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Dockerfile deployments are available through `routely deploy <app> [--watch]` and the dashboard deploy panel. Domain commands and the dashboard can add hostnames, verify DNS against `ROUTELY_SERVER_PUBLIC_IP`, and generate Traefik-compatible HTTPS routes for the latest successful deployment. Env commands and the dashboard Env inspector store secret values in SQLite, hide them after save, and mark apps as needing restart/redeploy after env/settings changes. GitHub App env can be configured with `ROUTELY_GITHUB_APP_ID`, `ROUTELY_GITHUB_WEBHOOK_SECRET`, `ROUTELY_GITHUB_PRIVATE_KEY`, `ROUTELY_GITHUB_CLIENT_ID`, and `ROUTELY_GITHUB_CLIENT_SECRET`. Restore automation, external backup storage, static deploys, full rollback, alerts, notifications, and broad VPS operations remain deferred to later checkpoints.
+Production server foundation now supports Dockerfile deployments, domain/proxy/HTTPS state, signed GitHub push-to-deploy for apps connected to a GitHub repository/branch, stored env/secrets injection, app health state, runtime/deployment log inspection, narrow host/container metric sampling, production database records, local-file database backups, and notification channels/delivery attempts. `routely server init` switches the workspace/server state to production mode, records the production data directory strategy, and prints a one-time admin token. Keep that token secret and provide it to server-side dashboard/API and CLI processes as `ROUTELY_ADMIN_TOKEN` until a full login UI lands. Dockerfile deployments are available through `routely deploy <app> [--watch]` and the dashboard deploy panel. Domain commands and the dashboard can add hostnames, verify DNS against `ROUTELY_SERVER_PUBLIC_IP`, and generate Traefik-compatible HTTPS routes for the latest successful deployment. Env commands and the dashboard Env inspector store secret values in SQLite, hide them after save, and mark apps as needing restart/redeploy after env/settings changes. Notification commands and the dashboard Settings panel support generic webhook, Discord webhook, and Telegram channels with redacted public targets and audited delivery attempts. GitHub App env can be configured with `ROUTELY_GITHUB_APP_ID`, `ROUTELY_GITHUB_WEBHOOK_SECRET`, `ROUTELY_GITHUB_PRIVATE_KEY`, `ROUTELY_GITHUB_CLIENT_ID`, and `ROUTELY_GITHUB_CLIENT_SECRET`. Restore automation, external backup storage, static deploys, full rollback, marketplace templates, email notifications, and broad VPS operations remain deferred to later checkpoints.
 
 ## CLI Build And Global Reinstall Flow
 

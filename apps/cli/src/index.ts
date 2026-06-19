@@ -144,6 +144,10 @@ Usage:
   routely backup disable <database>
   routely backup run <database>
   routely backup ls
+  routely notify ls
+  routely notify add <webhook|discord|telegram> --name <name> [--url <url>] [--bot-token <token>] [--chat-id <id>]
+  routely notify test <channel-id>
+  routely notify disable <channel-id>
   routely doctor           Check local Routely prerequisites and port availability
   routely server init      Prepare production server foundation state and admin token
   routely server doctor    Check production server readiness
@@ -332,6 +336,35 @@ type RoutelyBackupsResponse = {
   runs: RoutelyBackupRunDto[];
   job?: RoutelyBackupJobDto;
   run?: RoutelyBackupRunDto;
+};
+
+type RoutelyNotificationChannelDto = {
+  id: number;
+  name: string;
+  type: string;
+  enabled: boolean;
+  events: string[];
+  target: string | null;
+};
+
+type RoutelyNotificationAttemptDto = {
+  id: number;
+  channelId: number | null;
+  channelName: string | null;
+  channelType: string | null;
+  event: string;
+  status: string;
+  httpStatus: number | null;
+  message: string | null;
+  target: string | null;
+  createdAt: string;
+};
+
+type RoutelyNotificationsResponse = {
+  channels: RoutelyNotificationChannelDto[];
+  attempts: RoutelyNotificationAttemptDto[];
+  channel?: RoutelyNotificationChannelDto;
+  attempt?: RoutelyNotificationAttemptDto;
 };
 
 async function daemonRequest<T>(path: string, init: RequestInit = {}): Promise<DaemonResult<T>> {
@@ -778,6 +811,84 @@ async function backupCommand(args: string[]): Promise<void> {
     process.exit(1);
   }
   console.log(`Backup ${result.data.run?.status}: ${result.data.run?.filePath || result.data.run?.message || "no file"}`);
+}
+
+async function notifyCommand(args: string[]): Promise<void> {
+  const subcommand = String(args[0] || "ls").trim();
+
+  if (subcommand === "ls" || subcommand === "list") {
+    const result = await daemonRequest<RoutelyNotificationsResponse>("/notifications");
+    if (!result.ok) {
+      console.error(`Could not list notifications: ${result.error}`);
+      process.exit(1);
+    }
+    if (result.data.channels.length === 0) console.log("No notification channels configured yet.");
+    for (const channel of result.data.channels) {
+      console.log(`channel:${channel.id}\t${channel.name}\t${channel.type}\t${channel.enabled ? "enabled" : "disabled"}\t${channel.events.join(",")}\t${channel.target || "-"}`);
+    }
+    for (const attempt of result.data.attempts.slice(0, 10)) {
+      console.log(`attempt:${attempt.id}\t${attempt.channelName || attempt.channelId || "deleted"}\t${attempt.event}\t${attempt.status}\t${attempt.httpStatus || "-"}\t${attempt.message || "-"}`);
+    }
+    return;
+  }
+
+  if (subcommand === "add") {
+    const { positionals, flags } = parseFlags(args.slice(1));
+    const type = String(positionals[0] || "").trim();
+    const name = String(flags.name || type).trim();
+    const events = typeof flags.events === "string" ? flags.events.split(",").map((item) => item.trim()).filter(Boolean) : undefined;
+    if (!type || !name) {
+      console.error("Usage: routely notify add <webhook|discord|telegram> --name <name> [--url <url>] [--bot-token <token>] [--chat-id <id>]");
+      process.exit(1);
+    }
+    const result = await daemonRequest<RoutelyNotificationsResponse>("/notifications", {
+      method: "POST",
+      body: JSON.stringify({
+        type,
+        name,
+        events,
+        url: typeof flags.url === "string" ? flags.url : undefined,
+        botToken: typeof flags["bot-token"] === "string" ? flags["bot-token"] : undefined,
+        chatId: typeof flags["chat-id"] === "string" ? flags["chat-id"] : undefined
+      })
+    });
+    if (!result.ok) {
+      console.error(`Could not add notification channel: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`Added notification channel ${result.data.channel?.name || name}.`);
+    console.log(`Target: ${result.data.channel?.target || "[redacted]"}`);
+    return;
+  }
+
+  const id = Number(args[1]);
+  if (!Number.isInteger(id)) {
+    console.error("Usage: routely notify <test|disable> <channel-id>");
+    process.exit(1);
+  }
+
+  if (subcommand === "test") {
+    const result = await daemonRequest<RoutelyNotificationsResponse>(`/notifications/${id}/test`, { method: "POST", body: JSON.stringify({}) });
+    if (!result.ok) {
+      console.error(`Notification test failed: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`Notification test ${result.data.attempt?.status}: ${result.data.attempt?.message || "sent"}`);
+    return;
+  }
+
+  if (subcommand === "disable") {
+    const result = await daemonRequest<RoutelyNotificationsResponse>(`/notifications/${id}`, { method: "PATCH", body: JSON.stringify({ enabled: false }) });
+    if (!result.ok) {
+      console.error(`Could not disable notification channel: ${result.error}`);
+      process.exit(1);
+    }
+    console.log(`Disabled notification channel ${result.data.channel?.name || id}.`);
+    return;
+  }
+
+  console.error("Usage: routely notify <ls|add|test|disable> ...");
+  process.exit(1);
 }
 
 function stopProcess(child: ChildProcess): void {
@@ -1639,6 +1750,10 @@ switch (command) {
     break;
   case "backup":
     await backupCommand(argv.slice(1));
+    break;
+  case "notify":
+  case "notifications":
+    await notifyCommand(argv.slice(1));
     break;
   case "up":
     await upCommand();

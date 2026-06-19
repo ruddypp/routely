@@ -1,8 +1,8 @@
 # Next Agent Prompt
 
 Last updated: 2026-06-19  
-Latest completed checkpoint: Checkpoint 10, Database Services and Backups  
-Expected commit: `feat: add database backups`
+Latest completed checkpoint: Checkpoint 11, Notifications and Release Polish foundation  
+Expected commit: `feat: add notifications`
 
 Use this prompt for the next implementation agent. It asks for the next full product/backend/frontend slice, not a frontend-only redesign.
 
@@ -41,7 +41,7 @@ Product/design execution rule:
 - Preserve DESIGN.md: dark functional surfaces, compact typography, restrained green accent, rounded controls, and no generic SaaS landing page.
 
 Current progress:
-- Checkpoint 0 through Checkpoint 10 are implemented.
+- Checkpoint 0 through Checkpoint 11 are implemented.
 - Browser code must keep using same-origin /api/*; do not call the daemon directly from browser code.
 - Production mode requires admin bearer token auth for private daemon actions.
 - Manual Dockerfile deploy, domain/proxy/HTTPS state, signed GitHub push-to-deploy behavior, stored env/secrets, secret redaction, restart/redeploy-needed state, runtime/deploy logs, app health, metric samples, production database records, and local-file backup state must be preserved.
@@ -49,24 +49,20 @@ Current progress:
 Current implemented surface:
 - CLI supports workspace init/sync/add/up/down/ps/logs/restart/doctor.
 - CLI supports routely server init, routely server doctor, routely deploy <app> [--watch], env commands, domain commands, GitHub commands, and routely health <app>.
-- SQLite/config persistence covers apps, services, Compose metadata, deployments, deployment logs, domains, proxy routes, GitHub state, webhook deliveries, app env/secrets, restart/redeploy-needed flags, healthchecks, metrics_samples, databases, backup_jobs, and backup_runs.
+- SQLite/config persistence covers apps, services, Compose metadata, deployments, deployment logs, domains, proxy routes, GitHub state, webhook deliveries, app env/secrets, restart/redeploy-needed flags, healthchecks, metrics_samples, databases, backup_jobs, backup_runs, notification_channels, and notification_delivery_attempts.
 - Dockerfile deployments build local Dockerfile apps, start containers on temporary 127.0.0.1:32xxx ports, inject stored production env, run healthcheck/container-running checks, persist deployment/log metadata, and refresh app health state.
 - Domains target the latest successful Dockerfile deployment and generate Traefik-compatible HTTPS config after DNS verification.
 - GitHub webhooks validate X-Hub-Signature-256, deduplicate X-GitHub-Delivery, filter unsupported events, and queue the existing Dockerfile deployment flow for connected repo/branch pushes.
-- Dashboard has local app/service separation, server readiness, Dockerfile deploy panel, deployment phase/log panels, temporary URLs, domain/DNS/proxy/HTTPS controls, GitHub repository/source/delivery controls, Env inspector, Health inspector, Databases & Backups panel, pending restart/redeploy indicators, desktop sidebar, and mobile bottom nav.
+- Dashboard has clickable sidebar/mobile feature modules, an overview-only home, local app/service separation, server readiness, Dockerfile deploy panel, deployment phase/log panels, temporary URLs, domain/DNS/proxy/HTTPS controls, GitHub repository/source/delivery controls, Env inspector, Health inspector, Databases & Backups panels, Settings notifications panel, pending restart/redeploy indicators, desktop sidebar, and mobile bottom nav.
+- Notifications now support generic webhook, Discord webhook, and Telegram channels with redacted public targets and audited delivery attempts. Deploy succeeded, deploy failed, and backup failed events trigger enabled subscribed channels. Daemon outbound delivery is constrained to HTTP(S), rejects URL credentials and private/loopback/link-local targets after DNS lookup, and uses short timeouts.
 
 Your next task:
-Implement Checkpoint 11 from docs/14-implementation-plan.md comprehensively: Notifications and Release Polish.
+Continue release polish for public alpha readiness: improve README/install docs, add example projects, add screenshots or demo assets after the UI is stable, add issue templates, and add a contributing guide. If a later implementation checkpoint is chosen instead, preserve Checkpoint 11 notifications behavior and do not implement full rollback, marketplace templates, destructive restore automation, external backup storage, email notifications, or broad VPS operations unless explicitly requested.
 
 Execution bar:
-- Backend first: schema/DB helpers for notification settings and delivery attempts, daemon endpoints, auth enforcement, safe outbound request behavior, secret redaction, and tests.
-- CLI/API where useful: add notification workflows only if backed by real daemon/storage data.
-- Frontend after backend exists: add notification/release-polish surfaces around real data, preferably as sidebar feature pages/panels rather than more content crammed into the dashboard overview. Future/unsafe actions must be inert and labeled as later scope.
-- Improve the existing frontend structure while implementing the backend slice: make daily operations more readable and comfortable, with less dashboard clutter and clearer sidebar hierarchy.
-- Keep notifications narrow: generic webhook, Discord webhook, and Telegram where practical.
-- Trigger notifications for deploy succeeded, deploy failed, and backup failed.
-- Do not implement full rollback, marketplace templates, destructive restore automation, external backup storage, or broad VPS operations during Checkpoint 11.
-- Preserve manual Dockerfile deploy, domain/proxy/HTTPS, GitHub webhook behavior, stored env injection, health/metrics/log state, database/backup state, restart/redeploy-needed state, and same-origin Next.js API proxy behavior.
+- Do not make future work frontend-only. Keep backend/storage/API/CLI/tests/docs progress leading any implementation checkpoint.
+- Preserve notification storage, daemon endpoints, production auth, safe outbound request behavior, secret redaction, delivery attempts, event triggers, CLI workflows, and same-origin Next.js API proxy behavior.
+- Preserve manual Dockerfile deploy, domain/proxy/HTTPS, GitHub webhook behavior, stored env injection, health/metrics/log state, database/backup state, restart/redeploy-needed state, and notification state.
 
 Required reading before coding:
 1. AGENTS.md

@@ -1,8 +1,8 @@
 # Routely Agent Execution Context
 
 Last updated: 2026-06-19  
-Current completed checkpoint: Checkpoint 10, Database Services and Backups  
-Next checkpoint: Checkpoint 11, Notifications and Release Polish
+Current completed checkpoint: Checkpoint 11, Notifications and Release Polish  
+Next checkpoint: Public alpha release docs/examples or the next explicit implementation checkpoint
 
 This file is a compact handoff and copy-paste prompt for another implementation agent.
 
@@ -53,6 +53,7 @@ Implemented checkpoints:
 - Checkpoint 8: environment, secrets, app settings, redaction, env injection, restart/redeploy-needed state.
 - Checkpoint 9: logs, metrics, and health.
 - Checkpoint 10: database services and backups.
+- Checkpoint 11: notifications and release polish foundation.
 
 Current important behavior:
 
@@ -61,6 +62,26 @@ Current important behavior:
 - Preserve manual Dockerfile deploy, domain/proxy/HTTPS state, signed GitHub push-to-deploy, stored env/secrets, redaction behavior, restart/redeploy-needed flags, and health/metrics/log state.
 - Keep secrets out of `routely.yml` by default. Stored secret values are hidden after save.
 - Keep unsafe/future features inert unless the checkpoint explicitly asks for them.
+
+Checkpoint 11 added:
+
+- SQLite `notification_channels` and `notification_delivery_attempts` persistence.
+- Shared helpers for channel normalization, generic/Discord/Telegram payloads, public target redaction, and delivery attempt DTOs.
+- Authenticated daemon endpoints: `/notifications`, `/notifications/:id`, and `/notifications/:id/test`.
+- Safe outbound notification behavior: HTTP(S) only, no URL credentials, short timeout, and DNS/IP rejection for loopback, private, and link-local targets.
+- Triggers for deploy succeeded, deploy failed, and backup failed events.
+- CLI commands: `routely notify ls`, `routely notify add <webhook|discord|telegram>`, `routely notify test <channel-id>`, and `routely notify disable <channel-id>`.
+- Same-origin Next.js route handlers under `/api/notifications/*`.
+- Dashboard information architecture now uses clickable sidebar/mobile feature modules. Home is overview-only; Settings includes a real Notifications panel backed by daemon/storage data.
+
+Still deferred:
+
+- Email notifications.
+- Full rollback.
+- Marketplace templates.
+- Destructive restore automation.
+- External backup storage.
+- Broad VPS operations.
 
 Checkpoint 10 added:
 
@@ -75,12 +96,7 @@ Checkpoint 10 added:
 - Dashboard now has a real Databases & Backups operational panel backed by daemon/storage data, with create/start/stop database controls, backup enable/run/toggle controls, and backup run history.
 - Secret/raw database env values are not returned in database DTOs; API/UI show env key names only.
 
-Still deferred:
-
-- Destructive restore automation.
-- External backup storage.
-- Notifications/alerts.
-- Full rollback and broad VPS operations.
+Checkpoint 10 deferred destructive restore automation, external backup storage, full rollback, and broad VPS operations.
 
 Current CLI surface includes workspace init/sync/add/up/down/ps/logs/restart/doctor, server init/doctor, deploy, env, domain, GitHub, and `routely health <app>`.
 
@@ -114,14 +130,7 @@ Implementation bar for all future checkpoints:
 
 Next task:
 
-Implement Checkpoint 11 from `docs/14-implementation-plan.md`: Notifications and Release Polish.
-
-Checkpoint 11 should be conservative:
-
-- Add notification settings and delivery attempts only when backed by real storage/API behavior.
-- Support generic webhook, Discord webhook, and Telegram where practical with secret redaction.
-- Trigger notifications for deploy succeeded, deploy failed, and backup failed.
-- Keep restore/destructive operations, marketplace templates, broad VPS operations, and full rollback deferred.
+Continue release polish for public alpha readiness: README/install docs, example projects, screenshots/demo assets after UI stability, issue templates, and contributing guide. If implementation continues instead, preserve Checkpoint 11 behavior and keep restore/destructive operations, marketplace templates, broad VPS operations, external backup storage, email notifications, and full rollback deferred unless a later checkpoint explicitly asks for them.
 
 Required checks remain:
 

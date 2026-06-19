@@ -389,8 +389,44 @@ type BackupsResponse = {
   error?: string | null;
 };
 
+type DaemonNotificationChannel = {
+  id: number;
+  name: string;
+  type: string;
+  enabled: boolean;
+  events: string[];
+  target: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type DaemonNotificationAttempt = {
+  id: number;
+  channelId: number | null;
+  channelName: string | null;
+  channelType: string | null;
+  event: string;
+  status: string;
+  httpStatus: number | null;
+  message: string | null;
+  target: string | null;
+  resourceType: string | null;
+  resourceId: number | null;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
+type NotificationsResponse = {
+  channels: DaemonNotificationChannel[];
+  attempts: DaemonNotificationAttempt[];
+  channel?: DaemonNotificationChannel;
+  attempt?: DaemonNotificationAttempt;
+  error?: string | null;
+};
+
 type AppAction = "start" | "stop" | "restart";
 type FormMode = "create" | "edit";
+type ModuleKey = "overview" | "apps" | "deployments" | "domains" | "github" | "env" | "logs" | "health" | "metrics" | "databases" | "backups" | "settings";
 
 type AppFormState = {
   name: string;
@@ -615,6 +651,7 @@ function appInitials(name: string): string {
 }
 
 export default function DashboardClient() {
+  const [activeModule, setActiveModule] = useState<ModuleKey>("overview");
   const [health, setHealth] = useState<HealthResponse | null>(null);
   const [serverStatus, setServerStatus] = useState<DaemonServerStatus | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
@@ -641,6 +678,11 @@ export default function DashboardClient() {
   const [backupsError, setBackupsError] = useState<string | null>(null);
   const [backupActionById, setBackupActionById] = useState<Record<number, string | null>>({});
   const [backupForm, setBackupForm] = useState({ databaseId: "", schedule: "0 2 * * *", retentionDays: "7" });
+  const [notificationChannels, setNotificationChannels] = useState<DaemonNotificationChannel[]>([]);
+  const [notificationAttempts, setNotificationAttempts] = useState<DaemonNotificationAttempt[]>([]);
+  const [notificationsError, setNotificationsError] = useState<string | null>(null);
+  const [notificationSaving, setNotificationSaving] = useState(false);
+  const [notificationForm, setNotificationForm] = useState({ type: "webhook", name: "deploy-alerts", url: "", botToken: "", chatId: "", events: "deploy_succeeded,deploy_failed,backup_failed" });
   const [domainSaving, setDomainSaving] = useState(false);
   const [domainActionByHostname, setDomainActionByHostname] = useState<Record<string, string | null>>({});
   const [domainForm, setDomainForm] = useState({ appId: "", hostname: "" });
@@ -670,7 +712,7 @@ export default function DashboardClient() {
     if (showRefresh) setRefreshing(true);
 
     try {
-      const [healthRes, appsRes, serverRes, deploymentsRes, domainsRes, proxyRes, githubRes, databasesRes, backupsRes] = await Promise.all([
+      const [healthRes, appsRes, serverRes, deploymentsRes, domainsRes, proxyRes, githubRes, databasesRes, backupsRes, notificationsRes] = await Promise.all([
         fetch("/api/health", { cache: "no-store" }),
         fetch("/api/apps", { cache: "no-store" }),
         fetch("/api/server/status", { cache: "no-store" }),
@@ -679,7 +721,8 @@ export default function DashboardClient() {
         fetch("/api/proxy/routes", { cache: "no-store" }),
         fetch("/api/github/status", { cache: "no-store" }),
         fetch("/api/databases", { cache: "no-store" }),
-        fetch("/api/backups", { cache: "no-store" })
+        fetch("/api/backups", { cache: "no-store" }),
+        fetch("/api/notifications", { cache: "no-store" })
       ]);
 
       const healthData = (await healthRes.json()) as HealthResponse;
@@ -691,6 +734,7 @@ export default function DashboardClient() {
       const githubData = (await githubRes.json().catch(() => ({ github: null, error: "GitHub status unavailable." }))) as GithubStatusResponse;
       const databasesData = (await databasesRes.json().catch(() => ({ databases: [], error: "Databases unavailable." }))) as DatabasesResponse;
       const backupsData = (await backupsRes.json().catch(() => ({ jobs: [], runs: [], error: "Backups unavailable." }))) as BackupsResponse;
+      const notificationsData = (await notificationsRes.json().catch(() => ({ channels: [], attempts: [], error: "Notifications unavailable." }))) as NotificationsResponse;
 
       if (!mounted.current) return;
 
@@ -713,6 +757,9 @@ export default function DashboardClient() {
       setBackupJobs(backupsData.jobs || []);
       setBackupRuns(backupsData.runs || []);
       setBackupsError(backupsData.error || null);
+      setNotificationChannels(notificationsData.channels || []);
+      setNotificationAttempts(notificationsData.attempts || []);
+      setNotificationsError(notificationsData.error || null);
       setRootDomainInput((current) => current || domainsData.rootDomain || "");
       setGithubForm((current) => ({ ...current, appId: current.appId || String(appsData.apps?.find((app) => app.driver === "dockerfile")?.id || "") }));
       setBackupForm((current) => ({ ...current, databaseId: current.databaseId || String(databasesData.databases?.[0]?.id || "") }));
@@ -730,6 +777,7 @@ export default function DashboardClient() {
       setGithubError("Dashboard could not reach its API.");
       setDatabasesError("Dashboard could not reach its API.");
       setBackupsError("Dashboard could not reach its API.");
+      setNotificationsError("Dashboard could not reach its API.");
     } finally {
       if (mounted.current) setLoading(false);
       if (mounted.current && showRefresh) setRefreshing(false);
@@ -1059,6 +1107,74 @@ export default function DashboardClient() {
     }
   }, []);
 
+  const applyNotifications = useCallback((data: NotificationsResponse) => {
+    setNotificationChannels(data.channels || []);
+    setNotificationAttempts(data.attempts || []);
+    setNotificationsError(data.error || null);
+  }, []);
+
+  const createNotificationChannel = useCallback(async () => {
+    setNotificationSaving(true);
+    setNotificationsError(null);
+    try {
+      const response = await fetch("/api/notifications", {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          type: notificationForm.type,
+          name: notificationForm.name.trim(),
+          url: notificationForm.url.trim() || undefined,
+          botToken: notificationForm.botToken.trim() || undefined,
+          chatId: notificationForm.chatId.trim() || undefined,
+          events: notificationForm.events.split(",").map((event) => event.trim()).filter(Boolean)
+        })
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as NotificationsResponse;
+      applyNotifications(data);
+      setNotificationForm((current) => ({ ...current, url: "", botToken: "", chatId: "" }));
+    } catch (error) {
+      setNotificationsError(error instanceof Error ? error.message : "Could not save notification channel.");
+    } finally {
+      setNotificationSaving(false);
+    }
+  }, [applyNotifications, notificationForm.botToken, notificationForm.chatId, notificationForm.events, notificationForm.name, notificationForm.type, notificationForm.url]);
+
+  const testNotificationChannel = useCallback(async (channel: DaemonNotificationChannel) => {
+    setNotificationsError(null);
+    try {
+      const response = await fetch(`/api/notifications/${channel.id}/test`, {
+        method: "POST",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({})
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as NotificationsResponse;
+      applyNotifications(data);
+    } catch (error) {
+      setNotificationsError(error instanceof Error ? error.message : "Notification test failed.");
+    }
+  }, [applyNotifications]);
+
+  const toggleNotificationChannel = useCallback(async (channel: DaemonNotificationChannel, enabled: boolean) => {
+    setNotificationsError(null);
+    try {
+      const response = await fetch(`/api/notifications/${channel.id}`, {
+        method: "PATCH",
+        cache: "no-store",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled })
+      });
+      if (!response.ok) throw new Error(await readError(response));
+      const data = (await response.json()) as NotificationsResponse;
+      applyNotifications(data);
+    } catch (error) {
+      setNotificationsError(error instanceof Error ? error.message : "Could not update notification channel.");
+    }
+  }, [applyNotifications]);
+
   const runAction = useCallback(
     async (app: DaemonApp, action: AppAction) => {
       setActionError(null);
@@ -1169,11 +1285,23 @@ export default function DashboardClient() {
   const workspace = health?.health?.workspace || "local workspace";
   const stoppedCount = Math.max(0, apps.length - runningCount);
   const dockerfileApps = appResources.filter((app) => app.driver === "dockerfile");
+  const showOverview = activeModule === "overview";
+  const showApps = activeModule === "apps";
+  const showDeployments = activeModule === "deployments";
+  const showDomains = activeModule === "domains";
+  const showGithub = activeModule === "github";
+  const showEnv = activeModule === "env";
+  const showLogs = activeModule === "logs";
+  const showHealth = activeModule === "health";
+  const showMetrics = activeModule === "metrics";
+  const showDatabases = activeModule === "databases";
+  const showBackups = activeModule === "backups";
+  const showSettings = activeModule === "settings";
 
   return (
     <main className="min-h-screen bg-background text-foreground">
       <div className="grid min-h-screen grid-rows-[1fr_auto] lg:grid-cols-[248px_1fr] lg:grid-rows-1">
-        <Sidebar connected={connected} />
+        <Sidebar activeModule={activeModule} connected={connected} onSelect={setActiveModule} />
 
         <section className="min-w-0 pb-20 lg:pb-0">
           <WorkspaceHeader
@@ -1187,13 +1315,27 @@ export default function DashboardClient() {
           />
 
           <div className="grid gap-3 px-3 py-3 sm:px-4 lg:grid-cols-[minmax(0,1fr)_380px] lg:items-start lg:px-5 xl:grid-cols-[minmax(0,1fr)_410px]">
-            <ServerFoundationPanel
-              connected={connected}
-              error={serverError}
-              server={serverStatus}
-            />
+            {showOverview ? (
+              <OverviewPanel
+                apps={apps}
+                backupJobs={backupJobs}
+                backupRuns={backupRuns}
+                deployments={deployments}
+                healthchecksUnavailable={appsError || deploymentsError || backupsError}
+                onSelect={setActiveModule}
+                server={serverStatus}
+              />
+            ) : null}
 
-            <ProductionDeployPanel
+            {showOverview ? (
+              <ServerFoundationPanel
+                connected={connected}
+                error={serverError}
+                server={serverStatus}
+              />
+            ) : null}
+
+            {showDeployments || showDomains || showGithub ? <ProductionDeployPanel
               apps={dockerfileApps}
               connected={connected}
               deployments={deployments}
@@ -1224,9 +1366,9 @@ export default function DashboardClient() {
               onSaveRootDomain={() => void saveRootDomain()}
               onVerifyDomain={(domain) => void verifyDomain(domain)}
               onLogs={(deployment) => void loadDeploymentLogs(deployment)}
-            />
+            /> : null}
 
-            <DatabaseBackupPanel
+            {showDatabases || showBackups ? <DatabaseBackupPanel
               backupActionById={backupActionById}
               backupForm={backupForm}
               backupJobs={backupJobs}
@@ -1245,9 +1387,24 @@ export default function DashboardClient() {
               onEnableBackup={() => void enableBackup()}
               onRunBackup={(job) => void runBackup(job)}
               onToggleBackup={(job, enabled) => void toggleBackup(job, enabled)}
-            />
+            /> : null}
 
-            <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
+            {showSettings ? (
+              <NotificationsPanel
+                channels={notificationChannels}
+                attempts={notificationAttempts}
+                connected={connected}
+                error={notificationsError}
+                form={notificationForm}
+                saving={notificationSaving}
+                onChange={setNotificationForm}
+                onCreate={() => void createNotificationChannel()}
+                onTest={(channel) => void testNotificationChannel(channel)}
+                onToggle={(channel, enabled) => void toggleNotificationChannel(channel, enabled)}
+              />
+            ) : null}
+
+            {showApps ? <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
               <div className="flex flex-col gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.035] to-transparent px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Local runner</p>
@@ -1319,9 +1476,9 @@ export default function DashboardClient() {
                   </>
                 )}
               </div>
-            </section>
+            </section> : null}
 
-            <DetailPanel
+            {showApps || showEnv || showLogs || showHealth || showMetrics ? <DetailPanel
               app={selectedApp}
               connected={connected}
               deployments={selectedDeployments}
@@ -1340,17 +1497,17 @@ export default function DashboardClient() {
               onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)}
               onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined}
               onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined}
-            />
+            /> : null}
           </div>
         </section>
 
-        <MobileNav connected={connected} />
+        <MobileNav activeModule={activeModule} connected={connected} onSelect={setActiveModule} />
       </div>
     </main>
   );
 }
 
-function Sidebar({ connected }: { connected: boolean }) {
+function Sidebar({ activeModule, connected, onSelect }: { activeModule: ModuleKey; connected: boolean; onSelect: (module: ModuleKey) => void }) {
   return (
     <aside className={`hidden border-r border-white/5 bg-[#121212] px-3 py-4 ${PANEL_SHADOW} lg:block`}>
       <div className="flex items-center gap-3 px-2">
@@ -1361,22 +1518,156 @@ function Sidebar({ connected }: { connected: boolean }) {
         </div>
       </div>
       <nav className="mt-7 space-y-1">
-        <NavItem active label="Local apps" dot={connected} />
-        <NavItem label="Production" />
-        <NavItem label="Domains" dot={connected} />
-        <NavItem label="GitHub" dot={connected} />
-        <NavItem label="Logs" />
-        <NavItem label="Metrics" />
-        <NavItem label="Databases" dot={connected} />
-        <NavItem label="Backups" dot={connected} />
+        <NavItem active={activeModule === "overview"} label="Overview" dot={connected} onClick={() => onSelect("overview")} />
+        <NavItem active={activeModule === "apps"} label="Apps" dot={connected} onClick={() => onSelect("apps")} />
+        <NavItem active={activeModule === "deployments"} label="Deployments" onClick={() => onSelect("deployments")} />
+        <NavItem active={activeModule === "domains"} label="Domains" dot={connected} onClick={() => onSelect("domains")} />
+        <NavItem active={activeModule === "github"} label="GitHub" dot={connected} onClick={() => onSelect("github")} />
+        <NavItem active={activeModule === "env"} label="Env" onClick={() => onSelect("env")} />
+        <NavItem active={activeModule === "logs"} label="Logs" onClick={() => onSelect("logs")} />
+        <NavItem active={activeModule === "health"} label="Health" onClick={() => onSelect("health")} />
+        <NavItem active={activeModule === "metrics"} label="Metrics" onClick={() => onSelect("metrics")} />
+        <NavItem active={activeModule === "databases"} label="Databases" dot={connected} onClick={() => onSelect("databases")} />
+        <NavItem active={activeModule === "backups"} label="Backups" dot={connected} onClick={() => onSelect("backups")} />
       </nav>
       <div className="mt-7 border-t border-white/5 pt-4">
         <p className="px-3 text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Later</p>
         <nav className="mt-2 space-y-1">
-          <NavItem label="Settings" disabled />
+          <NavItem active={activeModule === "settings"} label="Settings" dot onClick={() => onSelect("settings")} />
         </nav>
       </div>
     </aside>
+  );
+}
+
+function OverviewPanel({ apps, backupJobs, backupRuns, deployments, healthchecksUnavailable, onSelect, server }: { apps: DaemonApp[]; backupJobs: DaemonBackupJob[]; backupRuns: DaemonBackupRun[]; deployments: DaemonDeployment[]; healthchecksUnavailable: string | null | undefined; onSelect: (module: ModuleKey) => void; server: DaemonServerStatus | null }) {
+  const failedDeploys = deployments.filter((deployment) => deployment.status === "failed").slice(0, 3);
+  const recentDeploys = deployments.slice(0, 5);
+  const backupFailures = backupRuns.filter((run) => run.status === "failed").slice(0, 3);
+  const pendingApps = apps.filter((app) => app.needsRedeploy || app.needsRestart);
+  const running = apps.filter((app) => app.status === "running").length;
+
+  return (
+    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
+      <div className="grid gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 md:grid-cols-[1fr_1.2fr]">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Overview</p>
+          <h1 className="text-xl font-bold leading-tight">Fleet status</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted">Server readiness, app counts, recent deploys, backup status, and urgent actions.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          <ReadinessCard label="Server" value={server?.readiness?.ok ? "ready" : server?.production ? "check" : "local"} status={server?.readiness?.ok || !server?.production ? "ok" : "warn"} />
+          <ReadinessCard label="Apps" value={`${running}/${apps.length} running`} status={running ? "ok" : "warn"} />
+          <ReadinessCard label="Deploys" value={failedDeploys.length ? `${failedDeploys.length} failed` : `${deployments.length} total`} status={failedDeploys.length ? "error" : "ok"} />
+          <ReadinessCard label="Backups" value={backupFailures.length ? `${backupFailures.length} failed` : `${backupJobs.length} jobs`} status={backupFailures.length ? "error" : backupJobs.length ? "ok" : "warn"} />
+        </div>
+      </div>
+      {healthchecksUnavailable ? <Alert title="Some overview data is stale" message={healthchecksUnavailable} /> : null}
+      <div className="grid gap-3 px-4 py-4 lg:grid-cols-3">
+        <OverviewList title="Recent deployments" empty="No deployments yet." action="Deployments" onAction={() => onSelect("deployments")}>
+          {recentDeploys.map((deployment) => <TimelineRow key={deployment.id} title={`#${deployment.id} ${deployment.appName || "app"}`} detail={`${deployment.status} · ${timeAgo(deployment.updatedAt)}`} tone={deployment.status === "failed" ? "error" : deployment.status === "succeeded" ? "ok" : "warn"} />)}
+        </OverviewList>
+        <OverviewList title="Health failures" empty="No urgent health failures." action="Health" onAction={() => onSelect("health")}>
+          {failedDeploys.map((deployment) => <TimelineRow key={deployment.id} title={deployment.appName || `deployment ${deployment.id}`} detail={deployment.errorMessage || deployment.phase} tone="error" />)}
+        </OverviewList>
+        <OverviewList title="Next actions" empty="No urgent actions." action="Settings" onAction={() => onSelect("settings")}>
+          {pendingApps.slice(0, 4).map((app) => <TimelineRow key={app.id} title={app.name} detail={app.needsRedeploy ? "Redeploy needed" : "Restart needed"} tone="warn" />)}
+          {backupFailures.map((run) => <TimelineRow key={`backup-${run.id}`} title={run.databaseName || `backup ${run.id}`} detail={run.message || "Backup failed"} tone="error" />)}
+        </OverviewList>
+      </div>
+    </section>
+  );
+}
+
+function OverviewList({ action, children, empty, onAction, title }: { action: string; children: ReactNode; empty: string; onAction: () => void; title: string }) {
+  const items = Array.isArray(children) ? children.filter(Boolean) : children;
+  const hasItems = Array.isArray(items) ? items.length > 0 : Boolean(items);
+  return (
+    <div className={`min-w-0 rounded-md bg-black/20 ${INSET_RING}`}>
+      <div className="flex items-center justify-between border-b border-white/5 px-3 py-2">
+        <h2 className="text-sm font-bold">{title}</h2>
+        <button type="button" onClick={onAction} className={`rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted transition hover:text-accent ${FOCUS_RING}`}>{action}</button>
+      </div>
+      <div className="divide-y divide-white/5">{hasItems ? items : <p className="px-3 py-3 text-xs text-muted">{empty}</p>}</div>
+    </div>
+  );
+}
+
+function NotificationsPanel({ attempts, channels, connected, error, form, onChange, onCreate, onTest, onToggle, saving }: { attempts: DaemonNotificationAttempt[]; channels: DaemonNotificationChannel[]; connected: boolean; error: string | null; form: { type: string; name: string; url: string; botToken: string; chatId: string; events: string }; onChange: (form: { type: string; name: string; url: string; botToken: string; chatId: string; events: string }) => void; onCreate: () => void; onTest: (channel: DaemonNotificationChannel) => void; onToggle: (channel: DaemonNotificationChannel, enabled: boolean) => void; saving: boolean }) {
+  const update = (patch: Partial<typeof form>) => onChange({ ...form, ...patch });
+  return (
+    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
+      <div className="flex flex-col gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.035] to-transparent px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Settings</p>
+          <h1 className="text-xl font-bold leading-tight">Notifications</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted">Deploy success, deploy failure, and backup failure alerts through real daemon delivery attempts.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <ReadinessCard label="Channels" value={String(channels.length)} status={channels.length ? "ok" : "warn"} />
+          <ReadinessCard label="Enabled" value={String(channels.filter((channel) => channel.enabled).length)} status={channels.some((channel) => channel.enabled) ? "ok" : "warn"} />
+          <ReadinessCard label="Attempts" value={String(attempts.length)} status={attempts.some((attempt) => attempt.status === "failed") ? "warn" : "ok"} />
+        </div>
+      </div>
+      {error ? <Alert title="Notifications unavailable" message={error} /> : null}
+      <div className="grid gap-3 px-4 py-4 lg:grid-cols-[0.9fr_1.1fr]">
+        <form onSubmit={(event) => { event.preventDefault(); onCreate(); }} className={`grid gap-3 rounded-md bg-black/20 p-3 ${INSET_RING}`}>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <SelectField label="Channel" value={form.type} values={["webhook", "discord", "telegram"]} onChange={(value) => update({ type: value })} disabled={!connected || saving} />
+            <Field label="Name" value={form.name} onChange={(value) => update({ name: value })} disabled={!connected || saving} />
+            {form.type === "telegram" ? <Field label="Bot token" value={form.botToken} onChange={(value) => update({ botToken: value })} disabled={!connected || saving} mono /> : <Field label="Webhook URL" value={form.url} onChange={(value) => update({ url: value })} disabled={!connected || saving} mono wide />}
+            {form.type === "telegram" ? <Field label="Chat ID" value={form.chatId} onChange={(value) => update({ chatId: value })} disabled={!connected || saving} mono /> : null}
+            <Field label="Events" value={form.events} onChange={(value) => update({ events: value })} disabled={!connected || saving} mono wide />
+          </div>
+          <PillButton type="submit" strong disabled={!connected || saving}>{saving ? "Saving" : "Add channel"}</PillButton>
+        </form>
+        <div className="grid gap-3">
+          <div className={`overflow-hidden rounded-md bg-black/20 ${INSET_RING}`}>
+            <ResourceSection title="Channels" count={channels.length} />
+            {channels.length === 0 ? <p className="px-3 py-3 text-sm text-muted">No notification channels configured yet.</p> : null}
+            {channels.map((channel) => <NotificationChannelRow key={channel.id} channel={channel} connected={connected} onTest={onTest} onToggle={onToggle} />)}
+          </div>
+          <div className={`overflow-hidden rounded-md bg-black/20 ${INSET_RING}`}>
+            <ResourceSection title="Delivery attempts" count={attempts.length} />
+            {attempts.length === 0 ? <p className="px-3 py-3 text-sm text-muted">No notification deliveries recorded yet.</p> : null}
+            {attempts.slice(0, 8).map((attempt) => <TimelineRow key={attempt.id} title={`${attempt.event} · ${attempt.channelName || "deleted channel"}`} detail={`${attempt.status}${attempt.httpStatus ? ` · HTTP ${attempt.httpStatus}` : ""}${attempt.message ? ` · ${attempt.message}` : ""}`} tone={attempt.status === "succeeded" ? "ok" : attempt.status === "failed" ? "error" : "warn"} />)}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function NotificationChannelRow({ channel, connected, onTest, onToggle }: { channel: DaemonNotificationChannel; connected: boolean; onTest: (channel: DaemonNotificationChannel) => void; onToggle: (channel: DaemonNotificationChannel, enabled: boolean) => void }) {
+  return (
+    <div className="grid gap-2 border-b border-white/5 px-3 py-3 md:grid-cols-[1fr_auto] md:items-center">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge status={channel.enabled ? "running" : "stopped"} />
+          <p className="truncate text-sm font-bold">{channel.name}</p>
+          <span className="rounded-full bg-surface-raised px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{channel.type}</span>
+        </div>
+        <p className="mt-1 truncate font-mono text-[11px] text-muted">{channel.target || "[redacted]"}</p>
+        <p className="mt-1 truncate text-[11px] text-muted">{channel.events.join(", ")}</p>
+      </div>
+      <div className="flex flex-wrap gap-2 md:justify-end">
+        <PillButton onClick={() => onTest(channel)} disabled={!connected || !channel.enabled}>Test</PillButton>
+        <PillButton onClick={() => onToggle(channel, !channel.enabled)} disabled={!connected}>{channel.enabled ? "Disable" : "Enable"}</PillButton>
+      </div>
+    </div>
+  );
+}
+
+function TimelineRow({ detail, title, tone }: { detail: string; title: string; tone: "ok" | "warn" | "error" }) {
+  const color = tone === "ok" ? "bg-accent" : tone === "warn" ? "bg-warning" : "bg-negative";
+  return (
+    <div className="grid grid-cols-[auto_1fr] gap-2 px-3 py-2">
+      <span className={`mt-1.5 h-2 w-2 rounded-full ${color}`} />
+      <div className="min-w-0">
+        <p className="truncate text-xs font-bold">{title}</p>
+        <p className="truncate text-[11px] text-muted">{detail}</p>
+      </div>
+    </div>
   );
 }
 
@@ -1486,13 +1777,13 @@ function CheckRow({ check }: { check: DaemonServerCheck }) {
   );
 }
 
-function MobileNav({ connected }: { connected: boolean }) {
+function MobileNav({ activeModule, connected, onSelect }: { activeModule: ModuleKey; connected: boolean; onSelect: (module: ModuleKey) => void }) {
   return (
     <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-4 gap-1 border-t border-white/5 bg-[#121212]/95 px-2 py-2 shadow-[rgba(0,0,0,0.5)_0px_-8px_24px] backdrop-blur lg:hidden">
-      <MobileNavItem active label="Apps" />
-      <MobileNavItem label="Logs" />
-      <MobileNavItem label="Prod" />
-      <MobileNavItem label={connected ? "Online" : "Offline"} status={connected} />
+      <MobileNavItem active={activeModule === "overview"} label="Home" onClick={() => onSelect("overview")} />
+      <MobileNavItem active={activeModule === "apps" || activeModule === "logs"} label="Apps" onClick={() => onSelect("apps")} />
+      <MobileNavItem active={activeModule === "deployments" || activeModule === "domains" || activeModule === "github"} label="Prod" onClick={() => onSelect("deployments")} />
+      <MobileNavItem active={activeModule === "settings"} label={connected ? "Settings" : "Offline"} onClick={() => onSelect("settings")} status={connected} />
     </nav>
   );
 }
@@ -2661,21 +2952,21 @@ function ActionLink({ children, href }: { children: ReactNode; href: string | nu
   );
 }
 
-function NavItem({ active, disabled, dot, label }: { active?: boolean; disabled?: boolean; dot?: boolean; label: string }) {
+function NavItem({ active, disabled, dot, label, onClick }: { active?: boolean; disabled?: boolean; dot?: boolean; label: string; onClick?: () => void }) {
   return (
-    <div className={`flex items-center justify-between rounded-full px-3 py-2 text-sm ${active ? "bg-surface-raised font-bold text-foreground" : disabled ? "text-muted/45" : "text-muted"}`}>
+    <button type="button" onClick={onClick} disabled={disabled} className={`flex min-h-9 w-full items-center justify-between rounded-full px-3 py-2 text-left text-sm transition active:scale-[0.99] disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised font-bold text-foreground" : disabled ? "text-muted/45" : "text-muted hover:bg-white/[0.035] hover:text-foreground"}`}>
       <span>{label}</span>
       {dot ? <span className="h-2 w-2 rounded-full bg-accent" aria-hidden="true" /> : null}
-    </div>
+    </button>
   );
 }
 
-function MobileNavItem({ active, disabled, label, status }: { active?: boolean; disabled?: boolean; label: string; status?: boolean }) {
+function MobileNavItem({ active, disabled, label, onClick, status }: { active?: boolean; disabled?: boolean; label: string; onClick?: () => void; status?: boolean }) {
   return (
-    <div className={`flex h-10 items-center justify-center rounded-full text-xs font-bold ${active ? "bg-surface-raised text-foreground" : disabled ? "text-muted/50" : "text-muted"}`}>
+    <button type="button" onClick={onClick} disabled={disabled} className={`flex h-10 items-center justify-center rounded-full text-xs font-bold transition disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised text-foreground" : disabled ? "text-muted/50" : "text-muted"}`}>
       {status != null ? <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${status ? "bg-accent" : "bg-negative"}`} aria-hidden="true" /> : null}
       {label}
-    </div>
+    </button>
   );
 }
 

@@ -197,6 +197,33 @@ export type DaemonBackupRun = {
   updatedAt: string;
 };
 
+export type DaemonNotificationChannel = {
+  id: number;
+  name: string;
+  type: "webhook" | "discord" | "telegram" | string;
+  enabled: boolean;
+  events: string[];
+  target: string | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type DaemonNotificationAttempt = {
+  id: number;
+  channelId: number | null;
+  channelName: string | null;
+  channelType: string | null;
+  event: string;
+  status: string;
+  httpStatus: number | null;
+  message: string | null;
+  target: string | null;
+  resourceType: string | null;
+  resourceId: number | null;
+  createdAt: string;
+  finishedAt: string | null;
+};
+
 export type DaemonAppHealthResponse = {
   app: DaemonApp;
   latestDeployment: DaemonDeployment | null;

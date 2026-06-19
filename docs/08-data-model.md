@@ -110,3 +110,30 @@ backup_runs:
   started_at
   finished_at
 ```
+
+## 6. Notification Fields
+
+```text
+notification_channels:
+  id
+  name
+  type
+  enabled
+  events
+  config
+
+notification_delivery_attempts:
+  id
+  channel_id
+  event
+  status
+  http_status
+  message
+  target
+  resource_type
+  resource_id
+  created_at
+  finished_at
+```
+
+Channel `config` contains delivery secrets and must not be returned directly through public API DTOs.
