@@ -2,7 +2,7 @@ import { DASHBOARD_NAV_GROUPS, type DashboardModuleKey } from "./types";
 
 export function MobileNav({ activeModule, connected, onSelect }: { activeModule: DashboardModuleKey; connected: boolean; onSelect: (module: DashboardModuleKey) => void }) {
   return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-background/96 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[rgba(0,0,0,0.55)_0px_-10px_28px] backdrop-blur md:hidden" aria-label="Dashboard modules">
+    <nav className="z-30 border-t border-border bg-background/96 px-2 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-2 shadow-[rgba(0,0,0,0.55)_0px_-10px_28px] backdrop-blur md:hidden" aria-label="Dashboard modules">
       <div className="flex snap-x gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {DASHBOARD_NAV_GROUPS.map((group) => (
           <div key={group.label} className="flex shrink-0 snap-start items-center gap-1 rounded-md border border-border bg-surface/85 p-1">
