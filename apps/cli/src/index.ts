@@ -39,6 +39,7 @@ import {
   listAppEnvVars,
   listRunningRuntimeInstances,
   listApps,
+  getServerFoundationState,
   reconcileStaleRuntimeInstances,
   recordRuntimeStart,
   recordRuntimeStop,
@@ -53,7 +54,7 @@ import { createDatabaseService, detectPreset, getAppPreset } from "@routely/pres
 import { validateHostname } from "@routely/proxy";
 import { DependencyCycleError, sortByDependencies } from "./dependencies.js";
 import { resolveInstallRoot, resolveWorkspaceRoot } from "./paths.js";
-import { findExistingRoutelyDashboard, findUnavailablePorts } from "./ports.js";
+import { findExistingRoutelyDashboard, findUnavailablePorts, isPortAvailable, probeRoutelyDaemon, probeRoutelyDashboard } from "./ports.js";
 
 type ChildProcess = ReturnType<typeof spawn>;
 type RunningApp = { app: RoutelyAppRecord; child: ChildProcess };
@@ -92,6 +93,15 @@ function parseFlags(args: string[]): { positionals: string[]; flags: Record<stri
   }
 
   return { positionals, flags };
+}
+
+function validateHostnameForCli(value: string, options?: { allowWildcard?: boolean }): string {
+  try {
+    return validateHostname(value, options);
+  } catch (error) {
+    console.error(`Invalid hostname: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
 }
 
 function run(name: string, commandName: string, args: string[], env: Record<string, string> = {}): ChildProcess {
@@ -1408,7 +1418,7 @@ async function domainCommand(args: string[]): Promise<void> {
     }
     const result = await daemonRequest<{ rootDomain: string; instructions: { records: Array<{ type: string; name: string; value: string }>; examples: string[] } }>("/domains/root", {
       method: "POST",
-      body: JSON.stringify({ domain: validateHostname(domain, { allowWildcard: false }) })
+      body: JSON.stringify({ domain: validateHostnameForCli(domain, { allowWildcard: false }) })
     });
     if (!result.ok) {
       console.error(`Could not set root domain: ${result.error}`);
@@ -1432,7 +1442,7 @@ async function domainCommand(args: string[]): Promise<void> {
     }
     const result = await daemonRequest<{ domain: RoutelyDomainDto }>("/domains", {
       method: "POST",
-      body: JSON.stringify({ appName, hostname: validateHostname(hostname) })
+      body: JSON.stringify({ appName, hostname: validateHostnameForCli(hostname) })
     });
     if (!result.ok) {
       console.error(`Could not add domain: ${result.error}`);
@@ -1452,7 +1462,7 @@ async function domainCommand(args: string[]): Promise<void> {
       console.error("Usage: routely domain verify <hostname>");
       process.exit(1);
     }
-    const encoded = encodeURIComponent(validateHostname(hostname));
+    const encoded = encodeURIComponent(validateHostnameForCli(hostname));
     const result = await daemonRequest<{ domain: RoutelyDomainDto; verification: { ok: boolean; message: string; addresses: string[]; expected: string } }>(`/domains/${encoded}/verify`, {
       method: "POST"
     });
@@ -1610,11 +1620,41 @@ async function doctorCommand(): Promise<void> {
   syncConfig(db);
   reconcileRuntimeState(db);
   const apps = listApps(db).filter((app) => app.enabled && ["command", "compose"].includes(app.driver));
-  const unavailable = await findUnavailablePorts([
-    { name: "dashboard", port: Number(process.env.ROUTELY_DASHBOARD_PORT || DEFAULT_DASHBOARD_PORT) },
-    { name: "daemon", port: Number(process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT) },
-    ...apps.map((app) => ({ name: app.name, port: app.port }))
-  ]);
+  const dashboardPort = Number(process.env.ROUTELY_DASHBOARD_PORT || DEFAULT_DASHBOARD_PORT);
+  const daemonPort = Number(process.env.ROUTELY_DAEMON_PORT || DEFAULT_DAEMON_PORT);
+  const portNotes: string[] = [];
+  const portConflicts: Array<{ name: string; port: number; detail?: string }> = [];
+  const dashboardUrl = await probeRoutelyDashboard(dashboardPort);
+  if (dashboardUrl) {
+    portNotes.push(`dashboard: ${dashboardPort} (Routely dashboard already running)`);
+  } else if (!(await isPortAvailable(dashboardPort))) {
+    portConflicts.push({ name: "dashboard", port: dashboardPort });
+  }
+
+  const daemonUrl = await probeRoutelyDaemon(daemonPort);
+  if (daemonUrl) {
+    portNotes.push(`daemon: ${daemonPort} (Routely daemon already running)`);
+  } else if (!(await isPortAvailable(daemonPort))) {
+    portConflicts.push({ name: "daemon", port: daemonPort });
+  }
+
+  const appPorts = apps.filter((app): app is RoutelyAppRecord & { port: number } => Number.isInteger(app.port));
+  const namesByPort = new Map<number, string[]>();
+  for (const app of appPorts) {
+    const names = namesByPort.get(app.port) || [];
+    names.push(app.name);
+    namesByPort.set(app.port, names);
+  }
+  for (const [port, names] of namesByPort) {
+    if (names.length > 1) {
+      portConflicts.push({ name: names.join(", "), port, detail: "duplicate Routely app port" });
+    }
+  }
+  const unknownAppConflicts = await findUnavailablePorts(appPorts.filter((app) => app.status !== "running" && (namesByPort.get(app.port)?.length || 0) === 1));
+  portConflicts.push(...unknownAppConflicts);
+  for (const app of appPorts.filter((item) => item.status === "running")) {
+    portNotes.push(`${app.name}: ${app.port} (managed app running)`);
+  }
 
   const checks = [
     ["node", spawnSync("node", ["-v"], { encoding: "utf8" })],
@@ -1629,12 +1669,18 @@ async function doctorCommand(): Promise<void> {
     console.log(`${ok ? "OK" : "WARN"} ${name}: ${value}`);
   }
 
-  if (unavailable.length === 0) {
+  if (portConflicts.length === 0) {
     console.log("OK ports: no conflicts detected");
+    for (const item of portNotes) {
+      console.log(`  ${item}`);
+    }
   } else {
     console.log("WARN ports: conflicts detected");
-    for (const item of unavailable) {
-      console.log(`  ${item.name}: ${item.port}`);
+    for (const item of portConflicts) {
+      console.log(`  ${item.name}: ${item.port}${item.detail ? ` (${item.detail})` : ""}`);
+    }
+    for (const item of portNotes) {
+      console.log(`  OK ${item}`);
     }
   }
 
@@ -1702,11 +1748,13 @@ async function serverInitCommand(args: string[]): Promise<void> {
 
 async function serverDoctorCommand(args: string[]): Promise<void> {
   const { flags } = parseFlags(args);
-  const dataDir = resolve(invocationCwd, String(flags["data-dir"] || defaultProductionDataDir(workspaceRoot)));
+  const { db } = initializeRoutely(workspaceRoot);
+  const foundation = getServerFoundationState(db);
+  const configuredDataDir = typeof flags["data-dir"] === "string" ? flags["data-dir"] : foundation.dataDir || defaultProductionDataDir(workspaceRoot);
+  const dataDir = resolve(invocationCwd, configuredDataDir);
   const ports = serverPortsFromFlags(flags);
   const dashboardPort = Number(flags["dashboard-port"] || process.env.ROUTELY_DASHBOARD_PORT || DEFAULT_DASHBOARD_PORT);
   const doctor = await runServerDoctorChecks({ workspaceRoot, dataDir, ports, dashboardPort, createDataDir: false });
-  const { db } = initializeRoutely(workspaceRoot);
 
   saveServerFoundationState(db, { lastDoctor: doctor as unknown as Record<string, unknown> });
   printDoctorSummary(doctor);

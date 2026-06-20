@@ -1,7 +1,7 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -89,13 +89,14 @@ async function createApp(baseUrl: string, input: Record<string, unknown>) {
   return body.app as { id: number; status: string };
 }
 
-async function runCli(workspaceRoot: string, args: string[]) {
+async function runCli(workspaceRoot: string, args: string[], env: Record<string, string> = {}) {
   const child = spawn(process.execPath, ["--import", "tsx", resolve(repoRoot, "apps/cli/src/index.ts"), ...args], {
     cwd: repoRoot,
     env: {
       ...process.env,
       ROUTELY_REPO_ROOT: repoRoot,
-      ROUTELY_WORKSPACE_ROOT: workspaceRoot
+      ROUTELY_WORKSPACE_ROOT: workspaceRoot,
+      ...env
     },
     stdio: ["ignore", "pipe", "pipe"]
   });
@@ -294,6 +295,76 @@ describe("QA regression fixes", () => {
 
     expect(check?.status).toBe("ok");
     expect(check?.message).toContain("Routely dashboard");
+  });
+
+  it("prints concise CLI validation errors for invalid domain hostnames", async () => {
+    const workspace = await createWorkspace();
+    const result = await runCli(workspace, ["domain", "root", "not a host"]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain("Invalid hostname:");
+    expect(result.stderr).not.toContain("at validateHostname");
+    expect(result.stderr).not.toContain("packages/proxy");
+  });
+
+  it("treats Routely-owned local doctor ports as expected", async () => {
+    const workspace = await createWorkspace();
+    const dashboardPort = randomPort();
+    const daemonPort = randomPort();
+    const dashboard = createServer((request, response) => {
+      if (request.url === "/api/health") {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ connected: true, daemonUrl: `http://127.0.0.1:${daemonPort}` }));
+        return;
+      }
+      response.statusCode = 404;
+      response.end("not found");
+    });
+    const daemon = createServer((request, response) => {
+      if (request.url === "/health") {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ ok: true, service: "routely-daemon" }));
+        return;
+      }
+      response.statusCode = 404;
+      response.end("not found");
+    });
+    servers.push(dashboard, daemon);
+    await Promise.all([
+      new Promise<void>((resolveListen) => dashboard.listen(dashboardPort, "127.0.0.1", resolveListen)),
+      new Promise<void>((resolveListen) => daemon.listen(daemonPort, "127.0.0.1", resolveListen))
+    ]);
+
+    const result = await runCli(workspace, ["doctor"], {
+      ROUTELY_DASHBOARD_PORT: String(dashboardPort),
+      ROUTELY_DAEMON_PORT: String(daemonPort)
+    });
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("OK ports: no conflicts detected");
+    expect(result.stdout).toContain(`dashboard: ${dashboardPort} (Routely dashboard already running)`);
+    expect(result.stdout).toContain(`daemon: ${daemonPort} (Routely daemon already running)`);
+    expect(result.stdout).not.toContain("WARN ports: conflicts detected");
+  });
+
+  it("uses the persisted production data dir for server doctor by default", async () => {
+    const workspace = await createWorkspace();
+    const persistedDataDir = join(workspace, "persisted-server-data");
+    await mkdir(persistedDataDir, { recursive: true });
+    const { db } = initializeRoutely(workspace);
+    saveServerFoundationState(db, {
+      mode: "production",
+      dataDir: persistedDataDir,
+      initializedAt: new Date().toISOString(),
+      adminTokenHash: "hash",
+      adminTokenSalt: "salt",
+      adminTokenCreatedAt: new Date().toISOString()
+    });
+    db.close();
+
+    const result = await runCli(workspace, ["server", "doctor", "--dashboard-port", String(randomPort())]);
+
+    expect(result.stdout).toContain(`Data dir:      ${persistedDataDir}`);
   });
 
   it("reports duplicate GitHub webhook deliveries as already processed", async () => {
