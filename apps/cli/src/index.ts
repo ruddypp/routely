@@ -151,7 +151,7 @@ Usage:
   routely doctor           Check local Routely prerequisites and port availability
   routely server init      Prepare production server foundation state and admin token
   routely server doctor    Check production server readiness
-  routely add [path] --name <name> [--command <command>] [--port <port>] [--preset <preset>]
+  routely add [path] --name <name> [--command <command>] [--driver <command|dockerfile>] [--port <port>] [--health-path <path>] [--preset <preset>]
   routely db add <type>    Register a local Compose database service
 
 Defaults:
@@ -632,9 +632,20 @@ function addCommand(args: string[]): void {
   const inferredName = resolvedPath.split(/[\\/]/).filter(Boolean).at(-1) || "app";
   const name = String(flags.name || positionals[1] || inferredName).trim();
   const appCommand = String(flags.command || flags.dev || explicitPreset.dev || "").trim();
+  const requestedDriver = typeof flags.driver === "string" ? String(flags.driver).trim().toLowerCase() : null;
+  const hasDockerfile = existsSync(resolve(resolvedPath, "Dockerfile"));
+  const driver = requestedDriver || (!appCommand && hasDockerfile ? "dockerfile" : "command");
 
-  if (!name || !appCommand) {
-    console.error("Usage: routely add [path] --name <name> [--command <command>] [--port <port>] [--preset <preset>]");
+  if (driver !== "command" && driver !== "dockerfile") {
+    console.error(`Unsupported add driver: ${driver}. Use command or dockerfile.`);
+    process.exit(1);
+  }
+
+  if (!name || (driver === "command" && !appCommand)) {
+    console.error("Usage: routely add [path] --name <name> [--command <command>] [--driver <command|dockerfile>] [--port <port>] [--health-path <path>] [--preset <preset>]");
+    if (!appCommand && hasDockerfile) {
+      console.error("This path contains a Dockerfile. Use --driver dockerfile to register it for production deploys.");
+    }
     process.exit(1);
   }
 
@@ -643,15 +654,17 @@ function addCommand(args: string[]): void {
     name,
     type: "app",
     preset: stringPresetValue(explicitPreset.preset, "custom") || "custom",
-    driver: "command",
+    driver: driver as RoutelyAppInput["driver"],
     path: resolvedPath,
-    command: appCommand,
+    command: driver === "command" ? appCommand : null,
     install: stringPresetValue(explicitPreset.install),
-    dev: appCommand,
+    dev: driver === "command" ? appCommand : null,
     build: stringPresetValue(explicitPreset.build),
     start: stringPresetValue(explicitPreset.start),
     port: typeof flags.port === "string" ? flags.port : numberPresetValue(explicitPreset.port),
-    healthcheck: objectPresetValue(explicitPreset.healthcheck),
+    healthcheck: typeof flags["health-path"] === "string"
+      ? { path: flags["health-path"], expected_status: typeof flags["health-status"] === "string" ? flags["health-status"] : 200 }
+      : objectPresetValue(explicitPreset.healthcheck),
     enabled: true,
     status: "stopped"
   };
@@ -660,10 +673,16 @@ function addCommand(args: string[]): void {
 
   console.log(`Registered ${saved.name}.`);
   console.log(`Preset:  ${saved.preset}`);
+  console.log(`Driver:  ${saved.driver}`);
   console.log(`Path:    ${saved.path}`);
-  console.log(`Command: ${saved.command}`);
+  if (saved.command) {
+    console.log(`Command: ${saved.command}`);
+  }
   if (saved.port) {
     console.log(`Port:    ${saved.port}`);
+  }
+  if (saved.healthcheck?.path) {
+    console.log(`Health:  ${saved.healthcheck.path}`);
   }
   console.log(`Config:  ${configWrite.configPath}`);
   db.close();
@@ -1676,6 +1695,7 @@ async function serverInitCommand(args: string[]): Promise<void> {
   console.log(token);
   console.log("");
   console.log("Keep this token secret. Set ROUTELY_ADMIN_TOKEN for the dashboard/API process until full login UI lands.");
+  console.log("If a local Routely daemon is already running for this workspace, it remains in local mode until you restart it with ROUTELY_SERVER_MODE=production.");
   printDoctorSummary(doctor);
   db.close();
 }

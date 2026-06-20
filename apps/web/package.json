@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run src/tests/api/*.test.ts"
+    "test": "vitest run src/tests/api/*.test.ts",
+    "test:dashboard-smoke": "node scripts/dashboard-smoke.mjs"
   },
   "dependencies": {
     "next": "16.2.9",
@@ -21,6 +22,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.2.9",
+    "playwright": "^1.61.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

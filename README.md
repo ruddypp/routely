@@ -65,6 +65,7 @@ npm i -g .
 ```bash
 routely init
 routely add /path/to/app --name web --command "npm run dev" --port 3000
+routely add /path/to/docker-app --name web-prod --driver dockerfile --port 3000 --health-path /health
 routely sync   # load routely.yml into the registry
 routely ps
 routely logs web --follow

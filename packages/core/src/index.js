@@ -276,6 +276,8 @@ function normalizeDependsOn(value) {
 }
 
 export function appToPublicDto(app) {
+  const env = app.env || {};
+  const shouldRedactEnv = app.type === "database" || app.internal === true || app.internal === 1;
   return {
     id: app.id,
     serverId: app.server_id,
@@ -289,7 +291,8 @@ export function appToPublicDto(app) {
     dev: app.dev,
     build: app.build,
     start: app.start,
-    env: app.env || {},
+    env: shouldRedactEnv ? {} : env,
+    envKeys: Object.keys(env).sort(),
     port: app.port,
     dependsOn: Array.isArray(app.depends_on) ? app.depends_on : [],
     healthcheck: app.healthcheck || null,

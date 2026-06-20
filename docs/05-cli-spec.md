@@ -49,6 +49,7 @@ routely doctor
 routely add
 routely add ./apps/web
 routely add --preset nextjs --path ./web --port 3000
+routely add ./apps/web --name web-prod --driver dockerfile --port 3000 --health-path /health
 routely restart api
 routely logs api --follow
 ```
@@ -79,6 +80,8 @@ routely deploy web --branch main
 routely deploy web --watch
 ```
 
+Dockerfile deployments require the app registry entry to use `driver: dockerfile`. The CLI supports this directly with `routely add <path> --name <name> --driver dockerfile --port <container-port> --health-path /health`. If the path contains a Dockerfile and no command is supplied, the add flow can register it as a Dockerfile app instead of requiring an API workaround.
+
 ## 7. Database Commands
 
 ```bash
@@ -97,4 +100,3 @@ routely backup disable postgres
 routely backup run postgres
 routely backup ls
 ```
-

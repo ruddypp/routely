@@ -1,13 +1,14 @@
 import { randomInt, randomUUID } from "node:crypto";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { runServerDoctorChecks } from "@routely/core";
 import { signGithubWebhookPayload } from "@routely/github";
+import { getAppByName, initializeRoutely, saveServerFoundationState } from "@routely/db";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const daemonPath = resolve(repoRoot, "apps/daemon/src/server.js");
@@ -88,7 +89,47 @@ async function createApp(baseUrl: string, input: Record<string, unknown>) {
   return body.app as { id: number; status: string };
 }
 
+async function runCli(workspaceRoot: string, args: string[]) {
+  const child = spawn(process.execPath, ["--import", "tsx", resolve(repoRoot, "apps/cli/src/index.ts"), ...args], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      ROUTELY_REPO_ROOT: repoRoot,
+      ROUTELY_WORKSPACE_ROOT: workspaceRoot
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+  child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+  const code = await new Promise<number | null>((resolveExit) => child.once("exit", resolveExit));
+  return { code, stdout, stderr };
+}
+
 describe("QA regression fixes", () => {
+  it("registers Dockerfile apps through the CLI with deploy metadata", async () => {
+    const workspace = await createWorkspace();
+    const appDir = await mkdtemp(join(tmpdir(), "routely-dockerfile-app-"));
+    await writeFile(join(appDir, "Dockerfile"), "FROM node:24-alpine\nCMD [\"node\", \"server.js\"]\n", "utf8");
+
+    const result = await runCli(workspace, ["add", appDir, "--name", "docker-web", "--driver", "dockerfile", "--port", "8080", "--health-path", "/health"]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain("Driver:  dockerfile");
+    expect(result.stdout).toContain("Health:  /health");
+    const config = await readFile(join(workspace, "routely.yml"), "utf8");
+    expect(config).toContain("driver: dockerfile");
+    expect(config).toContain("path: " + appDir);
+    expect(config).toContain("path: /health");
+    const { db } = initializeRoutely(workspace);
+    const app = getAppByName(db, "docker-web");
+    expect(app?.driver).toBe("dockerfile");
+    expect(app?.command).toBeNull();
+    expect(app?.healthcheck?.path).toBe("/health");
+    db.close();
+  });
+
   it("requires and accepts production admin auth on private daemon endpoints", async () => {
     const workspace = await createWorkspace();
     const adminToken = randomUUID();
@@ -106,6 +147,27 @@ describe("QA regression fixes", () => {
     });
     expect(authorized.response.status).toBe(200);
     expect(authorized.body.apps).toEqual([]);
+  });
+
+  it("keeps an already-running local daemon usable after server init mutates foundation state", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace);
+    const { db } = initializeRoutely(workspace);
+    saveServerFoundationState(db, {
+      mode: "production",
+      dataDir: join(workspace, ".routely", "server"),
+      initializedAt: new Date().toISOString(),
+      adminTokenHash: "hash",
+      adminTokenSalt: "salt",
+      adminTokenCreatedAt: new Date().toISOString()
+    });
+    db.close();
+
+    const listed = await jsonRequest(baseUrl, "/apps");
+    expect(listed.response.status).toBe(200);
+    const status = await jsonRequest(baseUrl, "/server/status");
+    expect(status.body.server.mode).toBe("local");
+    expect(status.body.server.auth.required).toBe(false);
   });
 
   it("parses app domain JSON bodies and returns validation errors for invalid hostnames", async () => {
@@ -142,6 +204,27 @@ describe("QA regression fixes", () => {
     expect(response.status).toBe(201);
     expect(body.database.envKeys.length).toBeGreaterThan(0);
     expect(body.app.env).toEqual({});
+    const listed = await jsonRequest(baseUrl, "/apps");
+    const listedDbApp = listed.body.apps.find((item: { name: string }) => item.name === "qa-postgres");
+    expect(listedDbApp.env).toEqual({});
+    expect(listedDbApp.envKeys).toContain("POSTGRES_DB");
+    const detail = await jsonRequest(baseUrl, `/apps/${body.app.id}`);
+    expect(detail.body.app.env).toEqual({});
+  });
+
+  it("rejects unsafe notification targets before saving channels", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace);
+
+    const created = await jsonRequest(baseUrl, "/notifications", {
+      method: "POST",
+      body: JSON.stringify({ type: "webhook", name: "local", url: "http://127.0.0.1:9876/hook" })
+    });
+
+    expect(created.response.status).toBe(400);
+    expect(created.body.error).toMatch(/private|loopback|link-local|Notification URL/i);
+    const listed = await jsonRequest(baseUrl, "/notifications");
+    expect(listed.body.channels).toEqual([]);
   });
 
   it("returns the active deployment instead of creating duplicate deploy jobs", async () => {

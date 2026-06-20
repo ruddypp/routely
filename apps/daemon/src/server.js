@@ -154,6 +154,8 @@ const { db, databasePath } = initializeRoutely(workspaceRoot);
 const startedAt = new Date().toISOString();
 const LOG_TAIL_BYTES = 64 * 1024;
 const lifecycleQueues = new Map();
+const startupFoundationState = getServerFoundationState(db);
+const startupEnvProduction = process.env.ROUTELY_SERVER_MODE === "production";
 
 // Pick up apps declared in routely.yml on boot so the daemon and CLI agree.
 try {
@@ -181,17 +183,17 @@ app.addContentTypeParser("application/json", { parseAs: "buffer" }, (request, bo
 
 function serverFoundationState() {
   const state = getServerFoundationState(db);
-  const envProduction = process.env.ROUTELY_SERVER_MODE === "production";
   const envTokenConfigured = Boolean(process.env.ROUTELY_ADMIN_TOKEN);
+  const processProduction = startupEnvProduction || startupFoundationState.production;
 
   return {
     ...state,
-    mode: envProduction ? "production" : state.mode,
-    production: envProduction || state.production,
+    mode: processProduction ? "production" : "local",
+    production: processProduction,
     dataDir: state.dataDir || defaultProductionDataDir(workspaceRoot),
     auth: {
       ...state.auth,
-      required: envProduction || state.auth.required,
+      required: startupEnvProduction || startupFoundationState.auth.required,
       configured: state.auth.configured || envTokenConfigured,
       envTokenConfigured
     }
@@ -815,7 +817,8 @@ async function runHealthcheck(appRecord, deployment) {
         lastError = new Error(`healthcheck returned ${response.status}, expected ${expected}`);
       } catch (error) {
         lastError = error;
-        appendDeploymentLogForApp(appRecord, deployment.id, { phase: "healthchecking", stream: "stderr", message: error instanceof Error ? error.message : String(error) });
+        const message = error instanceof Error ? error.message : String(error);
+        appendDeploymentLogForApp(appRecord, deployment.id, { phase: "healthchecking", stream: "stderr", message: `healthcheck retry ${attempt + 1}/8 failed: ${message}` });
       }
       await sleep(750);
     }
@@ -1211,7 +1214,12 @@ function isPrivateAddress(address) {
 }
 
 async function safeOutboundUrl(rawUrl) {
-  const url = new URL(String(rawUrl || ""));
+  let url;
+  try {
+    url = new URL(String(rawUrl || ""));
+  } catch {
+    throw new Error("Notification URL must be a valid http or https URL.");
+  }
   if (url.protocol !== "https:" && url.protocol !== "http:") {
     throw new Error("Notification URL must use http or https.");
   }
@@ -1223,6 +1231,16 @@ async function safeOutboundUrl(rawUrl) {
     throw new Error("Notification URL must not resolve to a private, loopback, or link-local address.");
   }
   return url.toString();
+}
+
+async function validateNotificationChannelTarget(input = {}) {
+  const type = String(input.type || input.channelType || "webhook").trim().toLowerCase();
+  const config = input.config && typeof input.config === "object" && !Array.isArray(input.config) ? input.config : {};
+  const url = input.url ?? input.webhookUrl ?? config.url;
+
+  if (type === "webhook" || type === "discord") {
+    await safeOutboundUrl(url);
+  }
 }
 
 function notificationTarget(channel) {
@@ -1764,6 +1782,7 @@ app.get("/notifications", async () => {
 
 app.post("/notifications", async (request, reply) => {
   try {
+    await validateNotificationChannelTarget(request.body || {});
     const channel = upsertNotificationChannel(db, request.body || {});
     return reply.code(201).send({ channel: notificationChannelToPublicDto(channel), ...publicNotificationsPayload() });
   } catch (error) {
@@ -1775,7 +1794,9 @@ app.patch("/notifications/:id", async (request, reply) => {
   const existing = listNotificationChannels(db).find((channel) => channel.id === Number(request.params.id));
   if (!existing) return reply.code(404).send({ error: `Notification channel ${request.params.id} not found.` });
   try {
-    const channel = upsertNotificationChannel(db, { ...existing, ...(request.body || {}), id: existing.id });
+    const payload = { ...existing, ...(request.body || {}), id: existing.id };
+    await validateNotificationChannelTarget(payload);
+    const channel = upsertNotificationChannel(db, payload);
     return reply.code(200).send({ channel: notificationChannelToPublicDto(channel), ...publicNotificationsPayload() });
   } catch (error) {
     return reply.code(400).send({ error: error instanceof Error ? error.message : "Invalid notification channel update." });
