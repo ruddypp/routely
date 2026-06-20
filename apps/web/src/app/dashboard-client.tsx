@@ -442,7 +442,7 @@ type NotificationsResponse = {
 type AppAction = "start" | "stop" | "restart";
 type FormMode = "create" | "edit";
 type ModuleKey = DashboardModuleKey;
-type InspectorTab = "overview" | "health" | "metrics" | "deployments" | "domains" | "proxy" | "github" | "env" | "logs" | "config";
+type InspectorTab = "overview" | "runtime" | "env" | "logs" | "health" | "deployments" | "domains";
 
 type AppFormState = {
   name: string;
@@ -557,6 +557,10 @@ function appCanRedeploy(app: DaemonApp): boolean {
   return app.driver === "dockerfile";
 }
 
+function canDeployApp(app: DaemonApp, connected: boolean): boolean {
+  return connected && appCanRedeploy(app) && Boolean(app.path) && app.enabled;
+}
+
 function pendingStateLabel(app: DaemonApp): string {
   const restart = app.needsRestart;
   const redeploy = app.needsRedeploy && appCanRedeploy(app);
@@ -579,6 +583,24 @@ function shortPath(path: string | null): string {
   if (!path) return "-";
   const parts = path.split("/").filter(Boolean);
   return parts.length > 3 ? `.../${parts.slice(-3).join("/")}` : path;
+}
+
+function compactSource(app: DaemonApp): string {
+  if (app.source?.repo) return `${app.source.repo}:${app.source.branch || "main"}`;
+  if (app.image) return app.image;
+  return app.driver === "compose" ? app.composeService || app.image || "compose service" : app.command || app.dev || "no command";
+}
+
+function domainSummary(domains: DaemonDomain[]): string {
+  if (domains.length === 0) return "no domain";
+  const ready = domains.filter((domain) => domain.status === "ready" || domain.dnsStatus === "verified").length;
+  return ready === domains.length ? `${domains.length} ready` : `${ready}/${domains.length} ready`;
+}
+
+function statusTone(status: string): "ok" | "warn" | "error" {
+  if (["running", "succeeded", "healthy", "ready", "verified", "active", "enabled", "ok"].includes(status)) return "ok";
+  if (["failed", "crashed", "error", "unhealthy"].includes(status)) return "error";
+  return "warn";
 }
 
 function formatBytes(value: number | null): string {
@@ -1332,10 +1354,16 @@ export default function DashboardClient() {
                 apps={apps}
                 backupJobs={backupJobs}
                 backupRuns={backupRuns}
+                connected={connected}
                 deployments={deployments}
+                domains={domains}
+                domainsMeta={domainsMeta}
+                github={github}
                 healthchecksUnavailable={appsError || deploymentsError || backupsError}
                 onSelect={setActiveModule}
+                proxyRoutes={proxyRoutes}
                 server={serverStatus}
+                workspace={workspace}
               />
             ) : null}
 
@@ -1372,7 +1400,7 @@ export default function DashboardClient() {
               />
             ) : null}
 
-            {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} disabledCount={disabledCount} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} serviceResources={serviceResources} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onSelect={setSelectedAppId} /> : null}
+            {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} deployingByAppId={deployingByAppId} deploymentsByAppId={latestDeploymentByAppId} disabledCount={disabledCount} domainsByAppId={domainsByAppId} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} serviceResources={serviceResources} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onDeploy={(app) => void deployApp(app)} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onSelect={setSelectedAppId} /> : null}
 
             {activeModule === "apps" || activeModule === "env" || activeModule === "logs" || activeModule === "health" ? <AppOperationsModule activeTab={activeModule === "apps" ? undefined : appModuleTabs[activeModule]} apps={apps} appResources={appResources} app={selectedApp} selectedAppId={selectedAppId} connected={connected} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} logs={logs} logsLoading={logsLoading} logsError={logsError} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} module={activeModule} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onLogs={(app) => void loadLogs(app)} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} /> : null}
 
@@ -1381,7 +1409,7 @@ export default function DashboardClient() {
   );
 }
 
-function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, disabledCount, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onSelect, runningCount, selectedAppId, serviceResources, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; disabledCount: number; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: () => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onSelect: (id: number) => void; runningCount: number; selectedAppId: number | null; serviceResources: DaemonApp[]; stoppedCount: number }) {
+function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, deployingByAppId, deploymentsByAppId, disabledCount, domainsByAppId, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onDeploy, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onSelect, runningCount, selectedAppId, serviceResources, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; deployingByAppId: Record<number, boolean>; deploymentsByAppId: Map<number, DaemonDeployment>; disabledCount: number; domainsByAppId: Map<number, DaemonDomain[]>; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: () => void; onDeploy: (app: DaemonApp) => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onSelect: (id: number) => void; runningCount: number; selectedAppId: number | null; serviceResources: DaemonApp[]; stoppedCount: number }) {
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
       <ModuleHeader module="apps" stats={<><MetricPill label="running" value={`${runningCount}/${apps.length}`} accent /><MetricPill label="services" value={String(serviceResources.length)} /><MetricPill label="stopped" value={String(stoppedCount)} /><MetricPill label="disabled" value={String(disabledCount)} /></>} actions={<PillButton onClick={onCreate} strong disabled={!connected}>Add resource</PillButton>} />
@@ -1396,10 +1424,10 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
         {loading ? <LoadingRows /> : apps.length === 0 ? <EmptyState connected={connected} onAdd={onCreate} /> : (
           <>
             <ResourceSection title="Apps" count={appResources.length} />
-            {appResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+            {appResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
             <ResourceSection title="Services & databases" count={serviceResources.length} />
             {serviceResources.length === 0 ? <ServiceEmpty /> : null}
-            {serviceResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+            {serviceResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
           </>
         )}
       </div>
@@ -1472,7 +1500,7 @@ function MetricsModule({ app, apps, appResources, connected, currentAction, depl
           </button>
         ))}
       </div>
-      <DetailPanel activeTab="metrics" app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />
+      <DetailPanel activeTab="health" app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />
     </section>
   );
 }
@@ -1577,42 +1605,88 @@ function BackupsModule({ backupActionById, backupForm, backupJobs, backupRuns, b
   );
 }
 
-function OverviewPanel({ apps, backupJobs, backupRuns, deployments, healthchecksUnavailable, onSelect, server }: { apps: DaemonApp[]; backupJobs: DaemonBackupJob[]; backupRuns: DaemonBackupRun[]; deployments: DaemonDeployment[]; healthchecksUnavailable: string | null | undefined; onSelect: (module: ModuleKey) => void; server: DaemonServerStatus | null }) {
+function OverviewPanel({ apps, backupJobs, backupRuns, connected, deployments, domains, domainsMeta, github, healthchecksUnavailable, onSelect, proxyRoutes, server, workspace }: { apps: DaemonApp[]; backupJobs: DaemonBackupJob[]; backupRuns: DaemonBackupRun[]; connected: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; domainsMeta: { rootDomain: string | null; serverPublicIp: string | null }; github: DaemonGithubStatus | null; healthchecksUnavailable: string | null | undefined; onSelect: (module: ModuleKey) => void; proxyRoutes: DaemonProxyRoute[]; server: DaemonServerStatus | null; workspace: string }) {
   const failedDeploys = deployments.filter((deployment) => deployment.status === "failed").slice(0, 3);
   const recentDeploys = deployments.slice(0, 5);
   const backupFailures = backupRuns.filter((run) => run.status === "failed").slice(0, 3);
   const pendingApps = apps.filter((app) => app.needsRedeploy || app.needsRestart);
   const running = apps.filter((app) => app.status === "running").length;
+  const stopped = apps.filter((app) => app.status === "stopped").length;
+  const crashed = apps.filter((app) => app.status === "crashed" || app.status === "failed").length;
+  const disabled = apps.filter((app) => !app.enabled).length;
+  const latestDeploy = deployments[0] || null;
+  const verifiedDomains = domains.filter((domain) => domain.dnsStatus === "verified" || domain.status === "ready").length;
+  const enabledRoutes = proxyRoutes.filter((route) => route.enabled).length;
+  const githubConnected = Boolean(github?.repositories.some((repo) => repo.connectedAppId));
+  const latestBackup = backupRuns[0] || null;
+  const urgent = [
+    ...failedDeploys.map((deployment) => ({ key: `deploy-${deployment.id}`, title: deployment.appName || `deployment ${deployment.id}`, detail: deployment.errorMessage || deployment.phase, tone: "error" as const, module: "deployments" as ModuleKey })),
+    ...pendingApps.slice(0, 5).map((app) => ({ key: `pending-${app.id}`, title: app.name, detail: pendingStateLabel(app), tone: "warn" as const, module: "apps" as ModuleKey })),
+    ...backupFailures.map((run) => ({ key: `backup-${run.id}`, title: run.databaseName || `backup ${run.id}`, detail: run.message || "Backup failed", tone: "error" as const, module: "backups" as ModuleKey }))
+  ].slice(0, 7);
 
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
-      <div className="grid gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 lg:grid-cols-[1fr_1.2fr]">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Overview</p>
-          <h1 className="text-xl font-bold leading-tight">Fleet status</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted">Server readiness, app counts, recent deploys, backup status, and urgent actions.</p>
+      <div className="grid gap-4 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.9fr)] xl:items-start">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Command center</p>
+          <h1 className="text-xl font-bold leading-tight">Local control plane</h1>
+          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
+            <Meta label="Daemon" value={connected ? "connected" : "offline"} />
+            <Meta label="Mode" value={server?.mode || "local"} />
+            <Meta label="Workspace" value={workspace} mono wide />
+            <Meta label="Data dir" value={server?.dataDir || "local workspace state"} mono wide />
+          </div>
         </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
+          <ReadinessCard label="Daemon" value={connected ? "online" : "offline"} status={connected ? "ok" : "error"} />
           <ReadinessCard label="Server" value={server?.readiness?.ok ? "ready" : server?.production ? "check" : "local"} status={server?.readiness?.ok || !server?.production ? "ok" : "warn"} />
-          <ReadinessCard label="Apps" value={`${running}/${apps.length} running`} status={running ? "ok" : "warn"} />
-          <ReadinessCard label="Deploys" value={failedDeploys.length ? `${failedDeploys.length} failed` : `${deployments.length} total`} status={failedDeploys.length ? "error" : "ok"} />
-          <ReadinessCard label="Backups" value={backupFailures.length ? `${backupFailures.length} failed` : `${backupJobs.length} jobs`} status={backupFailures.length ? "error" : backupJobs.length ? "ok" : "warn"} />
+          <ReadinessCard label="Apps" value={`${running}/${apps.length} run`} status={running || apps.length === 0 ? "ok" : "warn"} />
+          <ReadinessCard label="Pending" value={String(pendingApps.length)} status={pendingApps.length ? "warn" : "ok"} />
         </div>
       </div>
       {healthchecksUnavailable ? <Alert title="Some overview data is stale" message={healthchecksUnavailable} /> : null}
-      <div className="grid gap-3 px-4 py-4 lg:grid-cols-3">
+      <div className="grid gap-3 px-4 py-4 xl:grid-cols-[1.05fr_0.95fr]">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <OverviewStatusCard title="Fleet" action="Apps" onAction={() => onSelect("apps")} items={[`running ${running}`, `stopped ${stopped}`, `crashed ${crashed}`, `disabled ${disabled}`]} tone={crashed ? "error" : pendingApps.length ? "warn" : "ok"} />
+          <OverviewStatusCard title="Latest deploy" action="Deploy" onAction={() => onSelect("deployments")} items={latestDeploy ? [latestDeploy.appName || `app ${latestDeploy.appId}`, `${latestDeploy.status} · ${latestDeploy.phase}`, timeAgo(latestDeploy.updatedAt)] : ["no deployments", "Dockerfile apps can deploy"]} tone={latestDeploy ? statusTone(latestDeploy.status) : "warn"} />
+          <OverviewStatusCard title="Domains & proxy" action="Domains" onAction={() => onSelect("domains")} items={[domainsMeta.rootDomain || "root unset", `${verifiedDomains}/${domains.length} DNS ready`, `${enabledRoutes} proxy routes`]} tone={domains.length && verifiedDomains === domains.length ? "ok" : domains.length ? "warn" : "warn"} />
+          <OverviewStatusCard title="GitHub & backups" action="System" onAction={() => onSelect(githubConnected ? "backups" : "github")} items={[github?.configured ? "GitHub app configured" : "GitHub app missing", githubConnected ? "repo connected" : "no repo connected", latestBackup ? `${latestBackup.status} backup · ${timeAgo(latestBackup.updatedAt)}` : `${backupJobs.length} backup jobs`]} tone={backupFailures.length ? "error" : githubConnected || backupJobs.length ? "ok" : "warn"} />
+        </div>
+        <OverviewList title="Urgent next actions" empty="No urgent action. Fleet is clean." action="Review" onAction={() => onSelect(urgent[0]?.module || "apps")}>
+          {urgent.map((item) => <TimelineRow key={item.key} title={item.title} detail={item.detail} tone={item.tone} />)}
+        </OverviewList>
+      </div>
+      <div className="grid gap-3 border-t border-white/5 bg-black/10 px-4 py-4 lg:grid-cols-3">
         <OverviewList title="Recent deployments" empty="No deployments yet." action="Deployments" onAction={() => onSelect("deployments")}>
-          {recentDeploys.map((deployment) => <TimelineRow key={deployment.id} title={`#${deployment.id} ${deployment.appName || "app"}`} detail={`${deployment.status} · ${timeAgo(deployment.updatedAt)}`} tone={deployment.status === "failed" ? "error" : deployment.status === "succeeded" ? "ok" : "warn"} />)}
+          {recentDeploys.slice(0, 3).map((deployment) => <TimelineRow key={deployment.id} title={`#${deployment.id} ${deployment.appName || "app"}`} detail={`${deployment.status} · ${timeAgo(deployment.updatedAt)}`} tone={deployment.status === "failed" ? "error" : deployment.status === "succeeded" ? "ok" : "warn"} />)}
         </OverviewList>
-        <OverviewList title="Health failures" empty="No urgent health failures." action="Health" onAction={() => onSelect("health")}>
-          {failedDeploys.map((deployment) => <TimelineRow key={deployment.id} title={deployment.appName || `deployment ${deployment.id}`} detail={deployment.errorMessage || deployment.phase} tone="error" />)}
+        <OverviewList title="Domain readiness" empty="No domains configured." action="Domains" onAction={() => onSelect("domains")}>
+          {domains.slice(0, 4).map((domain) => <TimelineRow key={domain.id} title={domain.hostname} detail={`${domain.dnsStatus} DNS · ${domain.tlsStatus} TLS`} tone={statusTone(domain.dnsStatus === "verified" ? "ready" : domain.status)} />)}
         </OverviewList>
-        <OverviewList title="Next actions" empty="No urgent actions." action="Settings" onAction={() => onSelect("settings")}>
-          {pendingApps.slice(0, 4).map((app) => <TimelineRow key={app.id} title={app.name} detail={pendingStateLabel(app)} tone="warn" />)}
-          {backupFailures.map((run) => <TimelineRow key={`backup-${run.id}`} title={run.databaseName || `backup ${run.id}`} detail={run.message || "Backup failed"} tone="error" />)}
+        <OverviewList title="Backup state" empty="No backup jobs yet." action="Backups" onAction={() => onSelect("backups")}>
+          {backupJobs.slice(0, 4).map((job) => <TimelineRow key={job.id} title={job.databaseName || `database ${job.databaseId}`} detail={`${job.enabled ? "enabled" : "disabled"} · ${job.lastRunStatus || "never run"}`} tone={job.lastRunStatus === "failed" ? "error" : job.enabled ? "ok" : "warn"} />)}
         </OverviewList>
       </div>
     </section>
+  );
+}
+
+function OverviewStatusCard({ action, items, onAction, title, tone }: { action: string; items: string[]; onAction: () => void; title: string; tone: "ok" | "warn" | "error" }) {
+  const color = tone === "ok" ? "bg-accent" : tone === "warn" ? "bg-warning" : "bg-negative";
+  return (
+    <button type="button" onClick={onAction} className={`min-w-0 rounded-md bg-black/20 px-3 py-3 text-left transition hover:bg-white/[0.035] ${INSET_RING} ${FOCUS_RING}`}>
+      <div className="flex items-center justify-between gap-3">
+        <span className="flex min-w-0 items-center gap-2">
+          <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />
+          <span className="truncate text-sm font-bold">{title}</span>
+        </span>
+        <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{action}</span>
+      </div>
+      <div className="mt-3 grid gap-1">
+        {items.map((item) => <p key={item} className="truncate text-[11px] text-muted">{item}</p>)}
+      </div>
+    </button>
   );
 }
 
@@ -1819,7 +1893,11 @@ function AppRow({
   app,
   connected,
   currentAction,
+  deploying,
+  domains,
+  latestDeployment,
   onAction,
+  onDeploy,
   onEdit,
   onLogs,
   onSelect
@@ -1828,7 +1906,11 @@ function AppRow({
   app: DaemonApp;
   connected: boolean;
   currentAction?: AppAction | null;
+  deploying: boolean;
+  domains: DaemonDomain[];
+  latestDeployment: DaemonDeployment | null;
   onAction: (action: AppAction) => void;
+  onDeploy: () => void;
   onEdit: () => void;
   onLogs: () => void;
   onSelect: () => void;
@@ -1837,10 +1919,11 @@ function AppRow({
   const running = app.status === "running" || app.status === "starting";
   const localUrl = appUrl(app);
   const disabledReason = !app.enabled ? "Disabled" : !connected ? "Offline" : null;
-  const primaryMeta = app.driver === "compose" ? app.image || app.composeService || "compose service" : app.command || app.dev || "no command";
+  const deployable = canDeployApp(app, connected);
+  const pending = pendingStateLabel(app);
 
   return (
-    <article className={`grid gap-3 border-b border-white/5 px-3 py-3 transition hover:bg-white/[0.035] sm:px-4 xl:grid-cols-[minmax(210px,1fr)_100px_68px_minmax(150px,0.85fr)] xl:items-center ${active ? "bg-white/[0.055] shadow-[3px_0_0_0_var(--accent)_inset]" : ""}`}>
+    <article className={`grid gap-3 border-b border-white/5 px-3 py-3 transition hover:bg-white/[0.035] sm:px-4 xl:grid-cols-[minmax(240px,1.05fr)_minmax(180px,0.78fr)_minmax(170px,0.8fr)_auto] xl:items-center ${active ? "bg-white/[0.055] shadow-[3px_0_0_0_var(--accent)_inset]" : ""}`}>
       <button type="button" onClick={onSelect} className={`min-w-0 rounded-md text-left ${FOCUS_RING}`}>
         <div className="flex items-center gap-3">
           <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-black ${running ? "bg-accent text-black" : "bg-surface-raised text-muted"}`}>
@@ -1852,24 +1935,36 @@ function AppRow({
               {disabledReason ? <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{disabledReason}</span> : null}
               {app.needsRestart || app.needsRedeploy ? <span className="shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">pending</span> : null}
             </span>
-            <span className="block truncate font-mono text-[11px] text-muted">{shortPath(app.path)}</span>
-            <span className="mt-1 inline-flex rounded-full bg-white/[0.06] px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{resourceLabel(app)}</span>
+            <span className="block truncate font-mono text-[11px] text-muted">{resourceLabel(app)} · {app.driver}/{app.preset}</span>
           </span>
         </div>
       </button>
-      <div className="flex items-center justify-between gap-2 xl:block">
-        <StatusBadge status={app.status} />
-        <span className="font-mono text-xs text-muted xl:hidden">{app.port ? `:${app.port}` : "no port"}</span>
+      <div className="grid min-w-0 grid-cols-2 gap-2 text-[11px] text-muted sm:grid-cols-4 xl:grid-cols-2">
+        <Meta label="Path" value={shortPath(app.path)} mono />
+        <Meta label="Port" value={app.port ? `:${app.port}` : "none"} mono />
+        <Meta label="Domain" value={domainSummary(domains)} mono />
+        <Meta label="Source" value={compactSource(app)} mono />
       </div>
-      <div className="hidden font-mono text-xs text-muted xl:block">{app.port ? `:${app.port}` : "no port"}</div>
-      <div className="min-w-0 truncate rounded-full bg-black/20 px-3 py-1.5 font-mono text-xs text-muted xl:bg-transparent xl:px-0 xl:py-0">{primaryMeta}</div>
-      <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap sm:items-center sm:justify-end xl:col-span-4 xl:flex-nowrap">
+      <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
+        <div className="min-w-0">
+          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">Runtime</p>
+          <div className="mt-1"><StatusBadge status={app.status} /></div>
+        </div>
+        <Meta label="Pending" value={pending} />
+        <Meta label="Deploy" value={latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : appCanRedeploy(app) ? "never" : "n/a"} />
+        <Meta label="Updated" value={timeAgo(app.updatedAt)} />
+      </div>
+      <div className="flex min-w-0 flex-wrap items-center gap-1.5 xl:justify-end xl:flex-nowrap">
         <RoundAction label="Start" onClick={() => onAction("start")} disabled={busy || !connected || !app.enabled || running} active={currentAction === "start"} />
         <RoundAction label="Stop" onClick={() => onAction("stop")} disabled={busy || !connected || !running} active={currentAction === "stop"} />
         <RoundAction label="Restart" onClick={() => onAction("restart")} disabled={busy || !connected || !app.enabled} active={currentAction === "restart"} />
         <ActionLink href={localUrl}>Open</ActionLink>
         <PillButton onClick={onLogs} disabled={!connected}>Logs</PillButton>
+        <PillButton onClick={onDeploy} disabled={!deployable || deploying}>{deploying ? "Deploying" : "Deploy"}</PillButton>
         <PillButton onClick={onEdit} disabled={!connected}>Edit</PillButton>
+      </div>
+      <div className="hidden">
+        <StatusBadge status={app.status} />
       </div>
     </article>
   );
@@ -2477,8 +2572,8 @@ function DetailPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-1 border-b border-white/5 bg-black/20 px-2 py-2 sm:grid-cols-4">
-        {(["overview", "health", "metrics", "deployments", "domains", "proxy", "github", "env", "logs", "config"] as const).map((item) => (
+      <div className="grid grid-cols-3 gap-1 border-b border-white/5 bg-black/20 px-2 py-2 sm:grid-cols-7">
+        {(["overview", "runtime", "env", "logs", "health", "deployments", "domains"] as const).map((item) => (
           <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-full px-2 py-1.5 text-[11px] font-bold capitalize ${FOCUS_RING} ${selectedTab === item ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground"}`}>{item}</button>
         ))}
       </div>
@@ -2506,13 +2601,38 @@ function DetailPanel({
         </div>
       ) : null}
 
+      {selectedTab === "runtime" ? (
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
+          <Meta label="Runtime" value={app.driver} />
+          <Meta label="Preset" value={app.preset} />
+          <Meta label="Enabled" value={app.enabled ? "yes" : "no"} />
+          <Meta label="Internal" value={app.internal ? "yes" : "no"} />
+          <Meta label="Install" value={app.install || "-"} mono wide />
+          <Meta label="Dev" value={app.dev || app.command || "-"} mono wide />
+          <Meta label="Build" value={app.build || "-"} mono wide />
+          <Meta label="Start" value={app.start || "-"} mono wide />
+          <Meta label="Image" value={app.image || "-"} mono wide />
+          <Meta label="Compose" value={[app.composeFile, app.composeService].filter(Boolean).join(" / ") || "generated"} mono wide />
+          <Meta label="Depends on" value={(app.dependsOn || []).join(", ") || "-"} wide />
+          <Meta label="GitHub App" value={github?.configured ? "configured" : "not configured"} />
+          <Meta label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing secret"} />
+          <Meta label="Source" value={app.source?.repo ? `${app.source.repo}:${app.source.branch || "main"}` : "-"} mono wide />
+          <Meta label="Auto deploy" value={app.source?.auto_deploy?.enabled === false ? "disabled" : app.source?.type === "github" ? "enabled" : "not connected"} />
+          <Meta label="Recent delivery" value={github?.deliveries.find((delivery) => delivery.appId === app.id || delivery.repo === app.source?.repo)?.status || "none"} wide />
+          <Meta label="Volumes" value={(app.volumes || []).join(", ") || "-"} mono wide />
+          <Meta label="Config env" value={Object.keys(app.env || {}).length > 0 ? Object.keys(app.env || {}).join(", ") : "-"} mono wide />
+        </dl>
+      ) : null}
+
       {selectedTab === "health" ? (
         <div>
           <div className="border-b border-white/5 px-4 py-3">
-            <div className="grid grid-cols-3 gap-2">
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
               <ReadinessCard label="State" value={healthStatus} status={healthStatus === "healthy" ? "ok" : healthStatus === "unknown" ? "warn" : "error"} />
               <ReadinessCard label="Response" value={appHealth?.checks[0]?.responseTimeMs == null ? "-" : `${appHealth.checks[0].responseTimeMs}ms`} status="ok" />
               <ReadinessCard label="Checks" value={String(appHealth?.checks.length || 0)} status={appHealth?.checks.length ? "ok" : "warn"} />
+              <ReadinessCard label="CPU" value={latestMetric?.cpuPercent == null ? "-" : `${latestMetric.cpuPercent.toFixed(1)}%`} status="ok" />
+              <ReadinessCard label="RAM" value={latestMetric ? formatBytes(latestMetric.memoryBytes) : "-"} status="ok" />
             </div>
             <div className="mt-3 flex flex-wrap items-center gap-2">
               <PillButton onClick={() => void loadHealthAndMetrics(app)} disabled={!connected || healthLoading || metricsLoading}>{healthLoading || metricsLoading ? "Refreshing" : "Refresh health"}</PillButton>
@@ -2538,24 +2658,9 @@ function DetailPanel({
               </div>
             </div>
           ))}
-        </div>
-      ) : null}
-
-      {selectedTab === "metrics" ? (
-        <div>
-          <div className="border-b border-white/5 px-4 py-3">
-            <div className="grid grid-cols-3 gap-2">
-              <ReadinessCard label="Samples" value={String(appMetrics.length)} status={appMetrics.length ? "ok" : "warn"} />
-              <ReadinessCard label="CPU" value={latestMetric?.cpuPercent == null ? "-" : `${latestMetric.cpuPercent.toFixed(1)}%`} status="ok" />
-              <ReadinessCard label="Memory" value={latestMetric ? formatBytes(latestMetric.memoryBytes) : "-"} status="ok" />
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <PillButton onClick={() => void loadHealthAndMetrics(app)} disabled={!connected || healthLoading || metricsLoading}>{metricsLoading ? "Refreshing" : "Refresh metrics"}</PillButton>
-              {metricsError ? <span className="text-xs text-negative">{metricsError}</span> : null}
-            </div>
-          </div>
           <div className="border-b border-white/5 px-4 py-3">
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Container and app samples</p>
+            {metricsError ? <p className="mt-2 text-xs text-negative">{metricsError}</p> : null}
             <div className="mt-3 grid gap-2">
               {appMetrics.length === 0 ? <p className="text-sm text-muted">No metrics sampled yet. Refresh metrics to collect available host or container data for this app.</p> : null}
               {appMetrics.slice(0, 10).map((sample) => <MetricSampleRow key={sample.id} sample={sample} />)}
@@ -2583,28 +2688,19 @@ function DetailPanel({
                 </div>
                 <StatusBadge status={domain.status} />
               </div>
+              <div className="mt-3 grid grid-cols-3 gap-2">
+                <ReadinessCard label="DNS" value={domain.dnsStatus} status={domain.dnsStatus === "verified" ? "ok" : "warn"} />
+                <ReadinessCard label="TLS" value={domain.tlsStatus} status={domain.tlsStatus === "active" || domain.tlsStatus === "issuing" ? "ok" : "warn"} />
+                <ReadinessCard label="Target" value={domain.targetPort ? `:${domain.targetPort}` : "pending"} status={domain.targetPort ? "ok" : "warn"} />
+              </div>
             </div>
           ))}
+          <dl className="grid grid-cols-2 gap-x-3 gap-y-3 border-t border-white/5 px-4 py-4 text-xs">
+            <Meta label="Proxy exposure" value={app.internal || app.type === "database" ? "blocked" : "allowed after DNS verification"} />
+            <Meta label="HTTPS" value={domains.some((domain) => domain.tlsStatus === "issuing" || domain.tlsStatus === "active") ? "route generated" : "pending"} />
+            <Meta label="Public routes" value={domains.map((domain) => `${domain.hostname}:${domain.tlsStatus}`).join(", ") || "none"} mono wide />
+          </dl>
         </div>
-      ) : null}
-
-      {selectedTab === "proxy" ? (
-        <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
-          <Meta label="Proxy exposure" value={app.internal || app.type === "database" ? "blocked" : "allowed after DNS verification"} />
-          <Meta label="HTTPS" value={domains.some((domain) => domain.tlsStatus === "issuing" || domain.tlsStatus === "active") ? "route generated" : "pending"} />
-          <Meta label="Public routes" value={domains.map((domain) => `${domain.hostname}:${domain.tlsStatus}`).join(", ") || "none"} mono wide />
-        </dl>
-      ) : null}
-
-      {selectedTab === "github" ? (
-        <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
-          <Meta label="GitHub App" value={github?.configured ? "configured" : "not configured"} />
-          <Meta label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing secret"} />
-          <Meta label="Repository" value={app.source?.repo || "not connected"} mono wide />
-          <Meta label="Branch" value={app.source?.branch || "main/master default"} mono />
-          <Meta label="Auto deploy" value={app.source?.auto_deploy?.enabled === false ? "disabled" : app.source?.type === "github" ? "enabled" : "not connected"} />
-          <Meta label="Recent delivery" value={github?.deliveries.find((delivery) => delivery.appId === app.id || delivery.repo === app.source?.repo)?.status || "none"} wide />
-        </dl>
       ) : null}
 
       {selectedTab === "env" ? (
@@ -2662,24 +2758,6 @@ function DetailPanel({
             </div>
           ))}
         </div>
-      ) : null}
-
-      {selectedTab === "config" ? (
-        <dl className="grid grid-cols-2 gap-x-3 gap-y-3 px-4 py-4 text-xs">
-          <Meta label="Enabled" value={app.enabled ? "yes" : "no"} />
-          <Meta label="Internal" value={app.internal ? "yes" : "no"} />
-          <Meta label="Install" value={app.install || "-"} mono wide />
-          <Meta label="Dev" value={app.dev || app.command || "-"} mono wide />
-          <Meta label="Build" value={app.build || "-"} mono wide />
-          <Meta label="Start" value={app.start || "-"} mono wide />
-          <Meta label="Image" value={app.image || "-"} mono wide />
-          <Meta label="Compose" value={[app.composeFile, app.composeService].filter(Boolean).join(" / ") || "generated"} mono wide />
-          <Meta label="Depends on" value={(app.dependsOn || []).join(", ") || "-"} wide />
-          <Meta label="Domains" value={(app.domains || []).join(", ") || "locked"} wide />
-          <Meta label="Source" value={app.source?.repo ? `${app.source.repo}:${app.source.branch || "main"}` : "-"} mono wide />
-          <Meta label="Volumes" value={(app.volumes || []).join(", ") || "-"} mono wide />
-          <Meta label="Env" value={Object.keys(app.env || {}).length > 0 ? Object.keys(app.env || {}).join(", ") : "-"} mono wide />
-        </dl>
       ) : null}
 
       {selectedTab === "logs" ? <div className="border-t border-white/5">
