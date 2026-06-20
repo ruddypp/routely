@@ -644,6 +644,22 @@ function formatBytes(value: number | null): string {
   return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)}${units[index]}`;
 }
 
+function redactedTarget(target: string | null, type: string): string {
+  if (!target) return "[redacted]";
+  if (target.includes("***") || target.includes("...") || target.startsWith("[")) return target;
+  if (/^https?:\/\//i.test(target)) {
+    try {
+      const url = new URL(target);
+      return `${url.protocol}//${url.hostname}/...redacted`;
+    } catch {
+      return "[redacted URL]";
+    }
+  }
+  if (type === "telegram") return "telegram:...redacted";
+  if (target.length <= 6) return "[redacted]";
+  return `${target.slice(0, 3)}...${target.slice(-2)}`;
+}
+
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => ({}))) as { error?: string };
   return body.error || `Request failed with HTTP ${response.status}`;
@@ -753,6 +769,7 @@ export default function DashboardClient() {
   const [notificationAttempts, setNotificationAttempts] = useState<DaemonNotificationAttempt[]>([]);
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [notificationSaving, setNotificationSaving] = useState(false);
+  const [notificationActionById, setNotificationActionById] = useState<Record<number, string | null>>({});
   const [notificationForm, setNotificationForm] = useState({ type: "webhook", name: "deploy-alerts", url: "", botToken: "", chatId: "", events: "deploy_succeeded,deploy_failed,backup_failed" });
   const [domainSaving, setDomainSaving] = useState(false);
   const [domainActionByHostname, setDomainActionByHostname] = useState<Record<string, string | null>>({});
@@ -1219,6 +1236,7 @@ export default function DashboardClient() {
 
   const testNotificationChannel = useCallback(async (channel: DaemonNotificationChannel) => {
     setNotificationsError(null);
+    setNotificationActionById((current) => ({ ...current, [channel.id]: "test" }));
     try {
       const response = await fetch(`/api/notifications/${channel.id}/test`, {
         method: "POST",
@@ -1231,11 +1249,14 @@ export default function DashboardClient() {
       applyNotifications(data);
     } catch (error) {
       setNotificationsError(error instanceof Error ? error.message : "Notification test failed.");
+    } finally {
+      setNotificationActionById((current) => ({ ...current, [channel.id]: null }));
     }
   }, [applyNotifications]);
 
   const toggleNotificationChannel = useCallback(async (channel: DaemonNotificationChannel, enabled: boolean) => {
     setNotificationsError(null);
+    setNotificationActionById((current) => ({ ...current, [channel.id]: enabled ? "enable" : "disable" }));
     try {
       const response = await fetch(`/api/notifications/${channel.id}`, {
         method: "PATCH",
@@ -1248,6 +1269,8 @@ export default function DashboardClient() {
       applyNotifications(data);
     } catch (error) {
       setNotificationsError(error instanceof Error ? error.message : "Could not update notification channel.");
+    } finally {
+      setNotificationActionById((current) => ({ ...current, [channel.id]: null }));
     }
   }, [applyNotifications]);
 
@@ -1362,6 +1385,7 @@ export default function DashboardClient() {
   const stoppedCount = Math.max(0, apps.length - runningCount);
   const dockerfileApps = appResources.filter((app) => app.driver === "dockerfile");
   const appModuleTabs: Record<"env" | "logs" | "health", InspectorTab> = { env: "env", logs: "logs", health: "health" };
+  const moduleLoading = loading || refreshing;
 
   return (
     <DashboardShell
@@ -1410,9 +1434,9 @@ export default function DashboardClient() {
 
             {activeModule === "github" ? <GithubModule apps={dockerfileApps} connected={connected} github={github} githubError={githubError} githubForm={githubForm} githubSaving={githubSaving} onGithubConnect={() => void connectGithubRepository()} onGithubFormChange={setGithubForm} /> : null}
 
-            {activeModule === "databases" ? <DatabasesModule connected={connected} databaseActionById={databaseActionById} databaseForm={databaseForm} databaseSaving={databaseSaving} databases={databases} databasesError={databasesError} onCreateDatabase={() => void createDatabase()} onDatabaseAction={(database, action) => void runDatabaseAction(database, action)} onDatabaseFormChange={setDatabaseForm} /> : null}
+            {activeModule === "databases" ? <DatabasesModule connected={connected} databaseActionById={databaseActionById} databaseForm={databaseForm} databaseSaving={databaseSaving} databases={databases} databasesError={databasesError} loading={moduleLoading} onCreateDatabase={() => void createDatabase()} onDatabaseAction={(database, action) => void runDatabaseAction(database, action)} onDatabaseFormChange={setDatabaseForm} /> : null}
 
-            {activeModule === "backups" ? <BackupsModule backupActionById={backupActionById} backupForm={backupForm} backupJobs={backupJobs} backupRuns={backupRuns} backupsError={backupsError} connected={connected} databases={databases} onBackupFormChange={setBackupForm} onEnableBackup={() => void enableBackup()} onRunBackup={(job) => void runBackup(job)} onToggleBackup={(job, enabled) => void toggleBackup(job, enabled)} /> : null}
+            {activeModule === "backups" ? <BackupsModule backupActionById={backupActionById} backupForm={backupForm} backupJobs={backupJobs} backupRuns={backupRuns} backupsError={backupsError} connected={connected} databases={databases} loading={moduleLoading} onBackupFormChange={setBackupForm} onEnableBackup={() => void enableBackup()} onRunBackup={(job) => void runBackup(job)} onToggleBackup={(job, enabled) => void toggleBackup(job, enabled)} /> : null}
 
             {activeModule === "settings" ? (
               <NotificationsPanel
@@ -1421,6 +1445,8 @@ export default function DashboardClient() {
                 connected={connected}
                 error={notificationsError}
                 form={notificationForm}
+                loading={moduleLoading}
+                notificationActionById={notificationActionById}
                 saving={notificationSaving}
                 onChange={setNotificationForm}
                 onCreate={() => void createNotificationChannel()}
@@ -1662,34 +1688,138 @@ function GithubModule({ apps, connected, github, githubError, githubForm, github
   );
 }
 
-function DatabasesModule({ connected, databaseActionById, databaseForm, databaseSaving, databases, databasesError, onCreateDatabase, onDatabaseAction, onDatabaseFormChange }: { connected: boolean; databaseActionById: Record<number, string | null>; databaseForm: { type: string; name: string }; databaseSaving: boolean; databases: DaemonDatabase[]; databasesError: string | null; onCreateDatabase: () => void; onDatabaseAction: (database: DaemonDatabase, action: "start" | "stop") => void; onDatabaseFormChange: (form: { type: string; name: string }) => void }) {
+function DatabasesModule({ connected, databaseActionById, databaseForm, databaseSaving, databases, databasesError, loading, onCreateDatabase, onDatabaseAction, onDatabaseFormChange }: { connected: boolean; databaseActionById: Record<number, string | null>; databaseForm: { type: string; name: string }; databaseSaving: boolean; databases: DaemonDatabase[]; databasesError: string | null; loading: boolean; onCreateDatabase: () => void; onDatabaseAction: (database: DaemonDatabase, action: "start" | "stop") => void; onDatabaseFormChange: (form: { type: string; name: string }) => void }) {
+  const running = databases.filter((database) => database.status === "running").length;
+  const publicDatabases = databases.filter((database) => !database.internal).length;
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="databases" stats={<><ReadinessCard label="Records" value={String(databases.length)} status={databases.length ? "ok" : "warn"} /><ReadinessCard label="Running" value={String(databases.filter((database) => database.status === "running").length)} status={databases.some((database) => database.status === "running") ? "ok" : "warn"} /><ReadinessCard label="Network" value="internal" status="ok" /></>} />
+      <ModuleHeader module="databases" stats={<><ReadinessCard label="Records" value={loading ? "loading" : String(databases.length)} status={databases.length ? "ok" : "warn"} /><ReadinessCard label="Running" value={String(running)} status={running ? "ok" : "warn"} /><ReadinessCard label="Network" value={publicDatabases ? `${publicDatabases} public` : "internal"} status={publicDatabases ? "error" : "ok"} /></>} />
       {databasesError ? <Alert title="Database action failed" message={databasesError} /> : null}
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.72fr)_minmax(340px,1.28fr)]">
         <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
           <ResourceSection title="Create database" count={5} />
-          <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]"><UiSelect value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} label="Type" options={["postgres", "mysql", "mariadb", "redis", "mongodb"]} /><Field label="Name" value={databaseForm.name} onChange={(value) => onDatabaseFormChange({ ...databaseForm, name: value })} placeholder="postgres" disabled={!connected || databaseSaving} /><div className="flex items-end"><PillButton strong onClick={onCreateDatabase} disabled={!connected || databaseSaving || !databaseForm.name.trim()}>{databaseSaving ? "Creating" : "Create"}</PillButton></div></div><p className="mt-3 text-xs text-muted">Database services are Compose-backed and internal-only by default. The UI shows env key names, never raw values.</p></div>
+          <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]"><UiSelect value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} label="Type" options={["postgres", "mysql", "mariadb", "redis", "mongodb"]} /><Field label="Name" value={databaseForm.name} onChange={(value) => onDatabaseFormChange({ ...databaseForm, name: value })} placeholder="postgres" disabled={!connected || databaseSaving} /><div className="flex items-end"><PillButton strong onClick={onCreateDatabase} disabled={!connected || databaseSaving || !databaseForm.name.trim()}>{databaseSaving ? "Creating" : "Create"}</PillButton></div></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Runtime" value="Docker Compose service" /><Meta label="Secrets" value="env key names only" /></div></div>
+          <DeferredCapabilityList items={["Restore automation deferred", "External database exposure locked", "Raw env values hidden"]} />
         </div>
-        <div className="min-w-0"><ResourceSection title="Database services" count={databases.length} />{databases.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No production database records yet. Create one to add a Compose-backed internal service.</div> : databases.map((database) => { const busy = databaseActionById[database.id]; const running = database.status === "running"; return <div key={database.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{database.name}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{database.image || database.type} · {database.composeService || "compose"} · {database.volumeName || "volume pending"}</p></div><StatusBadge status={database.status} /></div><div className="mt-2 grid grid-cols-3 gap-2"><ReadinessCard label="Network" value={database.internal ? "internal" : "public"} status={database.internal ? "ok" : "error"} /><ReadinessCard label="Port" value={database.port ? `:${database.port}` : "none"} status="ok" /><ReadinessCard label="Env" value={`${database.envKeys.length} keys`} status="ok" /></div>{database.envKeys.length ? <p className="mt-2 break-all font-mono text-[11px] text-muted">{database.envKeys.join(", ")}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onDatabaseAction(database, "start")} disabled={!connected || Boolean(busy) || running}>{busy === "start" ? "Starting" : "Start"}</PillButton><PillButton onClick={() => onDatabaseAction(database, "stop")} disabled={!connected || Boolean(busy) || !running}>{busy === "stop" ? "Stopping" : "Stop"}</PillButton></div></div>; })}</div>
+        <div className="min-w-0"><ResourceSection title="Database ledger" count={databases.length} />{loading ? <LoadingRows /> : databases.length === 0 ? <DataEmpty title="No database services" detail="Create a supported internal Compose database when an app needs production state." /> : databases.map((database) => <DatabaseLedgerRow key={database.id} busy={databaseActionById[database.id]} connected={connected} database={database} onAction={onDatabaseAction} />)}</div>
       </div>
     </section>
   );
 }
 
-function BackupsModule({ backupActionById, backupForm, backupJobs, backupRuns, backupsError, connected, databases, onBackupFormChange, onEnableBackup, onRunBackup, onToggleBackup }: { backupActionById: Record<number, string | null>; backupForm: { databaseId: string; schedule: string; retentionDays: string }; backupJobs: DaemonBackupJob[]; backupRuns: DaemonBackupRun[]; backupsError: string | null; connected: boolean; databases: DaemonDatabase[]; onBackupFormChange: (form: { databaseId: string; schedule: string; retentionDays: string }) => void; onEnableBackup: () => void; onRunBackup: (job: DaemonBackupJob) => void; onToggleBackup: (job: DaemonBackupJob, enabled: boolean) => void }) {
+function BackupsModule({ backupActionById, backupForm, backupJobs, backupRuns, backupsError, connected, databases, loading, onBackupFormChange, onEnableBackup, onRunBackup, onToggleBackup }: { backupActionById: Record<number, string | null>; backupForm: { databaseId: string; schedule: string; retentionDays: string }; backupJobs: DaemonBackupJob[]; backupRuns: DaemonBackupRun[]; backupsError: string | null; connected: boolean; databases: DaemonDatabase[]; loading: boolean; onBackupFormChange: (form: { databaseId: string; schedule: string; retentionDays: string }) => void; onEnableBackup: () => void; onRunBackup: (job: DaemonBackupJob) => void; onToggleBackup: (job: DaemonBackupJob, enabled: boolean) => void }) {
   const latestRun = backupRuns[0] || null;
   const failedRuns = backupRuns.filter((run) => run.status === "failed");
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="backups" stats={<><ReadinessCard label="Jobs" value={String(backupJobs.length)} status={backupJobs.length ? "ok" : "warn"} /><ReadinessCard label="Latest" value={latestRun?.status || "never"} status={latestRun?.status === "succeeded" ? "ok" : latestRun?.status === "failed" ? "error" : "warn"} /><ReadinessCard label="Failed" value={String(failedRuns.length)} status={failedRuns.length ? "error" : "ok"} /></>} />
+      <ModuleHeader module="backups" stats={<><ReadinessCard label="Jobs" value={loading ? "loading" : String(backupJobs.length)} status={backupJobs.length ? "ok" : "warn"} /><ReadinessCard label="Latest" value={latestRun?.status || "never"} status={latestRun?.status === "succeeded" ? "ok" : latestRun?.status === "failed" ? "error" : "warn"} /><ReadinessCard label="Failed" value={String(failedRuns.length)} status={failedRuns.length ? "error" : "ok"} /><ReadinessCard label="Storage" value="local files" status="ok" /></>} />
       {backupsError ? <Alert title="Backup action failed" message={backupsError} /> : null}
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]">
-        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Enable backup job" count={databases.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.9fr)_minmax(0,1fr)_100px_auto]"><UiSelect value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} label="Database"><option value="">Choose</option>{databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}</UiSelect><Field label="Schedule" value={backupForm.schedule} onChange={(value) => onBackupFormChange({ ...backupForm, schedule: value })} placeholder="0 2 * * *" disabled={!connected} mono /><Field label="Keep days" value={backupForm.retentionDays} onChange={(value) => onBackupFormChange({ ...backupForm, retentionDays: value })} placeholder="7" disabled={!connected} type="number" /><div className="flex items-end"><PillButton strong onClick={onEnableBackup} disabled={!connected || !backupForm.databaseId}>Enable</PillButton></div></div><p className="mt-3 text-xs text-muted">Backups write local files only. Restore automation and external storage are later checkpoint scope.</p></div><ResourceSection title="Backup jobs" count={backupJobs.length} />{backupJobs.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Enable backups for a database to schedule local backup files and run manual backups.</div> : backupJobs.map((job) => { const busy = backupActionById[job.id]; return <div key={job.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{job.databaseName || `database ${job.databaseId}`}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{job.schedule || "manual only"} · retain {job.retentionDays}d · {job.localDir || "default backup dir"}</p></div><StatusBadge status={job.enabled ? "running" : "stopped"} /></div>{job.lastRunMessage ? <p className="mt-2 text-xs text-muted">Last run: {job.lastRunStatus || "unknown"} · {job.lastRunAt ? timeAgo(job.lastRunAt) : "never"} · {job.lastRunMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onRunBackup(job)} disabled={!connected || Boolean(busy)}>{busy === "run" ? "Running" : "Run now"}</PillButton><PillButton onClick={() => onToggleBackup(job, !job.enabled)} disabled={!connected || Boolean(busy)}>{job.enabled ? "Disable" : "Enable"}</PillButton></div></div>; })}</div>
-        <div className="min-w-0"><ResourceSection title="Backup runs" count={backupRuns.length} />{backupRuns.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Backup run history appears after a manual or scheduled run.</div> : backupRuns.map((run) => <div key={run.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-center justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">#{run.id} {run.databaseName || `database ${run.databaseId}`}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{run.trigger} · {run.finishedAt ? timeAgo(run.finishedAt) : timeAgo(run.createdAt)} · {formatBytes(run.sizeBytes)}</p></div><StatusBadge status={run.status} /></div><p className="mt-2 break-all text-xs text-muted">{run.filePath || run.message || "no backup file"}</p></div>)}</div>
+        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Enable backup job" count={databases.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.9fr)_minmax(0,1fr)_100px_auto]"><UiSelect value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} label="Database"><option value="">Choose</option>{databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}</UiSelect><Field label="Schedule" value={backupForm.schedule} onChange={(value) => onBackupFormChange({ ...backupForm, schedule: value })} placeholder="0 2 * * *" disabled={!connected} mono /><Field label="Keep days" value={backupForm.retentionDays} onChange={(value) => onBackupFormChange({ ...backupForm, retentionDays: value })} placeholder="7" disabled={!connected} type="number" /><div className="flex items-end"><PillButton strong onClick={onEnableBackup} disabled={!connected || !backupForm.databaseId}>Enable</PillButton></div></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Storage" value="local backup directory" /><Meta label="Restore" value="deferred, not exposed" /></div></div><DeferredCapabilityList items={["External object storage deferred", "Restore UI locked until backend exists", "Backup files stay local"]} /><ResourceSection title="Backup jobs" count={backupJobs.length} />{loading ? <LoadingRows /> : backupJobs.length === 0 ? <DataEmpty title="No backup jobs" detail="Enable a job for a database to schedule local backups or run one manually." /> : backupJobs.map((job) => <BackupJobLedgerRow key={job.id} busy={backupActionById[job.id]} connected={connected} job={job} latestRun={backupRuns.find((run) => run.backupJobId === job.id) || null} onRunBackup={onRunBackup} onToggleBackup={onToggleBackup} />)}</div>
+        <div className="min-w-0"><ResourceSection title="Run history" count={backupRuns.length} />{loading ? <LoadingRows /> : backupRuns.length === 0 ? <DataEmpty title="No backup runs" detail="Manual and scheduled runs will appear here with file or failure message state." /> : backupRuns.map((run) => <BackupRunLedgerRow key={run.id} run={run} />)}</div>
       </div>
     </section>
+  );
+}
+
+function DatabaseLedgerRow({ busy, connected, database, onAction }: { busy: string | null | undefined; connected: boolean; database: DaemonDatabase; onAction: (database: DaemonDatabase, action: "start" | "stop") => void }) {
+  const running = database.status === "running";
+  return (
+    <article className="grid gap-3 border-b border-white/5 px-4 py-3 transition hover:bg-white/[0.025] xl:grid-cols-[minmax(180px,0.8fr)_minmax(280px,1.2fr)_minmax(220px,0.9fr)_auto] xl:items-center">
+      <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-black/30 font-mono text-[10px] font-black uppercase text-accent shadow-[0_0_0_1px_var(--border)_inset]">{database.type.slice(0, 2)}</span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-bold">{database.name}</p>
+            <p className="truncate font-mono text-[11px] text-muted">{database.type} · {database.image || "image pending"}</p>
+          </div>
+        </div>
+      </div>
+      <div className="grid min-w-0 grid-cols-2 gap-2 text-xs sm:grid-cols-4 xl:grid-cols-2">
+        <Meta label="State" value={database.internal ? "internal" : "public"} />
+        <Meta label="Service" value={database.composeService || "compose pending"} mono />
+        <Meta label="Volume" value={database.volumeName || "volume pending"} mono />
+        <Meta label="Port" value={database.port ? `:${database.port}` : "none"} mono />
+      </div>
+      <div className="grid min-w-0 grid-cols-2 gap-2 text-xs sm:grid-cols-3 xl:grid-cols-2">
+        <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">Status</p><div className="mt-1"><StatusBadge status={database.status} /></div></div>
+        <Meta label="App" value={database.appName || "service only"} />
+        <Meta label="Env keys" value={database.envKeys.length ? database.envKeys.join(", ") : "none"} mono wide />
+      </div>
+      <div className="flex flex-wrap gap-1.5 xl:justify-end xl:flex-nowrap">
+        <PillButton onClick={() => onAction(database, "start")} disabled={!connected || Boolean(busy) || running}>{busy === "start" ? "Starting" : "Start"}</PillButton>
+        <PillButton onClick={() => onAction(database, "stop")} disabled={!connected || Boolean(busy) || !running}>{busy === "stop" ? "Stopping" : "Stop"}</PillButton>
+      </div>
+    </article>
+  );
+}
+
+function BackupJobLedgerRow({ busy, connected, job, latestRun, onRunBackup, onToggleBackup }: { busy: string | null | undefined; connected: boolean; job: DaemonBackupJob; latestRun: DaemonBackupRun | null; onRunBackup: (job: DaemonBackupJob) => void; onToggleBackup: (job: DaemonBackupJob, enabled: boolean) => void }) {
+  return (
+    <article className="grid gap-3 border-b border-white/5 px-4 py-3 transition hover:bg-white/[0.025] xl:grid-cols-[minmax(180px,0.85fr)_minmax(260px,1.05fr)_minmax(220px,0.95fr)_auto] xl:items-center">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <StatusBadge status={job.enabled ? "running" : "stopped"} />
+          <p className="truncate text-sm font-bold">{job.databaseName || `database ${job.databaseId}`}</p>
+          <span className="rounded-full bg-surface-raised px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{job.databaseType || "db"}</span>
+        </div>
+        <p className="mt-1 truncate font-mono text-[11px] text-muted">{job.localDir || "default backup dir"}</p>
+      </div>
+      <div className="grid min-w-0 grid-cols-2 gap-2 text-xs sm:grid-cols-3 xl:grid-cols-2">
+        <Meta label="Schedule" value={job.schedule || "manual only"} mono />
+        <Meta label="Retention" value={`${job.retentionDays} days`} />
+        <Meta label="Last run" value={job.lastRunAt ? timeAgo(job.lastRunAt) : "never"} />
+        <Meta label="Last state" value={job.lastRunStatus || "none"} />
+      </div>
+      <div className="min-w-0 text-xs text-muted">
+        <p className="line-clamp-2 break-words">{job.lastRunMessage || latestRun?.message || latestRun?.filePath || "No run message recorded."}</p>
+        {latestRun ? <p className="mt-1 truncate font-mono text-[11px]">run #{latestRun.id} · {latestRun.status} · {formatBytes(latestRun.sizeBytes)}</p> : null}
+      </div>
+      <div className="flex flex-wrap gap-1.5 xl:justify-end xl:flex-nowrap">
+        <PillButton onClick={() => onRunBackup(job)} disabled={!connected || Boolean(busy)}>{busy === "run" ? "Running" : "Run"}</PillButton>
+        <PillButton onClick={() => onToggleBackup(job, !job.enabled)} disabled={!connected || Boolean(busy)}>{busy === "enable" ? "Enabling" : busy === "disable" ? "Disabling" : job.enabled ? "Disable" : "Enable"}</PillButton>
+      </div>
+    </article>
+  );
+}
+
+function BackupRunLedgerRow({ run }: { run: DaemonBackupRun }) {
+  return (
+    <article className="grid gap-3 border-b border-white/5 px-4 py-3 transition hover:bg-white/[0.025] xl:grid-cols-[minmax(180px,0.8fr)_minmax(220px,0.85fr)_minmax(260px,1.15fr)] xl:items-start">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2"><StatusBadge status={run.status} /><p className="truncate text-sm font-bold">#{run.id} {run.databaseName || `database ${run.databaseId}`}</p></div>
+        <p className="mt-1 truncate font-mono text-[11px] text-muted">{run.databaseType || "database"} · {run.trigger}</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <Meta label="Started" value={timeAgo(run.startedAt || run.createdAt)} />
+        <Meta label="Finished" value={timeAgo(run.finishedAt)} />
+        <Meta label="Size" value={formatBytes(run.sizeBytes)} />
+        <Meta label="Job" value={`#${run.backupJobId}`} mono />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">File / message</p>
+        <p className="mt-1 break-all font-mono text-[11px] text-muted">{run.filePath || run.message || "no backup file"}</p>
+      </div>
+    </article>
+  );
+}
+
+function DeferredCapabilityList({ items }: { items: string[] }) {
+  return (
+    <div className="border-t border-white/5 bg-black/20 px-4 py-3">
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/65">{item}</span>)}
+      </div>
+    </div>
+  );
+}
+
+function DataEmpty({ detail, title }: { detail: string; title: string }) {
+  return (
+    <div className="border-b border-white/5 px-4 py-5">
+      <p className="text-sm font-bold">{title}</p>
+      <p className="mt-1 max-w-xl text-sm text-muted">{detail}</p>
+    </div>
   );
 }
 
@@ -1792,25 +1922,28 @@ function OverviewList({ action, children, empty, onAction, title }: { action: st
   );
 }
 
-function NotificationsPanel({ attempts, channels, connected, error, form, onChange, onCreate, onTest, onToggle, saving }: { attempts: DaemonNotificationAttempt[]; channels: DaemonNotificationChannel[]; connected: boolean; error: string | null; form: { type: string; name: string; url: string; botToken: string; chatId: string; events: string }; onChange: (form: { type: string; name: string; url: string; botToken: string; chatId: string; events: string }) => void; onCreate: () => void; onTest: (channel: DaemonNotificationChannel) => void; onToggle: (channel: DaemonNotificationChannel, enabled: boolean) => void; saving: boolean }) {
+function NotificationsPanel({ attempts, channels, connected, error, form, loading, notificationActionById, onChange, onCreate, onTest, onToggle, saving }: { attempts: DaemonNotificationAttempt[]; channels: DaemonNotificationChannel[]; connected: boolean; error: string | null; form: { type: string; name: string; url: string; botToken: string; chatId: string; events: string }; loading: boolean; notificationActionById: Record<number, string | null>; onChange: (form: { type: string; name: string; url: string; botToken: string; chatId: string; events: string }) => void; onCreate: () => void; onTest: (channel: DaemonNotificationChannel) => void; onToggle: (channel: DaemonNotificationChannel, enabled: boolean) => void; saving: boolean }) {
   const update = (patch: Partial<typeof form>) => onChange({ ...form, ...patch });
+  const failedAttempts = attempts.filter((attempt) => attempt.status === "failed").length;
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
       <div className="flex flex-col gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.035] to-transparent px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Settings</p>
-          <h1 className="text-xl font-bold leading-tight">Notifications</h1>
-          <p className="mt-1 max-w-2xl text-sm text-muted">Deploy success, deploy failure, and backup failure alerts through real daemon delivery attempts.</p>
+          <h1 className="text-xl font-bold leading-tight">Notifications and safety</h1>
+          <p className="mt-1 max-w-2xl text-sm text-muted">Webhook, Discord, and Telegram channels with redacted targets and recorded delivery attempts.</p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          <ReadinessCard label="Channels" value={String(channels.length)} status={channels.length ? "ok" : "warn"} />
+          <ReadinessCard label="Channels" value={loading ? "loading" : String(channels.length)} status={channels.length ? "ok" : "warn"} />
           <ReadinessCard label="Enabled" value={String(channels.filter((channel) => channel.enabled).length)} status={channels.some((channel) => channel.enabled) ? "ok" : "warn"} />
-          <ReadinessCard label="Attempts" value={String(attempts.length)} status={attempts.some((attempt) => attempt.status === "failed") ? "warn" : "ok"} />
+          <ReadinessCard label="Attempts" value={String(attempts.length)} status={failedAttempts ? "warn" : "ok"} />
         </div>
       </div>
       {error ? <Alert title="Notifications unavailable" message={error} /> : null}
-      <div className="grid gap-3 px-4 py-4 lg:grid-cols-[0.9fr_1.1fr]">
-        <form onSubmit={(event) => { event.preventDefault(); onCreate(); }} className={`grid gap-3 rounded-md bg-black/20 p-3 ${INSET_RING}`}>
+      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(360px,1.18fr)]">
+        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
+        <ResourceSection title="Add channel" count={3} />
+        <form onSubmit={(event) => { event.preventDefault(); onCreate(); }} className="grid gap-3 border-b border-white/5 px-4 py-3">
           <div className="grid gap-3 sm:grid-cols-2">
             <SelectField label="Channel" value={form.type} values={["webhook", "discord", "telegram"]} onChange={(value) => update({ type: value })} disabled={!connected || saving} />
             <Field label="Name" value={form.name} onChange={(value) => update({ name: value })} disabled={!connected || saving} />
@@ -1820,40 +1953,66 @@ function NotificationsPanel({ attempts, channels, connected, error, form, onChan
           </div>
           <PillButton type="submit" strong disabled={!connected || saving}>{saving ? "Saving" : "Add channel"}</PillButton>
         </form>
-        <div className="grid gap-3">
-          <div className={`overflow-hidden rounded-md bg-black/20 ${INSET_RING}`}>
-            <ResourceSection title="Channels" count={channels.length} />
-            {channels.length === 0 ? <p className="px-3 py-3 text-sm text-muted">No notification channels configured yet.</p> : null}
-            {channels.map((channel) => <NotificationChannelRow key={channel.id} channel={channel} connected={connected} onTest={onTest} onToggle={onToggle} />)}
-          </div>
-          <div className={`overflow-hidden rounded-md bg-black/20 ${INSET_RING}`}>
-            <ResourceSection title="Delivery attempts" count={attempts.length} />
-            {attempts.length === 0 ? <p className="px-3 py-3 text-sm text-muted">No notification deliveries recorded yet.</p> : null}
-            {attempts.slice(0, 8).map((attempt) => <TimelineRow key={attempt.id} title={`${attempt.event} · ${attempt.channelName || "deleted channel"}`} detail={`${attempt.status}${attempt.httpStatus ? ` · HTTP ${attempt.httpStatus}` : ""}${attempt.message ? ` · ${attempt.message}` : ""}`} tone={attempt.status === "succeeded" ? "ok" : attempt.status === "failed" ? "error" : "warn"} />)}
-          </div>
+        <DeferredCapabilityList items={["Email deferred", "Raw webhook URLs hidden", "Private/loopback targets rejected by daemon"]} />
+        </div>
+        <div className="min-w-0">
+          <ResourceSection title="Channels" count={channels.length} />
+          {loading ? <LoadingRows /> : channels.length === 0 ? <DataEmpty title="No notification channels" detail="Add a channel to receive deploy and backup failure events. Targets remain redacted after save." /> : channels.map((channel) => <NotificationChannelRow key={channel.id} action={notificationActionById[channel.id]} attempts={attempts.filter((attempt) => attempt.channelId === channel.id).slice(0, 3)} channel={channel} connected={connected} onTest={onTest} onToggle={onToggle} />)}
+          <ResourceSection title="Recent delivery attempts" count={attempts.length} />
+          {loading ? <LoadingRows /> : attempts.length === 0 ? <DataEmpty title="No deliveries yet" detail="Test sends and subscribed deploy or backup events will appear here." /> : attempts.slice(0, 10).map((attempt) => <NotificationAttemptRow key={attempt.id} attempt={attempt} />)}
         </div>
       </div>
     </section>
   );
 }
 
-function NotificationChannelRow({ channel, connected, onTest, onToggle }: { channel: DaemonNotificationChannel; connected: boolean; onTest: (channel: DaemonNotificationChannel) => void; onToggle: (channel: DaemonNotificationChannel, enabled: boolean) => void }) {
+function NotificationChannelRow({ action, attempts, channel, connected, onTest, onToggle }: { action: string | null | undefined; attempts: DaemonNotificationAttempt[]; channel: DaemonNotificationChannel; connected: boolean; onTest: (channel: DaemonNotificationChannel) => void; onToggle: (channel: DaemonNotificationChannel, enabled: boolean) => void }) {
   return (
-    <div className="grid gap-2 border-b border-white/5 px-3 py-3 md:grid-cols-[1fr_auto] md:items-center">
+    <div className="grid gap-3 border-b border-white/5 px-4 py-3 transition hover:bg-white/[0.025] xl:grid-cols-[minmax(220px,0.85fr)_minmax(240px,1fr)_minmax(220px,0.85fr)_auto] xl:items-center">
       <div className="min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <StatusBadge status={channel.enabled ? "running" : "stopped"} />
           <p className="truncate text-sm font-bold">{channel.name}</p>
           <span className="rounded-full bg-surface-raised px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{channel.type}</span>
         </div>
-        <p className="mt-1 truncate font-mono text-[11px] text-muted">{channel.target || "[redacted]"}</p>
-        <p className="mt-1 truncate text-[11px] text-muted">{channel.events.join(", ")}</p>
+        <p className="mt-1 truncate font-mono text-[11px] text-muted">{redactedTarget(channel.target, channel.type)}</p>
       </div>
-      <div className="flex flex-wrap gap-2 md:justify-end">
-        <PillButton onClick={() => onTest(channel)} disabled={!connected || !channel.enabled}>Test</PillButton>
-        <PillButton onClick={() => onToggle(channel, !channel.enabled)} disabled={!connected}>{channel.enabled ? "Disable" : "Enable"}</PillButton>
+      <div className="grid min-w-0 grid-cols-2 gap-2 text-xs sm:grid-cols-3 xl:grid-cols-2">
+        <Meta label="Events" value={channel.events.length ? channel.events.join(", ") : "none"} />
+        <Meta label="Enabled" value={channel.enabled ? "yes" : "no"} />
+        <Meta label="Updated" value={timeAgo(channel.updatedAt)} />
+        <Meta label="Created" value={timeAgo(channel.createdAt)} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">Recent attempts</p>
+        {attempts.length === 0 ? <p className="mt-1 text-xs text-muted">No deliveries recorded.</p> : attempts.map((attempt) => <p key={attempt.id} className="mt-1 truncate text-[11px] text-muted">{attempt.event} · {attempt.status}{attempt.httpStatus ? ` · HTTP ${attempt.httpStatus}` : ""}</p>)}
+      </div>
+      <div className="flex flex-wrap gap-1.5 xl:justify-end xl:flex-nowrap">
+        <PillButton onClick={() => onTest(channel)} disabled={!connected || !channel.enabled || Boolean(action)}>{action === "test" ? "Testing" : "Test"}</PillButton>
+        <PillButton onClick={() => onToggle(channel, !channel.enabled)} disabled={!connected || Boolean(action)}>{action === "enable" ? "Enabling" : action === "disable" ? "Disabling" : channel.enabled ? "Disable" : "Enable"}</PillButton>
       </div>
     </div>
+  );
+}
+
+function NotificationAttemptRow({ attempt }: { attempt: DaemonNotificationAttempt }) {
+  return (
+    <article className="grid gap-3 border-b border-white/5 px-4 py-3 transition hover:bg-white/[0.025] xl:grid-cols-[minmax(220px,0.9fr)_minmax(220px,0.85fr)_minmax(260px,1.05fr)] xl:items-start">
+      <div className="min-w-0">
+        <div className="flex flex-wrap items-center gap-2"><StatusBadge status={attempt.status} /><p className="truncate text-sm font-bold">{attempt.event}</p></div>
+        <p className="mt-1 truncate text-[11px] text-muted">{attempt.channelName || "deleted channel"} · {attempt.channelType || "channel"}</p>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-xs">
+        <Meta label="Target" value={redactedTarget(attempt.target, attempt.channelType || "webhook")} mono />
+        <Meta label="HTTP" value={attempt.httpStatus ? String(attempt.httpStatus) : "n/a"} />
+        <Meta label="Resource" value={attempt.resourceType ? `${attempt.resourceType} ${attempt.resourceId || ""}`.trim() : "none"} />
+        <Meta label="Finished" value={timeAgo(attempt.finishedAt || attempt.createdAt)} />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">Message</p>
+        <p className="mt-1 break-words text-xs text-muted">{attempt.message || "No delivery message."}</p>
+      </div>
+    </article>
   );
 }
 
