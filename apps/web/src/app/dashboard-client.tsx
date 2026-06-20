@@ -9,6 +9,9 @@ import { EmptyState as UiEmptyState } from "@/components/ui/empty-state";
 import { Field as UiField, TextAreaField as UiTextAreaField } from "@/components/ui/field";
 import { Select as UiSelect } from "@/components/ui/select";
 import { SkeletonRows } from "@/components/ui/skeleton";
+import { DashboardShell } from "@/components/dashboard/shell";
+import { ModuleHeader } from "@/components/dashboard/module-header";
+import type { DashboardModuleKey } from "@/components/dashboard/types";
 
 type DaemonApp = {
   id: number;
@@ -438,7 +441,7 @@ type NotificationsResponse = {
 
 type AppAction = "start" | "stop" | "restart";
 type FormMode = "create" | "edit";
-type ModuleKey = "overview" | "apps" | "deployments" | "domains" | "github" | "env" | "logs" | "health" | "metrics" | "databases" | "backups" | "settings";
+type ModuleKey = DashboardModuleKey;
 type InspectorTab = "overview" | "health" | "metrics" | "deployments" | "domains" | "proxy" | "github" | "env" | "logs" | "config";
 
 type AppFormState = {
@@ -472,20 +475,6 @@ const POLL_INTERVAL_MS = 4000;
 const APP_TYPES = ["app", "database", "compose", "static", "worker"];
 const APP_DRIVERS = ["command", "compose", "dockerfile", "buildpack", "static"];
 const APP_PRESETS = ["custom", "nextjs", "vite", "laravel", "express", "nestjs", "django", "fastapi", "go", "static", "php", "postgres", "mysql", "mariadb", "redis", "mongodb"];
-const MODULES: Array<{ key: ModuleKey; label: string; summary: string }> = [
-  { key: "overview", label: "Overview", summary: "Readiness and next actions" },
-  { key: "apps", label: "Apps", summary: "Local registry and lifecycle" },
-  { key: "deployments", label: "Deployments", summary: "Dockerfile deploy history" },
-  { key: "domains", label: "Domains", summary: "DNS, proxy, and HTTPS" },
-  { key: "github", label: "GitHub", summary: "Repos and webhook deliveries" },
-  { key: "env", label: "Env", summary: "Secrets and runtime env" },
-  { key: "logs", label: "Logs", summary: "Runtime and deploy output" },
-  { key: "health", label: "Health", summary: "Checks and failures" },
-  { key: "metrics", label: "Metrics", summary: "Host and container samples" },
-  { key: "databases", label: "Databases", summary: "Internal database services" },
-  { key: "backups", label: "Backups", summary: "Jobs and run history" },
-  { key: "settings", label: "Settings", summary: "Notifications and auth notes" }
-];
 const PANEL_SHADOW = "shadow-[var(--panel-shadow)]";
 const INSET_RING = "shadow-[var(--inset-border)]";
 const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
@@ -1324,22 +1313,20 @@ export default function DashboardClient() {
   const appModuleTabs: Record<"env" | "logs" | "health", InspectorTab> = { env: "env", logs: "logs", health: "health" };
 
   return (
-    <main className="min-h-screen bg-background text-foreground">
-      <div className="grid min-h-screen grid-rows-[1fr_auto] md:grid-cols-[232px_1fr] md:grid-rows-1 xl:grid-cols-[248px_1fr]">
-        <Sidebar activeModule={activeModule} connected={connected} onSelect={setActiveModule} />
-
-        <section className="min-w-0 pb-20 md:pb-0">
-          <WorkspaceHeader
-            connected={connected}
-            daemonUrl={health?.daemonUrl || "-"}
-            workspace={workspace}
-            updated={timeAgo(lastUpdated)}
-            loading={loading}
-            refreshing={refreshing}
-            onRefresh={() => void poll(true)}
-          />
-
-          <div className="grid gap-3 px-3 py-3 sm:px-4 lg:px-5">
+    <DashboardShell
+      activeModule={activeModule}
+      onSelect={setActiveModule}
+      status={{
+        connected,
+        daemonUrl: health?.daemonUrl || "-",
+        loading,
+        mode: serverStatus?.mode || "local",
+        refreshing,
+        updated: timeAgo(lastUpdated),
+        workspace,
+        onRefresh: () => void poll(true)
+      }}
+    >
             {activeModule === "overview" ? (
               <OverviewPanel
                 apps={apps}
@@ -1390,44 +1377,7 @@ export default function DashboardClient() {
             {activeModule === "apps" || activeModule === "env" || activeModule === "logs" || activeModule === "health" ? <AppOperationsModule activeTab={activeModule === "apps" ? undefined : appModuleTabs[activeModule]} apps={apps} appResources={appResources} app={selectedApp} selectedAppId={selectedAppId} connected={connected} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} logs={logs} logsLoading={logsLoading} logsError={logsError} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} module={activeModule} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onLogs={(app) => void loadLogs(app)} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} /> : null}
 
             {activeModule === "metrics" ? <MetricsModule app={selectedApp} apps={apps} appResources={appResources} connected={connected} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} github={github} hostMetrics={hostMetrics} hostMetricsError={hostMetricsError} logs={logs} logsError={logsError} logsLoading={logsLoading} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} selectedAppId={selectedAppId} /> : null}
-          </div>
-        </section>
-
-        <MobileNav activeModule={activeModule} connected={connected} onSelect={setActiveModule} />
-      </div>
-    </main>
-  );
-}
-
-function Sidebar({ activeModule, connected, onSelect }: { activeModule: ModuleKey; connected: boolean; onSelect: (module: ModuleKey) => void }) {
-  return (
-    <aside className={`hidden border-r border-white/5 bg-background px-3 py-4 ${PANEL_SHADOW} md:block`}>
-      <div className="flex items-center gap-3 px-2">
-        <div className="grid h-9 w-9 place-items-center rounded-full bg-accent text-sm font-black text-black">R</div>
-        <div>
-          <p className="text-sm font-bold leading-tight">Routely</p>
-          <p className="text-[11px] text-muted">Local control plane</p>
-        </div>
-      </div>
-      <nav className="mt-7 space-y-1">
-        {MODULES.map((module) => (
-          <NavItem key={module.key} active={activeModule === module.key} label={module.label} dot={connected && ["overview", "apps", "domains", "databases", "backups", "settings"].includes(module.key)} onClick={() => onSelect(module.key)} />
-        ))}
-      </nav>
-    </aside>
-  );
-}
-
-function ModuleHeader({ actions, module, stats }: { actions?: ReactNode; module: ModuleKey; stats?: ReactNode }) {
-  const meta = MODULES.find((item) => item.key === module) || MODULES[0];
-  return (
-    <div className="flex flex-col gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 lg:flex-row lg:items-center lg:justify-between">
-      <div className="min-w-0">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{meta.summary}</p>
-        <h1 className="text-xl font-bold leading-tight">{meta.label}</h1>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">{stats}{actions}</div>
-    </div>
+    </DashboardShell>
   );
 }
 
@@ -1636,7 +1586,7 @@ function OverviewPanel({ apps, backupJobs, backupRuns, deployments, healthchecks
 
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
-      <div className="grid gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 md:grid-cols-[1fr_1.2fr]">
+      <div className="grid gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 lg:grid-cols-[1fr_1.2fr]">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Overview</p>
           <h1 className="text-xl font-bold leading-tight">Fleet status</h1>
@@ -1861,58 +1811,6 @@ function CheckRow({ check }: { check: DaemonServerCheck }) {
       </div>
       <p className="mt-1 truncate text-[11px] text-muted">{check.message}</p>
     </div>
-  );
-}
-
-function MobileNav({ activeModule, connected, onSelect }: { activeModule: ModuleKey; connected: boolean; onSelect: (module: ModuleKey) => void }) {
-  return (
-    <nav className="fixed inset-x-0 bottom-0 z-30 border-t border-white/5 bg-background/95 px-2 py-2 shadow-[rgba(0,0,0,0.5)_0px_-8px_24px] backdrop-blur md:hidden">
-      <div className="flex snap-x gap-1 overflow-x-auto pb-1 pr-8 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        {MODULES.map((module) => (
-          <MobileNavItem key={module.key} active={activeModule === module.key} label={module.label} onClick={() => onSelect(module.key)} status={module.key === "settings" ? connected : undefined} />
-        ))}
-      </div>
-    </nav>
-  );
-}
-
-function WorkspaceHeader({
-  connected,
-  daemonUrl,
-  loading,
-  onRefresh,
-  refreshing,
-  updated,
-  workspace
-}: {
-  connected: boolean;
-  daemonUrl: string;
-  loading: boolean;
-  onRefresh: () => void;
-  refreshing: boolean;
-  updated: string;
-  workspace: string;
-}) {
-  return (
-    <header className="sticky top-0 z-20 border-b border-white/5 bg-background/92 px-3 py-3 backdrop-blur sm:px-4 lg:px-5">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Workspace</p>
-          <p className="truncate text-sm font-bold sm:text-base">{workspace}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <div className={`flex min-w-0 items-center gap-2 rounded-full bg-surface-raised px-3 py-2 ${INSET_RING}`}>
-            <span className={`h-2 w-2 rounded-full ${connected ? "bg-accent" : "bg-negative"}`} aria-hidden="true" />
-            <span className="text-xs font-bold">Daemon {connected ? "connected" : "offline"}</span>
-            <span className="hidden max-w-[220px] truncate font-mono text-[10px] text-muted sm:inline">{daemonUrl}</span>
-          </div>
-          <span className="text-xs text-muted">{loading ? "loading" : `updated ${updated}`}</span>
-          <PillButton onClick={onRefresh} disabled={refreshing || loading}>
-            {refreshing ? "Refreshing" : "Refresh"}
-          </PillButton>
-        </div>
-      </div>
-    </header>
   );
 }
 
@@ -3007,24 +2905,6 @@ function ActionLink({ children, href }: { children: ReactNode; href: string | nu
     >
       {children}
     </a>
-  );
-}
-
-function NavItem({ active, disabled, dot, label, onClick }: { active?: boolean; disabled?: boolean; dot?: boolean; label: string; onClick?: () => void }) {
-  return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`flex min-h-9 w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm transition active:translate-y-px disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised font-bold text-foreground shadow-[var(--inset-border)]" : disabled ? "text-muted/45" : "text-muted hover:bg-white/[0.035] hover:text-foreground"}`}>
-      <span>{label}</span>
-      {dot ? <span className="h-2 w-2 rounded-full bg-accent" aria-hidden="true" /> : null}
-    </button>
-  );
-}
-
-function MobileNavItem({ active, disabled, label, onClick, status }: { active?: boolean; disabled?: boolean; label: string; onClick?: () => void; status?: boolean }) {
-  return (
-    <button type="button" onClick={onClick} disabled={disabled} className={`flex h-8 shrink-0 snap-start items-center justify-center rounded-md px-3 text-xs font-bold transition active:translate-y-px disabled:cursor-not-allowed ${FOCUS_RING} ${active ? "bg-surface-raised text-foreground shadow-[var(--inset-border)]" : disabled ? "text-muted/50" : "text-muted"}`}>
-      {status != null ? <span className={`mr-1.5 h-1.5 w-1.5 rounded-full ${status ? "bg-accent" : "bg-negative"}`} aria-hidden="true" /> : null}
-      {label}
-    </button>
   );
 }
 

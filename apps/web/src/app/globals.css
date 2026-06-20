@@ -180,3 +180,56 @@ select {
 ::-webkit-scrollbar-track {
   background: var(--background);
 }
+
+.routely-sidebar {
+  position: relative;
+  box-shadow: var(--panel-shadow);
+}
+
+.routely-sidebar::before {
+  background:
+    linear-gradient(to bottom, transparent, var(--accent), transparent),
+    repeating-linear-gradient(to bottom, transparent 0 34px, rgba(39, 216, 111, 0.22) 34px 35px, transparent 35px 58px);
+  bottom: 0;
+  content: "";
+  left: 0;
+  opacity: 0.62;
+  position: absolute;
+  top: 0;
+  width: 2px;
+}
+
+.routely-mark {
+  align-items: center;
+  background: var(--accent);
+  border-radius: var(--radius-sm);
+  color: #061009;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.8125rem;
+  font-weight: 900;
+  height: 2rem;
+  justify-content: center;
+  position: relative;
+  width: 2rem;
+}
+
+.routely-mark::after {
+  border: 1px solid rgba(9, 11, 10, 0.5);
+  border-radius: 2px;
+  bottom: 6px;
+  content: "";
+  position: absolute;
+  right: 6px;
+  top: 6px;
+  width: 6px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}
