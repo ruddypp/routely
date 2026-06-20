@@ -603,6 +603,35 @@ function statusTone(status: string): "ok" | "warn" | "error" {
   return "warn";
 }
 
+function readinessFromStatus(status: string | null | undefined, ready: string[] = []): "ok" | "warn" | "error" {
+  if (!status) return "warn";
+  if (ready.includes(status) || ["running", "succeeded", "healthy", "ready", "verified", "active", "ok"].includes(status)) return "ok";
+  if (["failed", "crashed", "error", "unhealthy", "invalid"].includes(status)) return "error";
+  return "warn";
+}
+
+function domainStepTone(domain: DaemonDomain, route: DaemonProxyRoute | undefined, step: "root" | "hostname" | "dns" | "proxy" | "tls" | "target", hasRoot: boolean): "ok" | "warn" | "error" {
+  if (step === "root") return hasRoot ? "ok" : "warn";
+  if (step === "hostname") return domain.hostname ? "ok" : "warn";
+  if (step === "dns") return readinessFromStatus(domain.dnsStatus, ["verified"]);
+  if (step === "proxy") return route?.enabled ? "ok" : domain.status === "error" ? "error" : "warn";
+  if (step === "tls") return domain.tlsStatus === "active" ? "ok" : domain.tlsStatus === "failed" || domain.tlsStatus === "error" ? "error" : "warn";
+  return domain.targetPort ? "ok" : "warn";
+}
+
+function deploymentSource(deployment: DaemonDeployment): string {
+  const branch = deployment.branch ? `:${deployment.branch}` : "";
+  const commit = deployment.commitSha ? ` @ ${deployment.commitSha.slice(0, 7)}` : "";
+  return deployment.repo ? `${deployment.repo}${branch}${commit}` : deployment.sourceType || "local source";
+}
+
+function appDeployMetadata(app: DaemonApp, latest: DaemonDeployment | undefined): string {
+  const image = latest?.imageTag || app.image || "image pending";
+  const container = latest?.containerName || "container pending";
+  const ports = latest?.hostPort ? `127.0.0.1:${latest.hostPort}->${latest.containerPort || "container"}` : app.port ? `local :${app.port}` : "port pending";
+  return `${image} · ${container} · ${ports}`;
+}
+
 function formatBytes(value: number | null): string {
   if (value == null || Number.isNaN(value)) return "-";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -1455,7 +1484,7 @@ function AppOperationsModule({ activeTab, appResources, apps, app, connected, cu
   return (
     <section className="grid min-w-0 gap-3 xl:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.28fr)] xl:items-start">
       <div className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-        <ModuleHeader module={module} stats={<MetricPill label="resources" value={String(candidates.length)} accent />} />
+        <ModuleHeader module={module} stats={<><MetricPill label="resources" value={String(candidates.length)} accent />{module === "health" ? <MetricPill label="attention" value={String(candidates.filter((item) => item.status !== "running" || item.needsRestart || item.needsRedeploy).length)} /> : null}</>} />
         <ResourceSection title="Choose app" count={candidates.length} />
         {candidates.length === 0 ? <p className="px-4 py-5 text-sm text-muted">No app resources are registered yet. Add one from Apps to populate this module.</p> : null}
         {candidates.map((item) => (
@@ -1463,7 +1492,7 @@ function AppOperationsModule({ activeTab, appResources, apps, app, connected, cu
             <div className="flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <p className="truncate text-sm font-bold">{item.name}</p>
-                <p className="mt-1 truncate font-mono text-[11px] text-muted">{item.driver} · {item.port ? `:${item.port}` : "no port"}</p>
+                <p className="mt-1 truncate font-mono text-[11px] text-muted">{item.driver} · {item.port ? `:${item.port}` : "no port"} · {pendingStateLabel(item)}</p>
               </div>
               <StatusBadge status={item.status} />
             </div>
@@ -1514,8 +1543,8 @@ function MetricSampleRow({ sample }: { sample: DaemonMetricSample }) {
       </div>
       <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] text-muted sm:grid-cols-4">
         <span>CPU <strong className="text-foreground">{sample.cpuPercent == null ? "-" : `${sample.cpuPercent.toFixed(1)}%`}</strong></span>
-        <span>RAM <strong className="text-foreground">{formatBytes(sample.memoryBytes)}</strong></span>
-        <span>Disk <strong className="text-foreground">{formatBytes(sample.diskUsedBytes)}</strong></span>
+        <span>RAM <strong className="text-foreground">{formatBytes(sample.memoryBytes)}{sample.memoryLimitBytes ? ` / ${formatBytes(sample.memoryLimitBytes)}` : ""}</strong></span>
+        <span>Disk <strong className="text-foreground">{formatBytes(sample.diskUsedBytes)}{sample.diskTotalBytes ? ` / ${formatBytes(sample.diskTotalBytes)}` : ""}</strong></span>
         <span>Net <strong className="text-foreground">{formatBytes(sample.networkRxBytes)} / {formatBytes(sample.networkTxBytes)}</strong></span>
       </div>
       {sample.message ? <p className="mt-2 truncate text-[11px] text-muted">{sample.message}</p> : null}
@@ -1526,9 +1555,10 @@ function MetricSampleRow({ sample }: { sample: DaemonMetricSample }) {
 function DeploymentsModule({ apps, connected, deployments, deployingByAppId, error, latestByAppId, onDeploy, onLogs, server }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; deployingByAppId: Record<number, boolean>; error: string | null; latestByAppId: Map<number, DaemonDeployment>; onDeploy: (app: DaemonApp) => void; onLogs: (deployment: DaemonDeployment) => void; server: DaemonServerStatus | null }) {
   const dockerReady = Boolean(server?.readiness?.checks.some((check) => check.id === "docker" && check.status === "ok"));
   const ready = connected && dockerReady && Boolean(server?.dataDir) && Boolean(!server?.auth.required || server.auth.configured);
+  const failed = deployments.filter((item) => item.status === "failed");
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="deployments" stats={<><ReadinessCard label="Docker" value={dockerReady ? "ready" : "check"} status={dockerReady ? "ok" : "warn"} /><ReadinessCard label="History" value={String(deployments.length)} status={deployments.length ? "ok" : "warn"} /><ReadinessCard label="Failed" value={String(deployments.filter((item) => item.status === "failed").length)} status={deployments.some((item) => item.status === "failed") ? "error" : "ok"} /></>} />
+      <ModuleHeader module="deployments" stats={<><ReadinessCard label="Docker" value={dockerReady ? "ready" : "check"} status={dockerReady ? "ok" : "warn"} /><ReadinessCard label="History" value={String(deployments.length)} status={deployments.length ? "ok" : "warn"} /><ReadinessCard label="Failed" value={String(failed.length)} status={failed.length ? "error" : "ok"} /></>} />
       {error ? <Alert title="Deployment action failed" message={error} /> : null}
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
         <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
@@ -1537,7 +1567,31 @@ function DeploymentsModule({ apps, connected, deployments, deployingByAppId, err
           {apps.map((app) => {
             const latest = latestByAppId.get(app.id);
             const deploying = Boolean(deployingByAppId[app.id]);
-            return <div key={app.id} className="grid gap-3 border-b border-white/5 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-bold">{app.name}</p>{latest ? <StatusBadge status={latest.status} /> : <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">never deployed</span>}</div><p className="mt-1 truncate font-mono text-[11px] text-muted">{shortPath(app.path)} · {latest?.hostPort ? `http://127.0.0.1:${latest.hostPort}` : "temporary URL after deploy"}</p></div><div className="flex flex-wrap gap-2 md:justify-end">{latest ? <PillButton onClick={() => onLogs(latest)}>Logs</PillButton> : null}<PillButton strong onClick={() => onDeploy(app)} disabled={!ready || deploying || !app.enabled}>{deploying ? "Deploying" : "Deploy"}</PillButton></div></div>;
+            const disabledReason = !connected ? "daemon offline" : !dockerReady ? "docker check" : !server?.dataDir ? "server init" : !app.enabled ? "disabled" : null;
+            return (
+              <div key={app.id} className="border-b border-white/5 px-4 py-3">
+                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="truncate text-sm font-bold">{app.name}</p>
+                      {latest ? <StatusBadge status={latest.status} /> : <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">never deployed</span>}
+                      {disabledReason ? <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">{disabledReason}</span> : null}
+                    </div>
+                    <div className="mt-2 grid gap-2 text-[11px] text-muted sm:grid-cols-2">
+                      <Meta label="Source" value={latest ? deploymentSource(latest) : compactSource(app)} mono />
+                      <Meta label="Image / container / ports" value={appDeployMetadata(app, latest)} mono />
+                      <Meta label="Phase" value={latest?.phase || "waiting for first deploy"} />
+                      <Meta label="Updated" value={latest ? timeAgo(latest.updatedAt) : timeAgo(app.updatedAt)} />
+                    </div>
+                    {latest?.errorMessage ? <p className="mt-2 rounded-md bg-negative/10 px-3 py-2 text-xs text-negative">{latest.errorMessage}</p> : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2 md:justify-end">
+                    {latest ? <PillButton onClick={() => onLogs(latest)}>Logs</PillButton> : null}
+                    <PillButton strong onClick={() => onDeploy(app)} disabled={!ready || deploying || !app.enabled}>{deploying ? "Deploying" : "Deploy"}</PillButton>
+                  </div>
+                </div>
+              </div>
+            );
           })}
         </div>
         <div className="min-w-0"><ResourceSection title="Deployment history" count={deployments.length} />{deployments.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Deployment history appears after the first Dockerfile deploy.</div> : deployments.map((deployment) => <DeploymentSummaryRow key={deployment.id} deployment={deployment} onLogs={() => onLogs(deployment)} />)}</div>
@@ -1547,9 +1601,10 @@ function DeploymentsModule({ apps, connected, deployments, deployingByAppId, err
 }
 
 function DomainsModule({ apps, connected, domains, domainsError, domainsMeta, domainActionByHostname, domainForm, domainSaving, onAddDomain, onDomainFormChange, onRemoveDomain, onRootDomainChange, onSaveRootDomain, onVerifyDomain, proxyRoutes, rootDomainInput }: { apps: DaemonApp[]; connected: boolean; domains: DaemonDomain[]; domainsError: string | null; domainsMeta: { rootDomain: string | null; serverPublicIp: string | null }; domainActionByHostname: Record<string, string | null>; domainForm: { appId: string; hostname: string }; domainSaving: boolean; onAddDomain: () => void; onDomainFormChange: (form: { appId: string; hostname: string }) => void; onRemoveDomain: (domain: DaemonDomain) => void; onRootDomainChange: (value: string) => void; onSaveRootDomain: () => void; onVerifyDomain: (domain: DaemonDomain) => void; proxyRoutes: DaemonProxyRoute[]; rootDomainInput: string }) {
+  const enabledRoutes = proxyRoutes.filter((route) => route.enabled).length;
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="domains" stats={<><ReadinessCard label="Root" value={domainsMeta.rootDomain || "unset"} status={domainsMeta.rootDomain ? "ok" : "warn"} /><ReadinessCard label="Hosts" value={String(domains.length)} status={domains.length ? "ok" : "warn"} /><ReadinessCard label="Routes" value={String(proxyRoutes.filter((route) => route.enabled).length)} status={proxyRoutes.some((route) => route.enabled) ? "ok" : "warn"} /></>} />
+      <ModuleHeader module="domains" stats={<><ReadinessCard label="Root" value={domainsMeta.rootDomain || "unset"} status={domainsMeta.rootDomain ? "ok" : "warn"} /><ReadinessCard label="Hosts" value={String(domains.length)} status={domains.length ? "ok" : "warn"} /><ReadinessCard label="Routes" value={`${enabledRoutes}/${domains.length}`} status={enabledRoutes ? "ok" : "warn"} /></>} />
       {domainsError ? <Alert title="Domain or proxy action failed" message={domainsError} /> : null}
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.85fr)_minmax(340px,1.15fr)]">
         <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
@@ -1558,18 +1613,51 @@ function DomainsModule({ apps, connected, domains, domainsError, domainsMeta, do
           <ResourceSection title="Add hostname" count={apps.length} />
           <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]"><UiSelect value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} label="App"><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</UiSelect><Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} /><div className="flex items-end"><PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton></div></div></div>
         </div>
-        <div className="min-w-0"><ResourceSection title="Hostnames" count={domains.length} />{domains.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS verification creates proxy route state.</div> : domains.map((domain) => { const action = domainActionByHostname[domain.hostname]; const route = proxyRoutes.find((item) => item.domainId === domain.id); return <div key={domain.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{domain.hostname}</p><p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {route?.targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p></div><StatusBadge status={domain.status} /></div><div className="mt-3 grid grid-cols-3 gap-2"><ReadinessCard label="DNS" value={domain.dnsStatus} status={domain.dnsStatus === "verified" ? "ok" : "warn"} /><ReadinessCard label="TLS" value={domain.tlsStatus} status={domain.tlsStatus === "active" || domain.tlsStatus === "issuing" ? "ok" : "warn"} /><ReadinessCard label="Proxy" value={route?.enabled ? "ready" : "pending"} status={route?.enabled ? "ok" : "warn"} /></div>{domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton><ActionLink href={domain.status === "ready" ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink><PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton></div></div>; })}</div>
+        <div className="min-w-0"><ResourceSection title="Hostnames" count={domains.length} />{domains.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS verification creates proxy route state.</div> : domains.map((domain) => { const action = domainActionByHostname[domain.hostname]; const route = proxyRoutes.find((item) => item.domainId === domain.id); const steps = [{ label: "Root", value: domainsMeta.rootDomain || "unset", tone: domainStepTone(domain, route, "root", Boolean(domainsMeta.rootDomain)) }, { label: "Host", value: domain.hostname, tone: domainStepTone(domain, route, "hostname", Boolean(domainsMeta.rootDomain)) }, { label: "DNS", value: domain.dnsStatus, tone: domainStepTone(domain, route, "dns", Boolean(domainsMeta.rootDomain)) }, { label: "Proxy", value: route?.enabled ? "ready" : "pending", tone: domainStepTone(domain, route, "proxy", Boolean(domainsMeta.rootDomain)) }, { label: "TLS", value: domain.tlsStatus, tone: domainStepTone(domain, route, "tls", Boolean(domainsMeta.rootDomain)) }, { label: "Target", value: route?.targetUrl || (domain.targetPort ? `:${domain.targetPort}` : "pending"), tone: domainStepTone(domain, route, "target", Boolean(domainsMeta.rootDomain)) }]; return <div key={domain.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{domain.hostname}</p><p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {route?.targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p></div><StatusBadge status={domain.status} /></div><div className="mt-3 grid gap-2 sm:grid-cols-3">{steps.map((step) => <ReadinessCard key={step.label} label={step.label} value={step.value} status={step.tone} />)}</div>{domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton><ActionLink href={domain.status === "ready" ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink><PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton></div></div>; })}</div>
       </div>
     </section>
   );
 }
 
 function GithubModule({ apps, connected, github, githubError, githubForm, githubSaving, onGithubConnect, onGithubFormChange }: { apps: DaemonApp[]; connected: boolean; github: DaemonGithubStatus | null; githubError: string | null; githubForm: { appId: string; fullName: string; branch: string; autoDeploy: boolean }; githubSaving: boolean; onGithubConnect: () => void; onGithubFormChange: (form: { appId: string; fullName: string; branch: string; autoDeploy: boolean }) => void }) {
+  const connectedRepos = github?.repositories.filter((repo) => repo.connectedAppId != null).length || 0;
+  const acceptedDeliveries = github?.deliveries.filter((delivery) => ["accepted", "deployed", "ignored"].includes(delivery.status)).length || 0;
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="github" stats={<><ReadinessCard label="App" value={github?.configured ? "configured" : "missing"} status={github?.configured ? "ok" : "warn"} /><ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} /><ReadinessCard label="Repos" value={String(github?.repositories.length || 0)} status={github?.repositories.length ? "ok" : "warn"} /></>} />
+      <ModuleHeader module="github" stats={<><ReadinessCard label="App" value={github?.configured ? "configured" : "missing"} status={github?.configured ? "ok" : "warn"} /><ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} /><ReadinessCard label="Repos" value={`${connectedRepos}/${github?.repositories.length || 0}`} status={connectedRepos ? "ok" : "warn"} /><ReadinessCard label="Deliveries" value={String(github?.deliveries.length || 0)} status={acceptedDeliveries ? "ok" : "warn"} /></>} />
       {githubError ? <Alert title="GitHub action failed" message={githubError} /> : null}
-      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]"><div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Connect repository" count={apps.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_110px_auto]"><UiSelect value={githubForm.appId} onChange={(event) => onGithubFormChange({ ...githubForm, appId: event.target.value })} disabled={!connected || githubSaving} label="App"><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</UiSelect><Field label="Repository" value={githubForm.fullName} onChange={(value) => onGithubFormChange({ ...githubForm, fullName: value })} placeholder="owner/repo" disabled={!connected || githubSaving} /><Field label="Branch" value={githubForm.branch} onChange={(value) => onGithubFormChange({ ...githubForm, branch: value })} placeholder="main" disabled={!connected || githubSaving} /><div className="flex items-end"><PillButton onClick={onGithubConnect} disabled={!connected || githubSaving || !githubForm.appId || !githubForm.fullName.trim()} strong>{githubSaving ? "Saving" : "Connect"}</PillButton></div></div><label className="mt-3 flex items-center justify-between gap-3 rounded-md bg-black/20 px-3 py-2 text-xs"><span><span className="font-bold">Auto deploy on push</span><span className="block text-muted">Only matching branch push events queue deployments.</span></span><input type="checkbox" checked={githubForm.autoDeploy} onChange={(event) => onGithubFormChange({ ...githubForm, autoDeploy: event.target.checked })} disabled={githubSaving} className="h-4 w-4 accent-[var(--accent)]" /></label></div></div><div className="min-w-0"><ResourceSection title="Repositories" count={github?.repositories.length || 0} />{github?.repositories.length ? github.repositories.map((repo) => <div key={repo.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{repo.fullName}</p><p className="mt-1 text-[11px] text-muted">{repo.connectedAppName || "not connected"} · {repo.selectedBranch || repo.defaultBranch || "branch not set"} · {repo.private ? "private" : "public"}</p></div><StatusBadge status={repo.autoDeployEnabled ? "running" : "stopped"} /></div></div>) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Connect a repository to store source metadata and enable signed push-to-deploy.</div>}<ResourceSection title="Webhook deliveries" count={github?.deliveries.length || 0} />{github?.deliveries.length ? github.deliveries.slice(0, 12).map((delivery) => <TimelineRow key={delivery.deliveryId} title={delivery.repo || delivery.event} detail={`${delivery.status} · ${delivery.branch || "-"} · ${delivery.commitSha?.slice(0, 7) || "no commit"} · ${timeAgo(delivery.receivedAt)}`} tone={delivery.status === "accepted" || delivery.status === "deployed" ? "ok" : delivery.status === "failed" ? "error" : "warn"} />) : <div className="px-4 py-5 text-sm text-muted">Signed push deliveries appear here after GitHub sends webhooks.</div>}</div></div>
+      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]">
+        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
+          <ResourceSection title="Configuration" count={github ? 1 : 0} />
+          <div className="border-b border-white/5 px-4 py-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <ReadinessCard label="App ID" value={github?.appId || "unset"} status={github?.configured ? "ok" : "warn"} />
+              <ReadinessCard label="Client ID" value={github?.clientId ? "set" : "unset"} status={github?.clientId ? "ok" : "warn"} />
+              <ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} />
+              <ReadinessCard label="Private key" value={github?.privateKeyConfigured ? "ready" : "missing"} status={github?.privateKeyConfigured ? "ok" : "warn"} />
+            </div>
+          </div>
+          <ResourceSection title="Connect repository" count={apps.length} />
+          <div className="px-4 py-3">
+            <div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_110px_auto]">
+              <UiSelect value={githubForm.appId} onChange={(event) => onGithubFormChange({ ...githubForm, appId: event.target.value })} disabled={!connected || githubSaving} label="App"><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</UiSelect>
+              <Field label="Repository" value={githubForm.fullName} onChange={(value) => onGithubFormChange({ ...githubForm, fullName: value })} placeholder="owner/repo" disabled={!connected || githubSaving} />
+              <Field label="Branch" value={githubForm.branch} onChange={(value) => onGithubFormChange({ ...githubForm, branch: value })} placeholder="main" disabled={!connected || githubSaving} />
+              <div className="flex items-end"><PillButton onClick={onGithubConnect} disabled={!connected || githubSaving || !githubForm.appId || !githubForm.fullName.trim()} strong>{githubSaving ? "Saving" : "Connect"}</PillButton></div>
+            </div>
+            <label className="mt-3 flex items-center justify-between gap-3 rounded-md bg-black/20 px-3 py-2 text-xs">
+              <span><span className="font-bold">Auto deploy on push</span><span className="block text-muted">Only matching branch push events queue deployments.</span></span>
+              <input type="checkbox" checked={githubForm.autoDeploy} onChange={(event) => onGithubFormChange({ ...githubForm, autoDeploy: event.target.checked })} disabled={githubSaving} className="h-4 w-4 accent-[var(--accent)]" />
+            </label>
+          </div>
+        </div>
+        <div className="min-w-0">
+          <ResourceSection title="Repositories" count={github?.repositories.length || 0} />
+          {github?.repositories.length ? github.repositories.map((repo) => <div key={repo.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{repo.fullName}</p><p className="mt-1 text-[11px] text-muted">{repo.connectedAppName || "not connected"} · {repo.selectedBranch || repo.defaultBranch || "branch not set"} · {repo.private ? "private" : "public"}</p></div><StatusBadge status={repo.autoDeployEnabled ? "running" : "stopped"} /></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4"><ReadinessCard label="Auto deploy" value={repo.autoDeployEnabled ? "on" : "off"} status={repo.autoDeployEnabled ? "ok" : "warn"} /><ReadinessCard label="Branch" value={repo.selectedBranch || repo.defaultBranch || "unset"} status={repo.selectedBranch || repo.defaultBranch ? "ok" : "warn"} /><ReadinessCard label="Install" value={repo.installationId ? String(repo.installationId) : "manual"} status={repo.installationId ? "ok" : "warn"} /><ReadinessCard label="Synced" value={timeAgo(repo.lastSyncedAt)} status={repo.lastSyncedAt ? "ok" : "warn"} /></div></div>) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Connect a repository to store source metadata and enable signed push-to-deploy.</div>}
+          <ResourceSection title="Recent deliveries" count={github?.deliveries.length || 0} />
+          {github?.deliveries.length ? github.deliveries.slice(0, 12).map((delivery) => <div key={delivery.deliveryId} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{delivery.repo || delivery.event}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{delivery.event}{delivery.action ? `:${delivery.action}` : ""} · {delivery.branch || "-"} · {delivery.commitSha?.slice(0, 7) || "no commit"} · {timeAgo(delivery.receivedAt)}</p></div><StatusBadge status={delivery.status} /></div><div className="mt-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4"><Meta label="Signature" value={delivery.signatureValid ? "valid" : "invalid"} /><Meta label="App" value={delivery.appName || "unmatched"} /><Meta label="Deploy" value={delivery.deploymentId ? `#${delivery.deploymentId}` : "none"} /><Meta label="Processed" value={timeAgo(delivery.processedAt)} /></div>{delivery.message ? <p className="mt-2 text-xs text-muted">{delivery.message}</p> : null}</div>) : <div className="px-4 py-5 text-sm text-muted">Signed push deliveries appear here after GitHub sends webhooks.</div>}
+        </div>
+      </div>
     </section>
   );
 }
@@ -2223,10 +2311,12 @@ function ProductionDeployPanel({
 function DeploymentSummaryRow({ deployment, onLogs }: { deployment: DaemonDeployment; onLogs: () => void }) {
   return (
     <button type="button" onClick={onLogs} className={`block w-full border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/[0.035] ${FOCUS_RING}`}>
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate text-sm font-bold">#{deployment.id} {deployment.appName || `app ${deployment.appId}`}</p>
-          <p className="mt-1 truncate text-[11px] text-muted">{deployment.phase} · {deployment.startedAt ? timeAgo(deployment.startedAt) : timeAgo(deployment.createdAt)}</p>
+          <p className="mt-1 truncate font-mono text-[11px] text-muted">{deploymentSource(deployment)}</p>
+          <p className="mt-1 truncate text-[11px] text-muted">{deployment.phase} · {deployment.containerName || "container pending"} · {deployment.hostPort ? `:${deployment.hostPort}->${deployment.containerPort || "?"}` : "port pending"} · {deployment.startedAt ? timeAgo(deployment.startedAt) : timeAgo(deployment.createdAt)}</p>
+          {deployment.errorMessage ? <p className="mt-2 text-xs text-negative">{deployment.errorMessage}</p> : null}
         </div>
         <StatusBadge status={deployment.status} />
       </div>
@@ -2764,20 +2854,20 @@ function DetailPanel({
         <div className="flex items-center justify-between gap-3 px-4 py-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Recent logs</p>
-            <p className="text-xs text-muted">{logs?.truncated ? "tail 64 KB" : "latest local output"}</p>
+            <p className="text-xs text-muted">{logs?.path ? shortPath(logs.path) : logs?.truncated ? "tail 64 KB" : "latest local output"}</p>
           </div>
           <PillButton onClick={onReload} disabled={!onReload || loading || !connected}>{loading ? "Loading" : "Reload"}</PillButton>
         </div>
         {error ? <div className="border-y border-negative/20 bg-negative/10 px-4 py-2 text-xs text-negative">{error}</div> : null}
-        <pre className="max-h-[360px] min-h-[240px] overflow-auto whitespace-pre-wrap border-t border-white/5 bg-black/45 px-4 py-3 font-mono text-xs leading-5 text-[#d9d9d9] shadow-[rgb(0,0,0)_0px_1px_0px_inset]">
+        <TerminalSurface minHeight="min-h-[260px]" maxHeight="max-h-[420px]">
           {loading && !logs ? "Loading logs..." : logs?.app.id === app.id ? logs.logs || "No logs captured yet." : "Logs pending."}
-        </pre>
+        </TerminalSurface>
         <div className="border-t border-white/5 px-4 py-3">
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Deployment logs</p>
           {deploymentLogsError ? <p className="mt-2 text-xs text-negative">{deploymentLogsError}</p> : null}
-          <pre className="mt-2 max-h-[260px] overflow-auto whitespace-pre-wrap rounded-md bg-black/45 px-3 py-3 font-mono text-xs leading-5 text-[#d9d9d9]">
+          <TerminalSurface className="mt-2" minHeight="min-h-[180px]" maxHeight="max-h-[280px]">
             {deploymentLogsLoading && !deploymentLogs ? "Loading deployment logs..." : deploymentLogs?.logs.map((log) => log.message).join("") || "Select a deployment log from the deploy panel or Deployments tab."}
-          </pre>
+          </TerminalSurface>
         </div>
       </div> : null}
     </aside>
@@ -2986,11 +3076,19 @@ function ActionLink({ children, href }: { children: ReactNode; href: string | nu
   );
 }
 
+function TerminalSurface({ children, className, maxHeight = "max-h-[360px]", minHeight = "min-h-[220px]" }: { children: ReactNode; className?: string; maxHeight?: string; minHeight?: string }) {
+  return (
+    <pre className={`${className || ""} ${maxHeight} ${minHeight} overflow-auto whitespace-pre-wrap border-t border-white/5 bg-black/55 px-4 py-3 font-mono text-[11px] leading-5 text-[#d9d9d9] shadow-[rgb(0,0,0)_0px_1px_0px_inset]`}>
+      {children}
+    </pre>
+  );
+}
+
 function MetricPill({ accent, label, value }: { accent?: boolean; label: string; value: string }) {
   return (
-    <div className={`rounded-full bg-surface-raised px-3 py-1.5 text-xs ${INSET_RING}`}>
+    <div aria-label={`${value} ${label}`} className={`rounded-full bg-surface-raised px-3 py-1.5 text-xs ${INSET_RING}`}>
       <span className={accent ? "font-bold text-accent" : "font-bold text-foreground"}>{value}</span>
-      <span className="ml-1 text-muted">{label}</span>
+      <span className="ml-1 text-muted"> {label}</span>
     </div>
   );
 }
