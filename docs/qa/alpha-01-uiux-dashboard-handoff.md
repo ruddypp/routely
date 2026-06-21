@@ -1,0 +1,78 @@
+# ALPHA-01 UI/UX Dashboard Handoff
+
+Status: UI/UX review/spec handoff
+Owner: UI/UX
+Date: 2026-06-21
+
+## UX Problem
+
+The dashboard is close to the right public alpha shape: it is a dense operational control surface, uses same-origin `/api/*` data, and covers local apps, services, logs, deploys, domains, GitHub, env, health, metrics, databases, backups, and notifications.
+
+The remaining demo risk is honesty at the edges. The UI must never imply that unverified drivers, TLS, rollback, preview-style production operations, or broad settings are ready when the public alpha only needs three demos:
+
+- local runner: three apps plus one database with real status and logs
+- VPS: one Dockerfile app with domain and conservative HTTPS/proxy state
+- GitHub: configured branch push redeploys and broken deploy logs are diagnosable
+
+## Recommended Flow
+
+1. Start on Overview with four questions answered in the first viewport: daemon/server ready, app fleet state, latest deploy state, and urgent next action.
+2. For the local demo, route users from Overview to Apps, then Logs. Apps should make start/stop/restart, URLs, status, dependencies, service/database state, crash state, and captured logs obvious.
+3. For the VPS demo, route users from Overview to Deployments, then Domains. Deployments should show Docker/server/auth/data-dir readiness before the Deploy button. Domains should show DNS, proxy, TLS, target, and verification messages as separate states.
+4. For the GitHub demo, route users from GitHub to Deployments/Logs. Recent deliveries must show repo, branch, commit, accepted/ignored/failed status, linked deployment, and an obvious log path for broken pushes.
+5. Settings, backups, notifications, metrics, and databases should support diagnosis only. Any unsupported production capability should be disabled, hidden, or explicitly marked deferred.
+
+## Component And State Spec
+
+- Overview: show urgent next actions before secondary history. Treat missing daemon, failed app, failed deployment, DNS mismatch, TLS failed/pending, missing GitHub webhook secret, and failed backup/notification as attention items.
+- Apps: keep local lifecycle controls available only for connected, enabled resources. Show disabled reasons inline: `daemon offline`, `resource disabled`, `already running`, `not running`, or `Dockerfile deploy only`.
+- App create/edit: restrict public-alpha choices or label unverified options. `buildpack`, `static`, broad presets, and non-demo drivers should not look equally supported unless Frontend/Backend verifies them.
+- Logs: preserve terminal formatting, truncation notice, log file path, and reload state. Empty logs should say whether the app has not run yet, crashed before output, or logs are unavailable.
+- Deployments: deployment history must include status, phase, app, source, commit when present, container/image, host/container port, error message, and a Logs action.
+- Domains: keep DNS, proxy, TLS, and target as separate readiness cards. `issuing`, `pending`, `generated`, and `active` are not interchangeable.
+- GitHub: show configuration as separate checks: App ID, client ID, private key, webhook secret, connected repo, branch, auto-deploy setting, latest delivery, latest deployment, ignored delivery reason, and signature validity.
+- Env/secrets: after save, show only redacted or display-safe values. Pending restart/redeploy state should name the exact next action.
+- Deferred capability labels: use `deferred` for roadmap items and `locked` only when the current mode/server state actively prevents an implemented action.
+
+## Copy Guidelines
+
+- Use honest operational copy: `pending`, `not configured`, `not verified`, `generated`, `issuing`, `active`, `failed`, `ignored`, `disabled`, `deferred`.
+- Avoid success-adjacent copy for HTTPS until certificate state is actually active. Generated proxy config should read as `proxy route generated`, not HTTPS success.
+- Button labels should name the action and loading state consistently: `Start` -> `Starting`, `Stop` -> `Stopping`, `Deploy` -> `Deploying`, `Verify DNS` -> `Checking DNS`.
+- Empty states should direct the next concrete action: add an app, start Routely from the CLI, run `routely server doctor`, connect a repo, verify DNS, or open logs.
+- Do not expose implementation labels as primary copy when user language is clearer. Keep `/api/*`, route-handler, and daemon internals in diagnostics, not main task guidance.
+
+## Responsive And Accessibility Requirements
+
+- Required dashboard smoke widths: 390px mobile, 768px tablet, 1280px desktop.
+- Mobile must keep the top status bar readable, bottom module navigation scrollable, and primary app/deploy/log controls reachable without horizontal page overflow.
+- Inspector tabs must not wrap into overlapping text at mobile widths. If needed, make tabs horizontally scrollable instead of squeezing seven labels into a dense grid.
+- Every icon/dot-only state needs adjacent text or an accessible label. Status badges already help; timeline dots and nav signal dots should remain decorative only.
+- Disabled controls need visible reasons nearby when the reason is not obvious.
+- Keyboard focus must remain visible for nav, tabs, buttons, links, form fields, rows that behave as buttons, and horizontal mobile navigation.
+- Reduced-motion preference must be respected; current global CSS already covers transition duration.
+
+## Instructions For Frontend
+
+- Before editing `apps/web`, read the relevant Next.js guide under `node_modules/next/dist/docs/` per `AGENTS.md`.
+- Preserve same-origin `/api/*` usage. Browser code must not call the daemon directly.
+- Reconcile the server foundation footer copy. The fallback `deployments/domains/https/github/backups locked` language conflicts with active demo modules unless those actions are truly disabled by server state.
+- Align TLS semantics across Domains and the app inspector. In the inspector, `issuing` should be warning/pending, not OK, and HTTPS should not read as complete until TLS is active.
+- Gate or label unverified create/edit options such as `buildpack`, `static`, and broad presets so alpha users do not think non-demo deploy paths are supported.
+- Remove or isolate unused legacy combined panels in `apps/web/src/app/dashboard-client.tsx` after ownership confirmation. They contain stale copy and suppressed lint, which increases drift risk.
+- Keep deploy button disablement consistent between Apps and Deployments. If Docker/server/data-dir/auth readiness blocks deploy in Deployments, Apps should show the same block reason.
+
+## Visual QA Criteria
+
+- Local demo: with three apps and one database, Overview shows real fleet counts, Apps separates apps from services/databases, each row has status/port/source/actions, and Logs shows captured output for a selected app.
+- Local failure: a crashed app or failed start is visible as a failed/crashed state with useful log output and no success-colored status.
+- VPS demo: Deployments shows Docker/server readiness, deployment phase, failure message when applicable, and deployment logs. Domains shows DNS/proxy/TLS/target separately and does not claim HTTPS success before TLS is active.
+- GitHub demo: GitHub shows configured/missing server-side setup, connected repo/branch, delivery status, ignored branch behavior, deployment linkage, and a path to logs for failed deploys.
+- Real-data honesty: no demo-critical module should show mock data, placeholder success, or enabled controls for unsupported alpha features.
+- Responsive: desktop, tablet, and mobile screenshots show no text overlap, no clipped primary controls, no horizontal page overflow, and readable terminal/log areas.
+
+## Blockers To Route Back To Routely Lead
+
+- Product decision: whether non-demo drivers/presets should be hidden for public alpha or visible as disabled/deferred options.
+- Environment/access: VPS, DNS, GitHub App, webhook secret, or repo access needed for visual verification.
+- Ownership: Frontend should confirm before UI/UX edits `apps/web`; this handoff intentionally avoids code changes.
