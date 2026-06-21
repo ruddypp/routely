@@ -14,7 +14,7 @@ import { ModuleHeader } from "@/components/dashboard/module-header";
 import type { DashboardModuleKey } from "@/components/dashboard/types";
 import { appActionBlockReason, appSupportsBulkStart, bulkStartSkipReason, bulkStartStateLabel, isAppRuntimeRunning, startAllBlockReason, startAllPlan, type BulkStartPlan } from "@/lib/app-lifecycle";
 import { APP_DRIVERS, APP_PRESETS, APP_TYPES, appDriverPatch, appFormFromDaemonApp, appFormPayload, appFormValidationError, blankAppForm, type AppFormState } from "@/lib/app-registry-form";
-import { backupRestoreLabel, backupRunFileState, backupStorageLabel, databaseExposureLabel, deploymentLogsLabel, deploymentStateLabel, domainDnsLabel, domainProxyLabel, domainTargetLabel, domainTlsLabel, envVisibilityLabel, isDeploymentInProgress, latestSuccessfulDeployment, logAvailabilityLabel, productionAuthState, safeEnvDisplay } from "@/lib/dashboard-operations";
+import { backupRestoreLabel, backupRunFileState, backupStorageLabel, databaseExposureLabel, deploymentLogsLabel, deploymentStateLabel, domainDnsLabel, domainProxyLabel, domainTargetLabel, domainTlsLabel, envVisibilityLabel, githubConnectionState, githubDeliveryLogPath, githubDeliveryState, githubLatestDelivery, githubRepositoryBranch, isDeploymentInProgress, latestDeployment, latestSuccessfulDeployment, logAvailabilityLabel, productionAuthState, safeEnvDisplay } from "@/lib/dashboard-operations";
 
 type DaemonApp = {
   id: number;
@@ -500,6 +500,12 @@ function timeAgo(iso: string | null): string {
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes}m ago`;
   return `${Math.floor(minutes / 60)}h ago`;
+}
+
+function timeValue(iso: string | null | undefined): number {
+  if (!iso) return 0;
+  const value = Date.parse(iso);
+  return Number.isFinite(value) ? value : 0;
 }
 
 function appUrl(app: DaemonApp): string | null {
@@ -1430,7 +1436,7 @@ export default function DashboardClient() {
 
             {activeModule === "domains" ? <DomainsModule apps={dockerfileApps} connected={connected} domains={domains} domainsError={domainsError || proxyError} domainsMeta={domainsMeta} domainActionByHostname={domainActionByHostname} domainForm={domainForm} domainSaving={domainSaving} proxyRoutes={proxyRoutes} rootDomainInput={rootDomainInput} onAddDomain={() => void addDomain()} onDomainFormChange={setDomainForm} onRemoveDomain={(domain) => void removeDomain(domain)} onRootDomainChange={setRootDomainInput} onSaveRootDomain={() => void saveRootDomain()} onVerifyDomain={(domain) => void verifyDomain(domain)} /> : null}
 
-            {activeModule === "github" ? <GithubModule apps={dockerfileApps} connected={connected} github={github} githubError={githubError} githubForm={githubForm} githubSaving={githubSaving} onGithubConnect={() => void connectGithubRepository()} onGithubFormChange={setGithubForm} /> : null}
+            {activeModule === "github" ? <GithubModule apps={dockerfileApps} connected={connected} deployments={deployments} github={github} githubError={githubError} githubForm={githubForm} githubSaving={githubSaving} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onGithubConnect={() => void connectGithubRepository()} onGithubFormChange={setGithubForm} /> : null}
 
             {activeModule === "databases" ? <DatabasesModule connected={connected} databaseActionById={databaseActionById} databaseForm={databaseForm} databaseSaving={databaseSaving} databases={databases} databasesError={databasesError} loading={moduleLoading} onCreateDatabase={() => void createDatabase()} onDatabaseAction={(database, action) => void runDatabaseAction(database, action)} onDatabaseFormChange={setDatabaseForm} /> : null}
 
@@ -1730,12 +1736,25 @@ function DomainsModule({ apps, connected, domains, domainsError, domainsMeta, do
   );
 }
 
-function GithubModule({ apps, connected, github, githubError, githubForm, githubSaving, onGithubConnect, onGithubFormChange }: { apps: DaemonApp[]; connected: boolean; github: DaemonGithubStatus | null; githubError: string | null; githubForm: { appId: string; fullName: string; branch: string; autoDeploy: boolean }; githubSaving: boolean; onGithubConnect: () => void; onGithubFormChange: (form: { appId: string; fullName: string; branch: string; autoDeploy: boolean }) => void }) {
+function GithubModule({ apps, connected, deployments, github, githubError, githubForm, githubSaving, onDeploymentLogs, onGithubConnect, onGithubFormChange }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; github: DaemonGithubStatus | null; githubError: string | null; githubForm: { appId: string; fullName: string; branch: string; autoDeploy: boolean }; githubSaving: boolean; onDeploymentLogs: (deployment: DaemonDeployment) => void; onGithubConnect: () => void; onGithubFormChange: (form: { appId: string; fullName: string; branch: string; autoDeploy: boolean }) => void }) {
   const connectedRepos = github?.repositories.filter((repo) => repo.connectedAppId != null).length || 0;
-  const acceptedDeliveries = github?.deliveries.filter((delivery) => ["accepted", "deployed", "ignored"].includes(delivery.status)).length || 0;
+  const connection = githubConnectionState(github);
+  const deliveries = [...(github?.deliveries || [])].sort((a, b) => timeValue(b.receivedAt || b.updatedAt) - timeValue(a.receivedAt || a.updatedAt));
+  const deliveryByDeploymentId = new Map(deliveries.filter((delivery) => delivery.deploymentId != null).map((delivery) => [delivery.deploymentId as number, delivery]));
+  const githubDeployments = deployments
+    .filter((deployment) => deployment.sourceType === "github" || Boolean(deployment.repo) || deliveryByDeploymentId.has(deployment.id))
+    .sort((a, b) => timeValue(b.finishedAt || b.updatedAt || b.createdAt) - timeValue(a.finishedAt || a.updatedAt || a.createdAt));
+  const deploymentsById = new Map(githubDeployments.map((deployment) => [deployment.id, deployment]));
+  const latestDelivery = githubLatestDelivery(deliveries);
+  const latestDeploy = latestDeployment(githubDeployments);
+  const latestSuccess = latestSuccessfulDeployment(githubDeployments);
+  const latestDeliveryDeployment = latestDelivery?.deploymentId ? deploymentsById.get(latestDelivery.deploymentId) || null : null;
+  const latestDeliveryState = githubDeliveryState(latestDelivery, latestDeliveryDeployment);
+  const ignoredDeliveries = deliveries.filter((delivery) => githubDeliveryState(delivery, delivery.deploymentId ? deploymentsById.get(delivery.deploymentId) : null).label.startsWith("ignored event"));
+  const failingDeliveries = deliveries.filter((delivery) => githubDeliveryState(delivery, delivery.deploymentId ? deploymentsById.get(delivery.deploymentId) : null).tone === "error");
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="github" stats={<><ReadinessCard label="App" value={github?.configured ? "configured" : "missing"} status={github?.configured ? "ok" : "warn"} /><ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} /><ReadinessCard label="Repos" value={`${connectedRepos}/${github?.repositories.length || 0}`} status={connectedRepos ? "ok" : "warn"} /><ReadinessCard label="Deliveries" value={String(github?.deliveries.length || 0)} status={acceptedDeliveries ? "ok" : "warn"} /></>} />
+      <ModuleHeader module="github" stats={<><ReadinessCard label="Connection" value={connection.label} status={connection.tone} /><ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} /><ReadinessCard label="Repos" value={`${connectedRepos}/${github?.repositories.length || 0}`} status={connectedRepos ? "ok" : "warn"} /><ReadinessCard label="Latest" value={latestDeploy ? `#${latestDeploy.id}` : "none"} status={latestDeploy ? readinessFromStatus(latestDeploy.status) : "warn"} /><ReadinessCard label="Ignored" value={String(ignoredDeliveries.length)} status={ignoredDeliveries.length ? "warn" : "ok"} /><ReadinessCard label="Failing" value={String(failingDeliveries.length)} status={failingDeliveries.length ? "error" : "ok"} /></>} />
       {githubError ? <Alert title="GitHub action failed" message={githubError} /> : null}
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]">
         <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
@@ -1747,6 +1766,8 @@ function GithubModule({ apps, connected, github, githubError, githubForm, github
               <ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} />
               <ReadinessCard label="Private key" value={github?.privateKeyConfigured ? "ready" : "missing"} status={github?.privateKeyConfigured ? "ok" : "warn"} />
             </div>
+            {connection.detail ? <p className={`mt-3 text-xs ${connection.tone === "error" ? "text-negative" : "text-muted"}`}>{connection.detail}</p> : null}
+            <p className="mt-2 text-xs text-muted">Webhook payloads, branch names, commit SHAs, and messages are rendered as text-only metadata. This alpha does not browse repository contents or write commit statuses.</p>
           </div>
           <ResourceSection title="Connect repository" count={apps.length} />
           <div className="px-4 py-3">
@@ -1761,13 +1782,95 @@ function GithubModule({ apps, connected, github, githubError, githubForm, github
               <input type="checkbox" checked={githubForm.autoDeploy} onChange={(event) => onGithubFormChange({ ...githubForm, autoDeploy: event.target.checked })} disabled={githubSaving} className="h-4 w-4 accent-[var(--accent)]" />
             </label>
           </div>
-          <DeferredCapabilityList items={["OAuth install callback deferred", "Live repo browsing deferred", "Commit status updates deferred", "Preview deployments deferred"]} />
+          <DeferredCapabilityList items={["OAuth install callback deferred", "Live repo browsing deferred", "Commit status updates deferred", "Preview deployments deferred", "RBAC deferred", "Multi-server deploys deferred"]} />
         </div>
         <div className="min-w-0">
           <ResourceSection title="Repositories" count={github?.repositories.length || 0} />
-          {github?.repositories.length ? github.repositories.map((repo) => <div key={repo.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{repo.fullName}</p><p className="mt-1 text-[11px] text-muted">{repo.connectedAppName || "not connected"} · {repo.selectedBranch || repo.defaultBranch || "branch not set"} · {repo.private ? "private" : "public"}</p></div><StatusBadge status={repo.autoDeployEnabled ? "running" : "stopped"} /></div><div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4"><ReadinessCard label="Auto deploy" value={repo.autoDeployEnabled ? "on" : "off"} status={repo.autoDeployEnabled ? "ok" : "warn"} /><ReadinessCard label="Branch" value={repo.selectedBranch || repo.defaultBranch || "unset"} status={repo.selectedBranch || repo.defaultBranch ? "ok" : "warn"} /><ReadinessCard label="Install" value={repo.installationId ? String(repo.installationId) : "manual"} status={repo.installationId ? "ok" : "warn"} /><ReadinessCard label="Synced" value={timeAgo(repo.lastSyncedAt)} status={repo.lastSyncedAt ? "ok" : "warn"} /></div></div>) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Connect a repository to store source metadata and enable signed push-to-deploy.</div>}
+          {github?.repositories.length ? github.repositories.map((repo) => {
+            const repoDeployments = githubDeployments.filter((deployment) => deployment.repo === repo.fullName || (repo.connectedAppId != null && deployment.appId === repo.connectedAppId));
+            const latestRepoDeploy = repoDeployments[0] || null;
+            const latestRepoDelivery = githubLatestDelivery(deliveries, repo) || deliveries.find((delivery) => repo.connectedAppId != null && delivery.appId === repo.connectedAppId) || null;
+            const latestRepoDeliveryDeployment = latestRepoDelivery?.deploymentId ? deploymentsById.get(latestRepoDelivery.deploymentId) : latestRepoDeploy;
+            const deliveryState = githubDeliveryState(latestRepoDelivery, latestRepoDeliveryDeployment);
+            return (
+              <div key={repo.id} className="border-b border-white/5 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-sm font-bold">{repo.fullName}</p>
+                    <p className="mt-1 text-[11px] text-muted">{repo.connectedAppName || "not connected"} · {githubRepositoryBranch(repo)} · {repo.private ? "private" : "public"}</p>
+                  </div>
+                  <StatusBadge status={repo.autoDeployEnabled ? "running" : "stopped"} />
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <ReadinessCard label="Auto deploy" value={repo.autoDeployEnabled ? "on" : "off"} status={repo.autoDeployEnabled ? "ok" : "warn"} />
+                  <ReadinessCard label="Branch" value={githubRepositoryBranch(repo)} status={repo.selectedBranch || repo.defaultBranch ? "ok" : "warn"} />
+                  <ReadinessCard label="Latest delivery" value={deliveryState.label} status={deliveryState.tone} />
+                  <ReadinessCard label="Latest deploy" value={latestRepoDeploy ? `#${latestRepoDeploy.id}` : "none"} status={latestRepoDeploy ? readinessFromStatus(latestRepoDeploy.status) : "warn"} />
+                </div>
+                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+                  <Meta label="Install" value={repo.installationId ? String(repo.installationId) : "manual"} mono />
+                  <Meta label="Synced" value={timeAgo(repo.lastSyncedAt)} />
+                  <Meta label="Commit" value={latestRepoDeploy?.commitSha?.slice(0, 12) || latestRepoDelivery?.commitSha?.slice(0, 12) || "none"} mono />
+                  <Meta label="Logs path" value={latestRepoDeploy ? githubDeliveryLogPath(latestRepoDelivery, latestRepoDeploy) : "deploy pending"} mono />
+                </div>
+              </div>
+            );
+          }) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Connect a repository to store source metadata and enable signed push-to-deploy.</div>}
           <ResourceSection title="Recent deliveries" count={github?.deliveries.length || 0} />
-          {github?.deliveries.length ? github.deliveries.slice(0, 12).map((delivery) => <div key={delivery.deliveryId} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-bold">{delivery.repo || delivery.event}</p><p className="mt-1 truncate font-mono text-[11px] text-muted">{delivery.event}{delivery.action ? `:${delivery.action}` : ""} · {delivery.branch || "-"} · {delivery.commitSha?.slice(0, 7) || "no commit"} · {timeAgo(delivery.receivedAt)}</p></div><StatusBadge status={delivery.status} /></div><div className="mt-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4"><Meta label="Signature" value={delivery.signatureValid ? "valid" : "invalid"} /><Meta label="App" value={delivery.appName || "unmatched"} /><Meta label="Deploy" value={delivery.deploymentId ? `#${delivery.deploymentId}` : "none"} /><Meta label="Processed" value={timeAgo(delivery.processedAt)} /></div>{delivery.message ? <p className="mt-2 text-xs text-muted">{delivery.message}</p> : null}</div>) : <div className="px-4 py-5 text-sm text-muted">Signed push deliveries appear here after GitHub sends webhooks.</div>}
+          {deliveries.length ? deliveries.slice(0, 12).map((delivery) => {
+            const deployment = delivery.deploymentId ? deploymentsById.get(delivery.deploymentId) || null : null;
+            const deliveryState = githubDeliveryState(delivery, deployment);
+            return (
+              <div key={delivery.deliveryId} className="border-b border-white/5 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-bold">{delivery.repo || delivery.event}</p>
+                    <p className="mt-1 truncate font-mono text-[11px] text-muted">{delivery.event}{delivery.action ? `:${delivery.action}` : ""} · {delivery.branch || "-"} · {delivery.commitSha?.slice(0, 12) || "no commit"} · {timeAgo(delivery.receivedAt)}</p>
+                  </div>
+                  <StatusBadge status={delivery.status} />
+                </div>
+                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+                  <Meta label="Diagnosis" value={deliveryState.label} />
+                  <Meta label="Signature" value={delivery.signatureValid ? "valid" : "invalid"} />
+                  <Meta label="App" value={delivery.appName || "unmatched"} />
+                  <Meta label="Deploy" value={delivery.deploymentId ? `#${delivery.deploymentId}` : "none"} />
+                  <Meta label="Phase" value={deployment ? deploymentStateLabel(deployment) : "not queued"} />
+                  <Meta label="Logs path" value={githubDeliveryLogPath(delivery, deployment)} mono />
+                  <Meta label="Processed" value={timeAgo(delivery.processedAt)} />
+                  <Meta label="Delivery ID" value={delivery.deliveryId} mono />
+                </div>
+                {deliveryState.detail || delivery.message ? <p className={`mt-2 text-xs ${deliveryState.tone === "error" ? "text-negative" : "text-muted"}`}>{deliveryState.detail || delivery.message}</p> : null}
+                {deployment ? <div className="mt-3"><PillButton onClick={() => onDeploymentLogs(deployment)}>Open logs</PillButton></div> : null}
+              </div>
+            );
+          }) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Signed push deliveries appear here after GitHub sends webhooks.</div>}
+          <ResourceSection title="GitHub deploy history" count={githubDeployments.length} />
+          <div className="grid grid-cols-2 gap-2 border-b border-white/5 px-4 py-3 sm:grid-cols-3">
+            <ReadinessCard label="Latest deploy" value={latestDeploy ? `#${latestDeploy.id}` : "none"} status={latestDeploy ? readinessFromStatus(latestDeploy.status) : "warn"} />
+            <ReadinessCard label="Latest success" value={latestSuccess ? `#${latestSuccess.id}` : "none"} status={latestSuccess ? "ok" : "warn"} />
+            <ReadinessCard label="Latest delivery" value={latestDeliveryState.label} status={latestDeliveryState.tone} />
+          </div>
+          {githubDeployments.length ? githubDeployments.slice(0, 12).map((deployment) => (
+            <div key={deployment.id} className="border-b border-white/5 px-4 py-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold">Deployment #{deployment.id}</p>
+                  <p className="mt-1 truncate font-mono text-[11px] text-muted">{deploymentSource(deployment)}</p>
+                </div>
+                <StatusBadge status={deployment.status} />
+              </div>
+              <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
+                <Meta label="State" value={deploymentStateLabel(deployment)} />
+                <Meta label="Commit" value={deployment.commitSha?.slice(0, 12) || "none"} mono />
+                <Meta label="Branch" value={deployment.branch || "none"} mono />
+                <Meta label="Logs path" value={githubDeliveryLogPath(null, deployment)} mono />
+                <Meta label="Started" value={timeAgo(deployment.startedAt || deployment.createdAt)} />
+                <Meta label="Finished" value={timeAgo(deployment.finishedAt)} />
+              </div>
+              {deployment.errorMessage ? <p className="mt-2 rounded-md bg-negative/10 px-3 py-2 text-xs text-negative">{deployment.errorMessage}</p> : null}
+              <div className="mt-3"><PillButton onClick={() => onDeploymentLogs(deployment)}>Open logs</PillButton></div>
+            </div>
+          )) : <div className="px-4 py-5 text-sm text-muted">GitHub-triggered deployments appear here after a signed matching-branch push queues a deploy.</div>}
         </div>
       </div>
     </section>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backupRunFileState, backupStorageLabel, databaseExposureLabel, deploymentLogsLabel, deploymentStateLabel, domainDnsLabel, domainProxyLabel, domainTargetLabel, domainTlsLabel, envVisibilityLabel, isDeploymentInProgress, latestSuccessfulDeployment, logAvailabilityLabel, productionAuthState, safeEnvDisplay } from "../../lib/dashboard-operations";
+import { backupRunFileState, backupStorageLabel, databaseExposureLabel, deploymentLogsLabel, deploymentStateLabel, domainDnsLabel, domainProxyLabel, domainTargetLabel, domainTlsLabel, envVisibilityLabel, githubConnectionState, githubDeliveryLogPath, githubDeliveryState, githubLatestDelivery, githubRepositoryBranch, isDeploymentInProgress, latestDeployment, latestSuccessfulDeployment, logAvailabilityLabel, productionAuthState, safeEnvDisplay } from "../../lib/dashboard-operations";
 
 describe("dashboard operation state labels", () => {
   const successfulDeployment = { id: 10, status: "succeeded", phase: "succeeded", logsUrl: "/deployments/10/logs" };
@@ -44,6 +44,36 @@ describe("dashboard operation state labels", () => {
     expect(productionAuthState(null, ["Routely production API requires an admin token."])).toMatchObject({ label: "missing auth", tone: "error" });
     expect(productionAuthState(null, [])).toMatchObject({ label: "unavailable", tone: "warn" });
     expect(productionAuthState({ auth: { required: false, configured: false } })).toMatchObject({ label: "local bypass", tone: "ok" });
+  });
+
+  it("labels GitHub connection readiness without implying unsupported operations", () => {
+    expect(githubConnectionState(null)).toMatchObject({ label: "unavailable", tone: "warn" });
+    expect(githubConnectionState({ configured: false, webhookSecretConfigured: false, privateKeyConfigured: false, repositories: [] })).toMatchObject({ label: "GitHub app missing", tone: "warn" });
+    expect(githubConnectionState({ configured: true, webhookSecretConfigured: false, privateKeyConfigured: true, repositories: [] })).toMatchObject({ label: "webhook secret missing", tone: "error" });
+    expect(githubConnectionState({ configured: true, webhookSecretConfigured: true, privateKeyConfigured: true, repositories: [{ connectedAppId: 7 }] })).toMatchObject({ label: "ready", tone: "ok" });
+  });
+
+  it("labels GitHub webhook deliveries for ignored, failing, and deploy-linked events", () => {
+    const failedDeploy = { id: 43, appId: 7, status: "failed", phase: "building", repo: "acme/web", branch: "main", errorMessage: "Dockerfile failed", updatedAt: "2026-06-22T00:03:00.000Z" };
+
+    expect(githubDeliveryState({ status: "ignored", signatureValid: true, message: "branch mismatch" })).toMatchObject({ label: "ignored event: ignored", tone: "warn" });
+    expect(githubDeliveryState({ status: "failed", signatureValid: true, message: "build failed" })).toMatchObject({ label: "failing event: failed", tone: "error", detail: "build failed" });
+    expect(githubDeliveryState({ status: "accepted", signatureValid: true, deploymentId: 42 })).toMatchObject({ label: "deploy #42", tone: "ok" });
+    expect(githubDeliveryState({ status: "deployment_queued", signatureValid: true, deploymentId: 43, message: "<img src=x onerror=alert(1)>" }, failedDeploy)).toMatchObject({ label: "deploy failed: building", tone: "error", detail: "Dockerfile failed" });
+    expect(githubDeliveryLogPath({ deploymentId: 43 }, failedDeploy)).toBe("/api/deployments/43/logs");
+    expect(githubDeliveryState({ status: "accepted", signatureValid: false, message: "bad hmac" })).toMatchObject({ label: "invalid signature", tone: "error", detail: "bad hmac" });
+  });
+
+  it("finds GitHub repo branch, latest delivery, and latest deployment without inventing preview state", () => {
+    const oldDelivery = { deliveryId: "old", repo: "acme/web", status: "ignored", signatureValid: true, receivedAt: "2026-06-22T00:01:00.000Z" };
+    const newDelivery = { deliveryId: "new", repo: "acme/web", status: "deployment_queued", signatureValid: true, receivedAt: "2026-06-22T00:04:00.000Z" };
+    const otherDelivery = { deliveryId: "other", repo: "acme/api", status: "deployment_queued", signatureValid: true, receivedAt: "2026-06-22T00:05:00.000Z" };
+    const oldDeploy = { id: 50, status: "succeeded", phase: "succeeded", updatedAt: "2026-06-22T00:01:00.000Z" };
+    const newDeploy = { id: 51, status: "failed", phase: "healthchecking", updatedAt: "2026-06-22T00:05:00.000Z" };
+
+    expect(githubRepositoryBranch({ fullName: "acme/web", selectedBranch: "main", defaultBranch: "trunk" })).toBe("main");
+    expect(githubLatestDelivery([oldDelivery, otherDelivery, newDelivery], "acme/web")).toBe(newDelivery);
+    expect(latestDeployment([oldDeploy, newDeploy])).toBe(newDeploy);
   });
 
   it("sorts latest successful deployments by real deployment timestamps", () => {
