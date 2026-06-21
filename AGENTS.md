@@ -34,7 +34,9 @@ Routely uses a single-context domain-doc layout with `CONTEXT.md` at the repo ro
 
 ### Local skills
 
-Relevant local skills live under `.agents/skills/`: `setup-matt-pocock-skills`, `domain-modeling`, `codebase-design`, `tdd`, `diagnosing-bugs`, `to-issues`, `implement`, `frontend-design`, and `ckm-design-system`.
+Relevant local skills live under `.agents/skills/`: `setup-matt-pocock-skills`, `ask-matt`, `grill-with-docs`, `to-prd`, `to-issues`, `triage`, `domain-modeling`, `codebase-design`, `tdd`, `diagnosing-bugs`, `implement`, `frontend-design`, and `ckm-design-system`.
+
+PM uses the Matt Pocock planning flow for non-trivial product work: `ask-matt` when the route is unclear, `grill-with-docs` style self-interview, `to-prd`, then `to-issues`. See `docs/02-team-execution-plan.md` and `.maestro/prompts/pm.md`.
 
 ## Maestro team roles
 

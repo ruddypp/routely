@@ -18,6 +18,8 @@ PM acts like a senior product manager. PM owns product planning, PRDs, requireme
 
 PM may edit docs and planning artifacts. PM converts Lead summaries and QA/Security findings into clear dev instructions for Backend and Frontend. PM must not edit production code.
 
+PM uses the installed Matt Pocock planning skills as its default planning toolkit. For new product work, ambiguous scope, or broad implementation planning, PM starts from Lead-provided context, uses `ask-matt` if the right flow is unclear, runs a `grill-with-docs` style self-interview to expose missing product/domain/risk details, then uses `to-prd` to synthesize the PRD and `to-issues` to split work into vertical slices. PM uses `triage` for intake, prioritization, readiness, and labeling decisions. PM asks Lead concise clarifying questions only when the Lead context is insufficient; otherwise PM documents assumptions and continues.
+
 ### Backend
 
 Backend acts like a senior backend developer. Backend owns CLI, daemon, SQLite, package boundaries, runtime drivers, production deploy behavior, GitHub integration, proxy/domain helpers, env/secrets, logs, health, metrics, database/backups, notifications, API contracts, and backend tests.
@@ -59,22 +61,24 @@ Security reports to Routely Lead, not directly to Backend or Frontend. Security 
 For public alpha work, use this flow:
 
 1. The user works through Routely Lead. Lead clarifies the objective, constraints, blockers, and approval needs.
-2. Lead instructs PM to write or update the plan, PRD, acceptance criteria, team assignments, and verification plan.
-3. PM sends dashboard/product-experience work to UI/UX for design, workflow, state, copy, responsive, and accessibility criteria.
-4. UI/UX returns executable design criteria to Lead/PM. Lead/PM route implementation to Frontend and Backend according to ownership.
-5. Backend implements or hardens storage/API/CLI/runtime behavior and tests for backend-owned scope.
-6. Frontend implements dashboard/API route integration and UI states against real data for frontend-owned scope.
-7. Backend and Frontend commit their own implementation changes after verification passes, unless Lead/user explicitly says not to commit.
-8. Lead sends the completed work to QA E2E and Security for validation.
-9. QA E2E writes an end-to-end report under `docs/qa/` and sends it to Lead only.
-10. Security writes a trust-boundary report under `docs/security/` and sends it to Lead only.
-11. Lead waits for both QA and Security reports before routing fixes. This avoids race conditions between QA and Security findings.
-12. Lead summarizes both reports into one coordinated finding set and sends the summary to PM.
-13. PM turns Lead's summary into prioritized dev instructions. Frontend bugs go to Frontend; backend bugs go to Backend; cross-cutting bugs get explicit owner splits.
-14. Backend and Frontend patch routed findings and commit their own implementation fixes after verification passes.
-15. Lead sends fixes back to QA E2E and Security for re-test.
-16. After QA and Security pass or document accepted blockers, PM updates canonical docs, release status, and handoff notes.
-17. Routely Lead asks the user for approval before destructive cleanup, credential actions, public release steps, or deleting legacy docs after true facts are merged.
+2. Lead instructs PM to run the PM planning flow for anything beyond a small direct task.
+3. PM uses `ask-matt` when the correct planning path is unclear, then runs `grill-with-docs` style self-interview from Lead context. PM asks Lead only for missing information that cannot be reasonably assumed.
+4. PM uses `to-prd` to synthesize the PRD from the grilling context, then uses `to-issues` to produce vertical slices, acceptance criteria, team assignments, dependencies, and verification plan.
+5. PM sends dashboard/product-experience work to UI/UX for design, workflow, state, copy, responsive, and accessibility criteria.
+6. UI/UX returns executable design criteria to Lead/PM. Lead/PM route implementation to Frontend and Backend according to ownership.
+7. Backend implements or hardens storage/API/CLI/runtime behavior and tests for backend-owned scope.
+8. Frontend implements dashboard/API route integration and UI states against real data for frontend-owned scope.
+9. Backend and Frontend commit their own implementation changes after verification passes, unless Lead/user explicitly says not to commit.
+10. Lead sends the completed work to QA E2E and Security for validation.
+11. QA E2E writes an end-to-end report under `docs/qa/` and sends it to Lead only.
+12. Security writes a trust-boundary report under `docs/security/` and sends it to Lead only.
+13. Lead waits for both QA and Security reports before routing fixes. This avoids race conditions between QA and Security findings.
+14. Lead summarizes both reports into one coordinated finding set and sends the summary to PM.
+15. PM turns Lead's summary into prioritized dev instructions. Frontend bugs go to Frontend; backend bugs go to Backend; cross-cutting bugs get explicit owner splits.
+16. Backend and Frontend patch routed findings and commit their own implementation fixes after verification passes.
+17. Lead sends fixes back to QA E2E and Security for re-test.
+18. After QA and Security pass or document accepted blockers, PM updates canonical docs, release status, and handoff notes.
+19. Routely Lead asks the user for approval before destructive cleanup, credential actions, public release steps, or deleting legacy docs after true facts are merged.
 
 For small bugs, Lead may route directly to Backend or Frontend, then QA/Security as needed.
 

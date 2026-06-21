@@ -26,7 +26,7 @@ All agents should read `docs/00-product-brief.md` through `docs/04-docs-map.md` 
 
 ## Routing Contract
 
-The user talks to Routely Lead. Lead instructs PM to produce plans, PRDs, acceptance criteria, and team assignments. PM routes product-experience work to UI/UX before implementation. UI/UX returns executable design criteria, then PM/Lead route implementation to Backend and Frontend.
+The user talks to Routely Lead. Lead instructs PM to produce plans, PRDs, acceptance criteria, and team assignments. For non-trivial planning, PM uses the installed Matt Pocock skills: `ask-matt` when the flow is unclear, `grill-with-docs` style self-interview before PRD synthesis, `to-prd` for the PRD, `to-issues` for vertical-slice execution issues, and `triage` for readiness/prioritization. PM routes product-experience work to UI/UX before implementation. UI/UX returns executable design criteria, then PM/Lead route implementation to Backend and Frontend.
 
 After implementation, Lead sends work to QA E2E and Security. QA and Security report back to Lead only. Lead waits for both reports, summarizes them, and sends the coordinated finding set to PM. PM turns that summary into owner-specific bug instructions: frontend findings go to Frontend, backend findings go to Backend, and cross-cutting findings get explicit owner splits.
 
