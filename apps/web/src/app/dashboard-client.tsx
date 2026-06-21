@@ -472,9 +472,9 @@ type AppFormState = {
 };
 
 const POLL_INTERVAL_MS = 4000;
-const APP_TYPES = ["app", "database", "compose", "static", "worker"];
-const APP_DRIVERS = ["command", "compose", "dockerfile", "buildpack", "static"];
-const APP_PRESETS = ["custom", "nextjs", "vite", "laravel", "express", "nestjs", "django", "fastapi", "go", "static", "php", "postgres", "mysql", "mariadb", "redis", "mongodb"];
+const APP_TYPES = ["app", "database", "worker"];
+const APP_DRIVERS = ["command", "compose", "dockerfile"];
+const APP_PRESETS = ["custom", "nextjs", "vite", "express", "postgres", "mysql", "mariadb", "redis", "mongodb"];
 const PANEL_SHADOW = "shadow-[var(--panel-shadow)]";
 const INSET_RING = "shadow-[var(--inset-border)]";
 const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
@@ -557,8 +557,21 @@ function appCanRedeploy(app: DaemonApp): boolean {
   return app.driver === "dockerfile";
 }
 
-function canDeployApp(app: DaemonApp, connected: boolean): boolean {
-  return connected && appCanRedeploy(app) && Boolean(app.path) && app.enabled;
+function serverCheck(server: DaemonServerStatus | null, id: string): DaemonServerCheck | undefined {
+  return server?.readiness?.checks.find((check) => check.id === id);
+}
+
+function deployBlockReason(app: DaemonApp, connected: boolean, server: DaemonServerStatus | null): string | null {
+  if (!connected) return "daemon offline";
+  if (!app.enabled) return "resource disabled";
+  if (!appCanRedeploy(app)) return "Dockerfile deploy only";
+  if (!app.path) return "Dockerfile path missing";
+  if (!server) return "server status unavailable";
+  if (serverCheck(server, "docker")?.status !== "ok") return "Docker not ready";
+  if (!server.dataDir) return "data dir pending";
+  if (server.auth.required && !server.auth.configured) return "auth missing";
+  if (server.readiness && !server.readiness.ok) return "server doctor check";
+  return null;
 }
 
 function pendingStateLabel(app: DaemonApp): string {
@@ -1455,16 +1468,16 @@ export default function DashboardClient() {
               />
             ) : null}
 
-            {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} deployingByAppId={deployingByAppId} deploymentsByAppId={latestDeploymentByAppId} disabledCount={disabledCount} domainsByAppId={domainsByAppId} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} serviceResources={serviceResources} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onDeploy={(app) => void deployApp(app)} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onSelect={setSelectedAppId} /> : null}
+            {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} deployingByAppId={deployingByAppId} deploymentsByAppId={latestDeploymentByAppId} disabledCount={disabledCount} domainsByAppId={domainsByAppId} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} server={serverStatus} serviceResources={serviceResources} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onDeploy={(app) => void deployApp(app)} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onSelect={setSelectedAppId} /> : null}
 
-            {activeModule === "apps" || activeModule === "env" || activeModule === "logs" || activeModule === "health" ? <AppOperationsModule activeTab={activeModule === "apps" ? undefined : appModuleTabs[activeModule]} apps={apps} appResources={appResources} app={selectedApp} selectedAppId={selectedAppId} connected={connected} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} logs={logs} logsLoading={logsLoading} logsError={logsError} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} module={activeModule} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onLogs={(app) => void loadLogs(app)} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} /> : null}
+            {activeModule === "apps" || activeModule === "env" || activeModule === "logs" || activeModule === "health" ? <AppOperationsModule activeTab={activeModule === "apps" ? undefined : appModuleTabs[activeModule]} apps={apps} appResources={appResources} app={selectedApp} selectedAppId={selectedAppId} connected={connected} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} logs={logs} logsLoading={logsLoading} logsError={logsError} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} module={activeModule} server={serverStatus} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onLogs={(app) => void loadLogs(app)} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} /> : null}
 
-            {activeModule === "metrics" ? <MetricsModule app={selectedApp} apps={apps} appResources={appResources} connected={connected} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} github={github} hostMetrics={hostMetrics} hostMetricsError={hostMetricsError} logs={logs} logsError={logsError} logsLoading={logsLoading} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} selectedAppId={selectedAppId} /> : null}
+            {activeModule === "metrics" ? <MetricsModule app={selectedApp} apps={apps} appResources={appResources} connected={connected} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} github={github} hostMetrics={hostMetrics} hostMetricsError={hostMetricsError} logs={logs} logsError={logsError} logsLoading={logsLoading} server={serverStatus} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} selectedAppId={selectedAppId} /> : null}
     </DashboardShell>
   );
 }
 
-function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, deployingByAppId, deploymentsByAppId, disabledCount, domainsByAppId, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onDeploy, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onSelect, runningCount, selectedAppId, serviceResources, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; deployingByAppId: Record<number, boolean>; deploymentsByAppId: Map<number, DaemonDeployment>; disabledCount: number; domainsByAppId: Map<number, DaemonDomain[]>; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: () => void; onDeploy: (app: DaemonApp) => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onSelect: (id: number) => void; runningCount: number; selectedAppId: number | null; serviceResources: DaemonApp[]; stoppedCount: number }) {
+function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, deployingByAppId, deploymentsByAppId, disabledCount, domainsByAppId, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onDeploy, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onSelect, runningCount, selectedAppId, server, serviceResources, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; deployingByAppId: Record<number, boolean>; deploymentsByAppId: Map<number, DaemonDeployment>; disabledCount: number; domainsByAppId: Map<number, DaemonDomain[]>; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: () => void; onDeploy: (app: DaemonApp) => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onSelect: (id: number) => void; runningCount: number; selectedAppId: number | null; server: DaemonServerStatus | null; serviceResources: DaemonApp[]; stoppedCount: number }) {
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
       <ModuleHeader module="apps" stats={<><MetricPill label="running" value={`${runningCount}/${apps.length}`} accent /><MetricPill label="services" value={String(serviceResources.length)} /><MetricPill label="stopped" value={String(stoppedCount)} /><MetricPill label="disabled" value={String(disabledCount)} /></>} actions={<PillButton onClick={onCreate} strong disabled={!connected}>Add resource</PillButton>} />
@@ -1479,10 +1492,10 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
         {loading ? <LoadingRows /> : apps.length === 0 ? <EmptyState connected={connected} onAdd={onCreate} /> : (
           <>
             <ResourceSection title="Apps" count={appResources.length} />
-            {appResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+            {appResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} server={server} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
             <ResourceSection title="Services & databases" count={serviceResources.length} />
             {serviceResources.length === 0 ? <ServiceEmpty /> : null}
-            {serviceResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+            {serviceResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} server={server} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
           </>
         )}
       </div>
@@ -1490,7 +1503,7 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
   );
 }
 
-function AppOperationsModule({ activeTab, appResources, apps, app, connected, currentAction, deploying, deploymentLogs, deploymentLogsError, deploymentLogsLoading, deployments, domains, github, logs, logsError, logsLoading, module, onAction, onDeploy, onDeploymentLogs, onEdit, onLogs, onReload, onSelect, selectedAppId }: { activeTab?: InspectorTab; appResources: DaemonApp[]; apps: DaemonApp[]; app: DaemonApp | null; connected: boolean; currentAction?: AppAction | null; deploying: boolean; deploymentLogs: DeploymentLogsResponse | null; deploymentLogsError: string | null; deploymentLogsLoading: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; github: DaemonGithubStatus | null; logs: DaemonAppLogsResponse | null; logsError: string | null; logsLoading: boolean; module: ModuleKey; onAction?: (action: AppAction) => void; onDeploy?: () => void; onDeploymentLogs: (deployment: DaemonDeployment) => void; onEdit?: () => void; onLogs: (app: DaemonApp) => void; onReload?: () => void; onSelect: (id: number) => void; selectedAppId: number | null }) {
+function AppOperationsModule({ activeTab, appResources, apps, app, connected, currentAction, deploying, deploymentLogs, deploymentLogsError, deploymentLogsLoading, deployments, domains, github, logs, logsError, logsLoading, module, onAction, onDeploy, onDeploymentLogs, onEdit, onLogs, onReload, onSelect, selectedAppId, server }: { activeTab?: InspectorTab; appResources: DaemonApp[]; apps: DaemonApp[]; app: DaemonApp | null; connected: boolean; currentAction?: AppAction | null; deploying: boolean; deploymentLogs: DeploymentLogsResponse | null; deploymentLogsError: string | null; deploymentLogsLoading: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; github: DaemonGithubStatus | null; logs: DaemonAppLogsResponse | null; logsError: string | null; logsLoading: boolean; module: ModuleKey; onAction?: (action: AppAction) => void; onDeploy?: () => void; onDeploymentLogs: (deployment: DaemonDeployment) => void; onEdit?: () => void; onLogs: (app: DaemonApp) => void; onReload?: () => void; onSelect: (id: number) => void; selectedAppId: number | null; server: DaemonServerStatus | null }) {
   useEffect(() => {
     if (module === "logs" && app && !logsLoading && logs?.app.id !== app.id) {
       onLogs(app);
@@ -1498,7 +1511,7 @@ function AppOperationsModule({ activeTab, appResources, apps, app, connected, cu
   }, [app, logs?.app.id, logsLoading, module, onLogs]);
 
   if (module === "apps") {
-    return <DetailPanel activeTab={activeTab} app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />;
+    return <DetailPanel activeTab={activeTab} app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} server={server} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />;
   }
   const candidates = [...(appResources.length ? appResources : apps)].sort((a, b) => {
     if (module !== "health") return a.name.localeCompare(b.name);
@@ -1525,12 +1538,12 @@ function AppOperationsModule({ activeTab, appResources, apps, app, connected, cu
           </button>
         ))}
       </div>
-      <DetailPanel activeTab={activeTab} app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />
+      <DetailPanel activeTab={activeTab} app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} server={server} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />
     </section>
   );
 }
 
-function MetricsModule({ app, apps, appResources, connected, currentAction, deploying, deploymentLogs, deploymentLogsError, deploymentLogsLoading, deployments, domains, github, hostMetrics, hostMetricsError, logs, logsError, logsLoading, onAction, onDeploy, onDeploymentLogs, onEdit, onReload, onSelect, selectedAppId }: { app: DaemonApp | null; apps: DaemonApp[]; appResources: DaemonApp[]; connected: boolean; currentAction?: AppAction | null; deploying: boolean; deploymentLogs: DeploymentLogsResponse | null; deploymentLogsError: string | null; deploymentLogsLoading: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; github: DaemonGithubStatus | null; hostMetrics: DaemonMetricSample[]; hostMetricsError: string | null; logs: DaemonAppLogsResponse | null; logsError: string | null; logsLoading: boolean; onAction?: (action: AppAction) => void; onDeploy?: () => void; onDeploymentLogs: (deployment: DaemonDeployment) => void; onEdit?: () => void; onReload?: () => void; onSelect: (id: number) => void; selectedAppId: number | null }) {
+function MetricsModule({ app, apps, appResources, connected, currentAction, deploying, deploymentLogs, deploymentLogsError, deploymentLogsLoading, deployments, domains, github, hostMetrics, hostMetricsError, logs, logsError, logsLoading, onAction, onDeploy, onDeploymentLogs, onEdit, onReload, onSelect, selectedAppId, server }: { app: DaemonApp | null; apps: DaemonApp[]; appResources: DaemonApp[]; connected: boolean; currentAction?: AppAction | null; deploying: boolean; deploymentLogs: DeploymentLogsResponse | null; deploymentLogsError: string | null; deploymentLogsLoading: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; github: DaemonGithubStatus | null; hostMetrics: DaemonMetricSample[]; hostMetricsError: string | null; logs: DaemonAppLogsResponse | null; logsError: string | null; logsLoading: boolean; onAction?: (action: AppAction) => void; onDeploy?: () => void; onDeploymentLogs: (deployment: DaemonDeployment) => void; onEdit?: () => void; onReload?: () => void; onSelect: (id: number) => void; selectedAppId: number | null; server: DaemonServerStatus | null }) {
   const latestHostMetric = hostMetrics[0] || null;
   const candidates = [...(appResources.length ? appResources : apps)].sort((a, b) => a.name.localeCompare(b.name));
 
@@ -1555,7 +1568,7 @@ function MetricsModule({ app, apps, appResources, connected, currentAction, depl
           </button>
         ))}
       </div>
-      <DetailPanel activeTab="health" app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />
+      <DetailPanel activeTab="health" app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} server={server} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />
     </section>
   );
 }
@@ -1579,12 +1592,14 @@ function MetricSampleRow({ sample }: { sample: DaemonMetricSample }) {
 }
 
 function DeploymentsModule({ apps, connected, deployments, deployingByAppId, error, latestByAppId, onDeploy, onLogs, server }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; deployingByAppId: Record<number, boolean>; error: string | null; latestByAppId: Map<number, DaemonDeployment>; onDeploy: (app: DaemonApp) => void; onLogs: (deployment: DaemonDeployment) => void; server: DaemonServerStatus | null }) {
-  const dockerReady = Boolean(server?.readiness?.checks.some((check) => check.id === "docker" && check.status === "ok"));
-  const ready = connected && dockerReady && Boolean(server?.dataDir) && Boolean(!server?.auth.required || server.auth.configured);
+  const dockerReady = serverCheck(server, "docker")?.status === "ok";
+  const dataReady = Boolean(server?.dataDir);
+  const authReady = Boolean(!server?.auth.required || server.auth.configured);
+  const serverReady = Boolean(server?.readiness?.ok);
   const failed = deployments.filter((item) => item.status === "failed");
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="deployments" stats={<><ReadinessCard label="Docker" value={dockerReady ? "ready" : "check"} status={dockerReady ? "ok" : "warn"} /><ReadinessCard label="History" value={String(deployments.length)} status={deployments.length ? "ok" : "warn"} /><ReadinessCard label="Failed" value={String(failed.length)} status={failed.length ? "error" : "ok"} /></>} />
+      <ModuleHeader module="deployments" stats={<><ReadinessCard label="Docker" value={dockerReady ? "ready" : "check"} status={dockerReady ? "ok" : "warn"} /><ReadinessCard label="Server" value={serverReady ? "ready" : "doctor"} status={serverReady ? "ok" : "warn"} /><ReadinessCard label="Data dir" value={dataReady ? "ready" : "pending"} status={dataReady ? "ok" : "warn"} /><ReadinessCard label="Auth" value={authReady ? "ready" : "missing"} status={authReady ? "ok" : "error"} /><ReadinessCard label="Failed" value={String(failed.length)} status={failed.length ? "error" : "ok"} /></>} />
       {error ? <Alert title="Deployment action failed" message={error} /> : null}
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
         <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
@@ -1593,7 +1608,7 @@ function DeploymentsModule({ apps, connected, deployments, deployingByAppId, err
           {apps.map((app) => {
             const latest = latestByAppId.get(app.id);
             const deploying = Boolean(deployingByAppId[app.id]);
-            const disabledReason = !connected ? "daemon offline" : !dockerReady ? "docker check" : !server?.dataDir ? "server init" : !app.enabled ? "disabled" : null;
+            const disabledReason = deployBlockReason(app, connected, server);
             return (
               <div key={app.id} className="border-b border-white/5 px-4 py-3">
                 <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
@@ -1613,7 +1628,7 @@ function DeploymentsModule({ apps, connected, deployments, deployingByAppId, err
                   </div>
                   <div className="flex flex-wrap gap-2 md:justify-end">
                     {latest ? <PillButton onClick={() => onLogs(latest)}>Logs</PillButton> : null}
-                    <PillButton strong onClick={() => onDeploy(app)} disabled={!ready || deploying || !app.enabled}>{deploying ? "Deploying" : "Deploy"}</PillButton>
+                    <PillButton strong onClick={() => onDeploy(app)} disabled={Boolean(disabledReason) || deploying}>{deploying ? "Deploying" : "Deploy"}</PillButton>
                   </div>
                 </div>
               </div>
@@ -2143,6 +2158,7 @@ function AppRow({
   deploying,
   domains,
   latestDeployment,
+  server,
   onAction,
   onDeploy,
   onEdit,
@@ -2156,6 +2172,7 @@ function AppRow({
   deploying: boolean;
   domains: DaemonDomain[];
   latestDeployment: DaemonDeployment | null;
+  server: DaemonServerStatus | null;
   onAction: (action: AppAction) => void;
   onDeploy: () => void;
   onEdit: () => void;
@@ -2166,7 +2183,7 @@ function AppRow({
   const running = app.status === "running" || app.status === "starting";
   const localUrl = appUrl(app);
   const disabledReason = !app.enabled ? "Disabled" : !connected ? "Offline" : null;
-  const deployable = canDeployApp(app, connected);
+  const deployReason = deployBlockReason(app, connected, server);
   const pending = pendingStateLabel(app);
 
   return (
@@ -2198,7 +2215,7 @@ function AppRow({
           <div className="mt-1"><StatusBadge status={app.status} /></div>
         </div>
         <Meta label="Pending" value={pending} />
-        <Meta label="Deploy" value={latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : appCanRedeploy(app) ? "never" : "n/a"} />
+        <Meta label="Deploy" value={deployReason || (latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : "ready")} />
         <Meta label="Updated" value={timeAgo(app.updatedAt)} />
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 xl:justify-end xl:flex-nowrap">
@@ -2207,7 +2224,7 @@ function AppRow({
         <RoundAction label="Restart" onClick={() => onAction("restart")} disabled={busy || !connected || !app.enabled} active={currentAction === "restart"} />
         <ActionLink href={localUrl}>Open</ActionLink>
         <PillButton onClick={onLogs} disabled={!connected}>Logs</PillButton>
-        <PillButton onClick={onDeploy} disabled={!deployable || deploying}>{deploying ? "Deploying" : "Deploy"}</PillButton>
+        <PillButton onClick={onDeploy} disabled={Boolean(deployReason) || deploying}>{deploying ? "Deploying" : "Deploy"}</PillButton>
         <PillButton onClick={onEdit} disabled={!connected}>Edit</PillButton>
       </div>
       <div className="hidden">
@@ -2384,7 +2401,7 @@ function ProductionDeployPanel({
                 </div>
                 <div className="mt-3 grid grid-cols-3 gap-2">
                   <ReadinessCard label="DNS" value={domain.dnsStatus} status={domain.dnsStatus === "verified" ? "ok" : "warn"} />
-                  <ReadinessCard label="TLS" value={domain.tlsStatus} status={domain.tlsStatus === "active" || domain.tlsStatus === "issuing" ? "ok" : "warn"} />
+                  <ReadinessCard label="TLS" value={domain.tlsStatus} status={domain.tlsStatus === "active" ? "ok" : "warn"} />
                   <ReadinessCard label="Proxy" value={route?.enabled ? "ready" : "pending"} status={route?.enabled ? "ok" : "warn"} />
                 </div>
                 {domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}
@@ -2653,7 +2670,8 @@ function DetailPanel({
   onDeploy,
   onDeploymentLogs,
   onEdit,
-  onReload
+  onReload,
+  server
 }: {
   activeTab?: InspectorTab;
   app: DaemonApp | null;
@@ -2674,6 +2692,7 @@ function DetailPanel({
   onDeploymentLogs?: (deployment: DaemonDeployment) => void;
   onEdit?: () => void;
   onReload?: () => void;
+  server: DaemonServerStatus | null;
 }) {
   const [tab, setTab] = useState<InspectorTab>(activeTab || "overview");
   const [appEnv, setAppEnv] = useState<AppEnvResponse["env"] | null>(null);
@@ -2795,7 +2814,7 @@ function DetailPanel({
   const running = app.status === "running" || app.status === "starting";
   const localUrl = appUrl(app);
   const latestDeployment = deployments[0] || null;
-  const canDeploy = app.driver === "dockerfile" && Boolean(app.path) && app.enabled && connected;
+  const deployReason = deployBlockReason(app, connected, server);
   const healthStatus = appHealth?.status || "unknown";
   const latestMetric = appMetrics[0] || null;
   const redeployPending = envRedeployLabel(app, appEnv?.pending.needsRedeploy);
@@ -2817,7 +2836,7 @@ function DetailPanel({
           <RoundAction label="Restart" onClick={() => onAction?.("restart")} disabled={!onAction || !connected || !app.enabled || Boolean(currentAction)} active={currentAction === "restart"} />
           <PillButton onClick={onEdit} disabled={!onEdit || !connected}>Edit</PillButton>
           <ActionLink href={localUrl}>Open</ActionLink>
-          <PillButton onClick={onDeploy} disabled={!canDeploy || deploying} strong>{deploying ? "Deploying" : "Deploy"}</PillButton>
+          <PillButton onClick={onDeploy} disabled={Boolean(deployReason) || deploying} strong>{deploying ? "Deploying" : "Deploy"}</PillButton>
         </div>
       </div>
 
@@ -2841,6 +2860,7 @@ function DetailPanel({
           <Meta label="Port" value={app.port ? String(app.port) : "-"} mono />
           <Meta label="Updated" value={timeAgo(app.updatedAt)} />
           <Meta label="Latest deploy" value={latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : "never"} />
+          <Meta label="Deploy ready" value={deployReason || "ready"} />
           <Meta label="Settings state" value={pendingStateLabel(app)} />
           <Meta label="Temporary URL" value={latestDeployment?.hostPort ? `http://127.0.0.1:${latestDeployment.hostPort}` : "-"} mono wide />
           <Meta label="Production domains" value={domains.map((domain) => `${domain.hostname} (${domain.status})`).join(", ") || "none"} mono wide />
@@ -2939,14 +2959,14 @@ function DetailPanel({
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2">
                 <ReadinessCard label="DNS" value={domain.dnsStatus} status={domain.dnsStatus === "verified" ? "ok" : "warn"} />
-                <ReadinessCard label="TLS" value={domain.tlsStatus} status={domain.tlsStatus === "active" || domain.tlsStatus === "issuing" ? "ok" : "warn"} />
+                <ReadinessCard label="TLS" value={domain.tlsStatus} status={domain.tlsStatus === "active" ? "ok" : "warn"} />
                 <ReadinessCard label="Target" value={domain.targetPort ? `:${domain.targetPort}` : "pending"} status={domain.targetPort ? "ok" : "warn"} />
               </div>
             </div>
           ))}
           <dl className="grid grid-cols-2 gap-x-3 gap-y-3 border-t border-white/5 px-4 py-4 text-xs">
             <Meta label="Proxy exposure" value={app.internal || app.type === "database" ? "blocked" : "allowed after DNS verification"} />
-            <Meta label="HTTPS" value={domains.some((domain) => domain.tlsStatus === "issuing" || domain.tlsStatus === "active") ? "route generated" : "pending"} />
+            <Meta label="HTTPS" value={domains.some((domain) => domain.tlsStatus === "active") ? "active" : domains.some((domain) => domain.tlsStatus === "issuing") ? "issuing" : "pending"} />
             <Meta label="Public routes" value={domains.map((domain) => `${domain.hostname}:${domain.tlsStatus}`).join(", ") || "none"} mono wide />
           </dl>
         </div>
