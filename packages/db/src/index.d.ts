@@ -225,6 +225,9 @@ export interface RoutelyProxyRouteRecord {
   deployment_id: number | null;
   hostname?: string;
   app_name?: string;
+  domain_status?: string | null;
+  dns_status?: string | null;
+  tls_status?: string | null;
   router_name: string;
   service_name: string;
   target_url: string;
@@ -236,7 +239,18 @@ export interface RoutelyProxyRouteRecord {
 export function listDomains(db: Database.Database): RoutelyDomainRecord[];
 export function listDomainsForApp(db: Database.Database, appId: number): RoutelyDomainRecord[];
 export function getDomainByHostname(db: Database.Database, hostname: string): RoutelyDomainRecord | null;
-export function createDomain(db: Database.Database, input: { appId: number; hostname: string; targetPort?: number | null; verificationMessage?: string | null }): RoutelyDomainRecord;
+export function createDomain(
+  db: Database.Database,
+  input: {
+    appId: number;
+    hostname: string;
+    status?: string;
+    dnsStatus?: string;
+    tlsStatus?: string;
+    targetPort?: number | null;
+    verificationMessage?: string | null;
+  }
+): RoutelyDomainRecord;
 export function deleteDomain(db: Database.Database, hostname: string): boolean;
 export function updateDomainVerification(
   db: Database.Database,

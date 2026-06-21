@@ -570,6 +570,7 @@ function deploymentUrl(deployment) {
 }
 
 function publicDomainDto(domain) {
+  const proxy = proxyStateForDomain(domain);
   return {
     id: domain.id,
     appId: domain.app_id,
@@ -578,7 +579,10 @@ function publicDomainDto(domain) {
     status: domain.status,
     dnsStatus: domain.dns_status,
     tlsStatus: domain.tls_status,
+    proxyStatus: proxy.status,
     targetPort: domain.target_port == null ? null : Number(domain.target_port),
+    targetDeploymentId: proxy.deployment?.id || null,
+    targetUrl: proxy.targetUrl,
     verificationMessage: domain.verification_message || null,
     lastVerifiedAt: domain.last_verified_at || null,
     appType: domain.app_type || null,
@@ -599,6 +603,10 @@ function publicProxyRouteDto(route) {
     routerName: route.router_name,
     serviceName: route.service_name,
     targetUrl: route.target_url,
+    status: route.enabled ? "generated" : "pending",
+    domainStatus: route.domain_status || null,
+    dnsStatus: route.dns_status || null,
+    tlsStatus: route.tls_status || null,
     enabled: Boolean(route.enabled),
     createdAt: route.created_at,
     updatedAt: route.updated_at
@@ -741,12 +749,30 @@ function serverPublicIp() {
   return process.env.ROUTELY_SERVER_PUBLIC_IP || getSetting(db, "server.public_ip") || null;
 }
 
-function materializeProxyRouteForDomain(domain) {
+function proxyStateForDomain(domain) {
   const appRecord = getAppById(db, domain.app_id);
+  if (!appRecord || appRecord.internal || appRecord.type === "database") {
+    return { status: "failed", deployment: null, route: null, targetUrl: null };
+  }
+
   const deployment = getLatestSuccessfulDeploymentForApp(db, domain.app_id);
   const route = buildTraefikRoute({ domain, deployment, app: appRecord });
-
   if (!route) {
+    return { status: "pending", deployment: deployment || null, route: null, targetUrl: null };
+  }
+
+  return {
+    status: "generated",
+    deployment,
+    route,
+    targetUrl: route.targetUrl || route.service?.loadBalancer?.servers?.[0]?.url || null
+  };
+}
+
+function materializeProxyRouteForDomain(domain) {
+  const proxy = proxyStateForDomain(domain);
+
+  if (proxy.status !== "generated" || !proxy.route || !proxy.deployment) {
     deleteProxyRouteForDomain(db, domain.hostname);
     return null;
   }
@@ -754,12 +780,12 @@ function materializeProxyRouteForDomain(domain) {
   return upsertProxyRoute(db, {
     domainId: domain.id,
     appId: domain.app_id,
-    deploymentId: deployment.id,
-    routerName: route.routerName,
-    serviceName: route.serviceName,
-    targetUrl: route.service.loadBalancer.servers[0].url,
-    config: route,
-    enabled: domain.status === "ready"
+    deploymentId: proxy.deployment.id,
+    routerName: proxy.route.routerName,
+    serviceName: proxy.route.serviceName,
+    targetUrl: proxy.targetUrl,
+    config: proxy.route,
+    enabled: true
   });
 }
 
@@ -768,11 +794,7 @@ function materializeProxyRoutesForApp(appId) {
 }
 
 function currentTraefikConfig() {
-  const routes = listDomains(db).map((domain) => {
-    const appRecord = getAppById(db, domain.app_id);
-    const deployment = getLatestSuccessfulDeploymentForApp(db, domain.app_id);
-    return buildTraefikRoute({ domain, deployment, app: appRecord });
-  }).filter(Boolean);
+  const routes = listDomains(db).map((domain) => proxyStateForDomain(domain).route).filter(Boolean);
   return buildTraefikDynamicConfig(routes);
 }
 
@@ -793,11 +815,21 @@ function createDomainForPayload(payload = {}) {
   }
 
   const latest = getLatestSuccessfulDeploymentForApp(db, appRecord.id);
+  const publicIp = serverPublicIp();
+  const hasGeneratedRoute = Boolean(latest?.host_port);
+  const status = publicIp ? hasGeneratedRoute ? "generated" : "pending" : "not-configured";
+  const dnsStatus = publicIp ? "pending" : "not-configured";
+  const tlsStatus = publicIp ? "pending" : "not-configured";
   const domain = createDomain(db, {
     appId: appRecord.id,
     hostname,
+    status,
+    dnsStatus,
+    tlsStatus,
     targetPort: latest?.host_port || null,
-    verificationMessage: `Create an A record for ${hostname} pointing to ${serverPublicIp() || "this server's public IP"}.`
+    verificationMessage: publicIp
+      ? `Create an A record for ${hostname} pointing to ${publicIp}.${hasGeneratedRoute ? " Proxy config can target the latest successful deployment; DNS and TLS are still pending." : " Waiting for a successful deployment before generating a proxy route."}`
+      : `Set ROUTELY_SERVER_PUBLIC_IP before verifying ${hostname}. DNS, proxy reachability, and TLS remain not configured.`
   });
   materializeProxyRouteForDomain(domain);
   return { ok: true, domain: publicDomainDto(getDomainByHostname(db, hostname)) };
@@ -1519,14 +1551,25 @@ app.post("/domains/:hostname/verify", async (request, reply) => {
 
   const result = await verifyDnsARecord(domain.hostname, serverPublicIp());
   const latest = getLatestSuccessfulDeploymentForApp(db, domain.app_id);
-  const status = result.ok && latest?.host_port ? "ready" : result.ok ? "verified" : "pending";
-  const tlsStatus = status === "ready" ? "issuing" : "pending";
+  const status = result.status === "not-configured"
+    ? "not-configured"
+    : result.ok && latest?.host_port
+      ? "generated"
+      : result.ok
+        ? "verified"
+        : "failed";
+  const tlsStatus = result.status === "not-configured" ? "not-configured" : result.ok && latest?.host_port ? "issuing" : result.ok ? "pending" : "failed";
+  const verificationMessage = result.status === "not-configured"
+    ? result.message
+    : latest?.host_port
+      ? `${result.message} Proxy route config targets the latest successful deployment on port ${latest.host_port}; TLS remains ${tlsStatus}.`
+      : `${result.message} Waiting for a successful deployment before generating the route.`;
   const updated = updateDomainVerification(db, domain.hostname, {
     status,
     dnsStatus: result.status,
     tlsStatus,
     targetPort: latest?.host_port || null,
-    verificationMessage: latest?.host_port ? result.message : `${result.message} Waiting for a successful deployment before enabling the route.`
+    verificationMessage
   });
   materializeProxyRouteForDomain(updated);
 

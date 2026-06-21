@@ -350,6 +350,7 @@ export function migrate(db) {
   addColumnIfMissing(db, "apps", "compose_service", "TEXT");
   addColumnIfMissing(db, "apps", "needs_restart", "INTEGER NOT NULL DEFAULT 0");
   addColumnIfMissing(db, "apps", "needs_redeploy", "INTEGER NOT NULL DEFAULT 0");
+  addColumnIfMissing(db, "apps", "enabled", "INTEGER NOT NULL DEFAULT 1");
 
   addColumnIfMissing(db, "app_env_vars", "scope", "TEXT NOT NULL DEFAULT 'all'");
   addColumnIfMissing(db, "app_env_vars", "needs_restart", "INTEGER NOT NULL DEFAULT 1");
@@ -723,6 +724,7 @@ function appSettingsChanged(existing, next) {
     "env",
     "port",
     "ports",
+    "depends_on",
     "healthcheck",
     "domains",
     "source",
@@ -1565,8 +1567,16 @@ export function createDomain(db, input) {
   const hostname = String(input.hostname || "").trim().toLowerCase();
   const result = db.prepare(`
     INSERT INTO domains (app_id, hostname, status, dns_status, tls_status, target_port, verification_message)
-    VALUES (?, ?, 'pending', 'pending', 'pending', ?, ?)
-  `).run(input.appId, hostname, input.targetPort || null, input.verificationMessage || null);
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.appId,
+    hostname,
+    input.status || "pending",
+    input.dnsStatus || "pending",
+    input.tlsStatus || "pending",
+    input.targetPort || null,
+    input.verificationMessage || null
+  );
   return getDomainByHostname(db, hostname) || db.prepare("SELECT * FROM domains WHERE id = ?").get(Number(result.lastInsertRowid));
 }
 
@@ -1597,7 +1607,7 @@ export function updateDomainVerification(db, hostname, input) {
 
 export function listProxyRoutes(db) {
   return db.prepare(`
-    SELECT proxy_routes.*, domains.hostname, apps.name AS app_name
+    SELECT proxy_routes.*, domains.hostname, domains.status AS domain_status, domains.dns_status, domains.tls_status, apps.name AS app_name
     FROM proxy_routes
     JOIN domains ON domains.id = proxy_routes.domain_id
     JOIN apps ON apps.id = proxy_routes.app_id

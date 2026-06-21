@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { runServerDoctorChecks } from "@routely/core";
 import { signGithubWebhookPayload } from "@routely/github";
-import { getAppByName, initializeRoutely, saveServerFoundationState } from "@routely/db";
+import { createDeployment, getAppByName, initializeRoutely, listProxyRoutes, saveServerFoundationState, updateDeployment } from "@routely/db";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const daemonPath = resolve(repoRoot, "apps/daemon/src/server.js");
@@ -150,6 +150,29 @@ describe("QA regression fixes", () => {
     expect(authorized.body.apps).toEqual([]);
   });
 
+  it("rejects unauthenticated production mutation endpoints", async () => {
+    const workspace = await createWorkspace();
+    const adminToken = randomUUID();
+    const { baseUrl } = await startDaemon(workspace, {
+      ROUTELY_SERVER_MODE: "production",
+      ROUTELY_ADMIN_TOKEN: adminToken
+    });
+
+    const missing = await jsonRequest(baseUrl, "/domains/root", {
+      method: "POST",
+      body: JSON.stringify({ domain: "example.com" })
+    });
+    expect(missing.response.status).toBe(401);
+
+    const authorized = await jsonRequest(baseUrl, "/domains/root", {
+      method: "POST",
+      headers: { authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ domain: "example.com" })
+    });
+    expect(authorized.response.status).toBe(200);
+    expect(authorized.body.rootDomain).toBe("example.com");
+  });
+
   it("round-trips disabled Compose app metadata through config, DB, daemon DTOs, and CLI output", async () => {
     const workspace = await createWorkspace();
     const { baseUrl } = await startDaemon(workspace);
@@ -266,7 +289,16 @@ describe("QA regression fixes", () => {
     });
     expect(valid.response.status).toBe(201);
     expect(valid.body.domain.hostname).toBe("web.example.com");
-    expect(valid.body.domain.status).toBe("pending");
+    expect(valid.body.domain.status).toBe("not-configured");
+    expect(valid.body.domain.dnsStatus).toBe("not-configured");
+    expect(valid.body.domain.proxyStatus).toBe("pending");
+    expect(valid.body.domain.tlsStatus).toBe("not-configured");
+
+    const verify = await jsonRequest(baseUrl, "/domains/web.example.com/verify", { method: "POST" });
+    expect(verify.response.status).toBe(200);
+    expect(verify.body.domain.status).toBe("not-configured");
+    expect(verify.body.domain.dnsStatus).toBe("not-configured");
+    expect(verify.body.verification.status).toBe("not-configured");
 
     const invalid = await jsonRequest(baseUrl, `/apps/${app.id}/domains`, {
       method: "POST",
@@ -275,6 +307,58 @@ describe("QA regression fixes", () => {
     expect(invalid.response.status).toBe(400);
     expect(invalid.body.error).toMatch(/hostname|domain/i);
     expect(invalid.body.error).not.toContain("FST_ERR_CTP_INVALID_CONTENT_LENGTH");
+  });
+
+  it("generates proxy routes against the latest successful deployment without claiming TLS success", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace, { ROUTELY_SERVER_PUBLIC_IP: "203.0.113.10" });
+    const app = await createApp(baseUrl, { name: "web", driver: "dockerfile", path: workspace, port: 3000 });
+    const { db } = initializeRoutely(workspace);
+    const first = createDeployment(db, { appId: app.id, containerPort: 3000, hostPort: 32041 });
+    updateDeployment(db, first.id, { status: "succeeded", phase: "succeeded", hostPort: 32041, finishedAt: "2026-06-22T00:00:00.000Z" });
+    const latest = createDeployment(db, { appId: app.id, containerPort: 3000, hostPort: 32042 });
+    updateDeployment(db, latest.id, { status: "succeeded", phase: "succeeded", hostPort: 32042, finishedAt: "2026-06-22T00:01:00.000Z" });
+    db.close();
+
+    const added = await jsonRequest(baseUrl, `/apps/${app.id}/domains`, {
+      method: "POST",
+      body: JSON.stringify({ hostname: "web.example.com" })
+    });
+
+    expect(added.response.status).toBe(201);
+    expect(added.body.domain.status).toBe("generated");
+    expect(added.body.domain.dnsStatus).toBe("pending");
+    expect(added.body.domain.proxyStatus).toBe("generated");
+    expect(added.body.domain.tlsStatus).toBe("pending");
+    expect(added.body.domain.targetDeploymentId).toBe(latest.id);
+    expect(added.body.domain.targetPort).toBe(32042);
+    expect(added.body.domain.targetUrl).toBe("http://127.0.0.1:32042");
+
+    const { db: verifyDb } = initializeRoutely(workspace);
+    const [route] = listProxyRoutes(verifyDb);
+    expect(route.deployment_id).toBe(latest.id);
+    expect(route.target_url).toBe("http://127.0.0.1:32042");
+    verifyDb.close();
+  });
+
+  it("redacts saved app secrets from daemon env responses", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace);
+    const app = await createApp(baseUrl, { name: "web", driver: "dockerfile", path: workspace, port: 3000 });
+
+    const saved = await jsonRequest(baseUrl, `/apps/${app.id}/env`, {
+      method: "POST",
+      body: JSON.stringify({ key: "DATABASE_URL", value: "postgres://raw-secret", isSecret: true, scope: "production" })
+    });
+
+    expect(saved.response.status).toBe(201);
+    expect(saved.body.envVar.value).toBeNull();
+    expect(saved.body.envVar.displayValue).toBe("[redacted]");
+    expect(saved.body.env.pending).toEqual({ count: 1, needsRestart: true, needsRedeploy: true });
+    expect(JSON.stringify(saved.body)).not.toContain("postgres://raw-secret");
+
+    const listed = await jsonRequest(baseUrl, `/apps/${app.id}/env`);
+    expect(JSON.stringify(listed.body)).not.toContain("postgres://raw-secret");
   });
 
   it("redacts database app env values from create responses", async () => {

@@ -46,6 +46,8 @@ describe("checkpoint 8 environment, secrets, and app settings", () => {
 
     expect(rows.map((row) => row.key)).toEqual(["DATABASE_URL", "PUBLIC_URL"]);
     expect(appEnvVarToPublicDto(secret!).value).toBeNull();
+    expect(appEnvVarToPublicDto(secret!).displayValue).toBe("[redacted]");
+    expect(JSON.stringify(appEnvVarToPublicDto(secret!))).not.toContain("postgres://secret");
     expect(appEnvVarToPublicDto(plain!).value).toBe("https://example.com");
     expect(listSecretValuesForApp(db, app.id)).toEqual(["postgres://secret"]);
     expect(appEnvPendingState(db, app.id)).toEqual({ count: 2, needsRestart: true, needsRedeploy: true });

@@ -1,6 +1,8 @@
 export const routelyProxyVersion: string;
 export const DOMAIN_STATUSES: string[];
+export const DNS_STATUSES: string[];
 export const TLS_STATUSES: string[];
+export const PROXY_ROUTE_STATUSES: string[];
 
 export interface DnsVerificationResult {
   hostname: string;

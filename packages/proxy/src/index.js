@@ -2,8 +2,10 @@ import { promises as dns } from "node:dns";
 
 export const routelyProxyVersion = "0.1.0";
 
-export const DOMAIN_STATUSES = ["pending", "verified", "ready", "error"];
-export const TLS_STATUSES = ["pending", "issuing", "active", "error", "disabled"];
+export const DOMAIN_STATUSES = ["not-configured", "pending", "verified", "generated", "failed"];
+export const DNS_STATUSES = ["not-configured", "pending", "verified", "failed"];
+export const TLS_STATUSES = ["not-configured", "pending", "issuing", "active", "failed", "disabled"];
+export const PROXY_ROUTE_STATUSES = ["pending", "generated", "failed"];
 
 const HOSTNAME_PATTERN = /^(?=.{1,253}$)(\*\.)?([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])$/i;
 
@@ -51,7 +53,7 @@ export async function verifyDnsARecord(hostname, serverPublicIp, resolver = dns.
     return {
       hostname: normalized,
       ok: false,
-      status: "error",
+      status: "not-configured",
       addresses: [],
       expected,
       message: "Server public IP is not configured. Set ROUTELY_SERVER_PUBLIC_IP before verifying domains."
@@ -64,7 +66,7 @@ export async function verifyDnsARecord(hostname, serverPublicIp, resolver = dns.
     return {
       hostname: normalized,
       ok,
-      status: ok ? "verified" : "error",
+      status: ok ? "verified" : "failed",
       addresses,
       expected,
       message: ok
@@ -75,7 +77,7 @@ export async function verifyDnsARecord(hostname, serverPublicIp, resolver = dns.
     return {
       hostname: normalized,
       ok: false,
-      status: "error",
+      status: "failed",
       addresses: [],
       expected,
       message: error instanceof Error ? error.message : `Could not resolve ${normalized}.`
@@ -99,12 +101,16 @@ export function buildTraefikRoute({ domain, deployment, app }) {
   const name = routeNameForHostname(hostname);
   const serviceName = `routely-${name}`;
   const routerName = `routely-${name}`;
+  const targetUrl = `http://127.0.0.1:${deployment.host_port}`;
   const rule = hostname.startsWith("*.")
     ? `HostRegexp(\`{subdomain:[a-z0-9-]+}.${hostname.slice(2)}\`)`
     : `Host(\`${hostname}\`)`;
 
   return {
     hostname,
+    status: "generated",
+    deploymentId: deployment.id || null,
+    targetUrl,
     routerName,
     serviceName,
     router: {
@@ -116,7 +122,7 @@ export function buildTraefikRoute({ domain, deployment, app }) {
     },
     service: {
       loadBalancer: {
-        servers: [{ url: `http://127.0.0.1:${deployment.host_port}` }]
+        servers: [{ url: targetUrl }]
       }
     }
   };

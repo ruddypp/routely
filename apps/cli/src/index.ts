@@ -180,7 +180,10 @@ type RoutelyDomainDto = {
   status: string;
   dnsStatus: string;
   tlsStatus: string;
+  proxyStatus: string;
   targetPort: number | null;
+  targetDeploymentId: number | null;
+  targetUrl: string | null;
   verificationMessage: string | null;
   lastVerifiedAt: string | null;
 };
@@ -1484,7 +1487,7 @@ async function domainCommand(args: string[]): Promise<void> {
       process.exit(1);
     }
     console.log(`Added ${result.data.domain.hostname} -> ${result.data.domain.appName || appName}`);
-    console.log(`Status: ${result.data.domain.status} / DNS ${result.data.domain.dnsStatus} / TLS ${result.data.domain.tlsStatus}`);
+    console.log(`Status: ${result.data.domain.status} / DNS ${result.data.domain.dnsStatus} / Proxy ${result.data.domain.proxyStatus} / TLS ${result.data.domain.tlsStatus}`);
     if (result.data.domain.verificationMessage) {
       console.log(result.data.domain.verificationMessage);
     }
@@ -1507,7 +1510,7 @@ async function domainCommand(args: string[]): Promise<void> {
     }
     console.log(`${result.data.verification.ok ? "OK" : "CHECK"} ${result.data.domain.hostname}`);
     console.log(result.data.verification.message);
-    console.log(`Status: ${result.data.domain.status} / DNS ${result.data.domain.dnsStatus} / TLS ${result.data.domain.tlsStatus}`);
+    console.log(`Status: ${result.data.domain.status} / DNS ${result.data.domain.dnsStatus} / Proxy ${result.data.domain.proxyStatus} / TLS ${result.data.domain.tlsStatus}`);
     return;
   }
 
@@ -1524,7 +1527,7 @@ async function domainCommand(args: string[]): Promise<void> {
       return;
     }
     for (const domain of result.data.domains) {
-      console.log(`${domain.hostname}\t${domain.appName || domain.appId}\t${domain.status}\tdns:${domain.dnsStatus}\ttls:${domain.tlsStatus}\t${domain.targetPort ? `:${domain.targetPort}` : "-"}`);
+      console.log(`${domain.hostname}\t${domain.appName || domain.appId}\t${domain.status}\tdns:${domain.dnsStatus}\tproxy:${domain.proxyStatus}\ttls:${domain.tlsStatus}\t${domain.targetPort ? `:${domain.targetPort}` : "-"}`);
     }
     return;
   }
