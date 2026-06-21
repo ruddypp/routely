@@ -1,0 +1,12 @@
+
+[2026-06-21T08:47:48.270Z] starting compose service postgres:16
+ Network routely__routely_qa-runs_alpha-01-local-demo-alt_default Creating 
+ Network routely__routely_qa-runs_alpha-01-local-demo-alt_default Created 
+ Volume routely__routely_qa-runs_alpha-01-local-demo-alt_postgres_data Creating 
+ Volume routely__routely_qa-runs_alpha-01-local-demo-alt_postgres_data Created 
+ Container routely__routely_qa-runs_alpha-01-local-demo-alt-postgres-1 Creating 
+ Container routely__routely_qa-runs_alpha-01-local-demo-alt-postgres-1 Created 
+ Container routely__routely_qa-runs_alpha-01-local-demo-alt-postgres-1 Starting 
+ Container routely__routely_qa-runs_alpha-01-local-demo-alt-postgres-1 Started 
+
+[2026-06-21T08:48:44.989Z] stopping compose service

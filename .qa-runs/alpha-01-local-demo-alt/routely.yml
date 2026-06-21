@@ -1,0 +1,50 @@
+version: 1
+name: routely-local
+dashboard:
+  port: 3030
+apps:
+  - name: web
+    type: app
+    preset: custom
+    driver: command
+    path: /home/ruddypp/Documents/work/routely/examples/hello-command
+    dev: PORT=3201 ROUTELY_EXAMPLE_NAME=web ROUTELY_EXAMPLE_ROLE=frontend npm run
+      dev
+    port: 3201
+    healthcheck:
+      path: /health
+      expected_status: 200
+  - name: api
+    type: app
+    preset: custom
+    driver: command
+    path: /home/ruddypp/Documents/work/routely/examples/hello-command
+    dev: PORT=3202 ROUTELY_EXAMPLE_NAME=api ROUTELY_EXAMPLE_ROLE=api npm run dev
+    port: 3202
+    healthcheck:
+      path: /health
+      expected_status: 200
+  - name: worker
+    type: app
+    preset: custom
+    driver: command
+    path: /home/ruddypp/Documents/work/routely/examples/hello-command
+    dev: PORT=3203 ROUTELY_EXAMPLE_NAME=worker ROUTELY_EXAMPLE_ROLE=worker npm run
+      dev
+    port: 3203
+    healthcheck:
+      path: /health
+      expected_status: 200
+services:
+  - name: postgres
+    type: database
+    preset: postgres
+    driver: compose
+    port: 55432
+    env:
+      POSTGRES_HOST_AUTH_METHOD: trust
+      POSTGRES_DB: app
+    image: postgres:16
+    internal: true
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
