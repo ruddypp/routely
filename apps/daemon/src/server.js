@@ -9,6 +9,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   DEFAULT_DAEMON_PORT,
+  DependencyCycleError,
   appToPublicDto,
   appEnvVarToPublicDto,
   backupJobToPublicDto,
@@ -31,6 +32,7 @@ import {
   normalizeDatabaseType,
   redactSecrets,
   runServerDoctorChecks,
+  selectBulkStartApps,
   selectBackupRunsForRetention,
   upsertWorkspaceConfigEntry,
   verifyAdminToken
@@ -415,22 +417,43 @@ function findAppOrReply(request, reply) {
 
 function validateStartableApp(appRecord) {
   if (!appRecord.enabled) {
-    return `${appRecord.name} is disabled.`;
+    return lifecycleFailure(400, "disabled", `${appRecord.name} is disabled.`);
   }
 
   if (!["command", "compose"].includes(appRecord.driver)) {
-    return `Start currently supports command and Compose apps only. ${appRecord.name} uses ${appRecord.driver}.`;
+    return lifecycleFailure(400, "unsupported-driver", `Start currently supports command and Compose apps only. ${appRecord.name} uses ${appRecord.driver}.`);
   }
 
   if (appRecord.driver === "command" && !appRecord.command) {
-    return `${appRecord.name} does not have a command configured.`;
+    return lifecycleFailure(400, "missing-command", `${appRecord.name} does not have a command configured.`);
   }
 
   if (appRecord.driver === "compose" && !appRecord.image && !appRecord.compose_file) {
-    return `${appRecord.name} does not have a Compose image or compose_file configured.`;
+    return lifecycleFailure(400, "missing-compose-metadata", `${appRecord.name} does not have a Compose image or compose_file configured.`);
   }
 
   return null;
+}
+
+function lifecycleFailure(status, code, error, details = {}) {
+  return { ok: false, status, code, error, ...details };
+}
+
+function sendLifecycleFailure(reply, result) {
+  const { ok: _ok, status, ...payload } = result;
+  return reply.code(status).send(payload);
+}
+
+function lifecycleSkip(appRecord, code, reason) {
+  return { app: appToPublicDto(appRecord), code, reason };
+}
+
+function isAppAlreadyRunning(appRecord) {
+  if (appRecord.driver === "command") {
+    return runningInstancesForApp(appRecord.id).length > 0;
+  }
+
+  return appRecord.driver === "compose" && appRecord.status === "running";
 }
 
 function isPortAvailable(portNumber) {
@@ -456,20 +479,20 @@ function appPorts(appRecord) {
 async function startLocalApp(appRecord) {
   const validationError = validateStartableApp(appRecord);
   if (validationError) {
-    return { ok: false, status: 400, error: validationError };
+    return validationError;
   }
 
   if (appRecord.driver === "command" && runningInstancesForApp(appRecord.id).length > 0) {
-    return { ok: false, status: 409, error: `${appRecord.name} is already running.` };
+    return lifecycleFailure(409, "already-running", `${appRecord.name} is already running.`);
   }
 
   if (appRecord.driver === "compose" && appRecord.status === "running") {
-    return { ok: false, status: 409, error: `${appRecord.name} is already running.` };
+    return lifecycleFailure(409, "already-running", `${appRecord.name} is already running.`);
   }
 
   for (const port of appPorts(appRecord)) {
     if (!(await isPortAvailable(port))) {
-      return { ok: false, status: 409, error: `Port ${port} is already in use.` };
+      return lifecycleFailure(409, "port-conflict", `Port ${port} is already in use.`, { port });
     }
   }
 
@@ -509,8 +532,120 @@ async function startLocalApp(appRecord) {
   } catch (error) {
     updateAppStatus(db, appRecord.id, "crashed");
     writeLogHeader(appRecord.name, `failed to start: ${error instanceof Error ? error.message : String(error)}`);
-    return { ok: false, status: 500, error: error instanceof Error ? error.message : "Failed to start app." };
+    return lifecycleFailure(500, "start-failed", error instanceof Error ? error.message : "Failed to start app.");
   }
+}
+
+function portCandidatesForApps(apps) {
+  return apps.flatMap((appRecord) => appPorts(appRecord).map((portNumber) => ({ app: appRecord, port: portNumber })));
+}
+
+async function findBulkStartPortConflicts(apps) {
+  const candidates = portCandidatesForApps(apps);
+  const namesByPort = new Map();
+
+  for (const candidate of candidates) {
+    const entries = namesByPort.get(candidate.port) || [];
+    entries.push(candidate.app);
+    namesByPort.set(candidate.port, entries);
+  }
+
+  const conflicts = [];
+  const duplicatePorts = new Set();
+  for (const [portNumber, appsForPort] of namesByPort.entries()) {
+    if (appsForPort.length > 1) {
+      duplicatePorts.add(portNumber);
+      conflicts.push({
+        code: "port-conflict",
+        port: portNumber,
+        appIds: appsForPort.map((appRecord) => appRecord.id),
+        appNames: appsForPort.map((appRecord) => appRecord.name),
+        reason: `Port ${portNumber} is configured by multiple apps: ${appsForPort.map((appRecord) => appRecord.name).join(", ")}.`
+      });
+    }
+  }
+
+  for (const candidate of candidates) {
+    if (duplicatePorts.has(candidate.port)) {
+      continue;
+    }
+
+    if (!(await isPortAvailable(candidate.port))) {
+      conflicts.push({
+        code: "port-conflict",
+        port: candidate.port,
+        appIds: [candidate.app.id],
+        appNames: [candidate.app.name],
+        reason: `Port ${candidate.port} is already in use.`
+      });
+    }
+  }
+
+  return conflicts;
+}
+
+async function startAllLocalApps() {
+  const records = listApps(db).map((appRecord) => reconcileAppRuntimeState(appRecord.id) || appRecord);
+  const skipped = [];
+  let ordered;
+
+  for (const appRecord of records) {
+    if (!appRecord.enabled) {
+      skipped.push(lifecycleSkip(appRecord, "disabled", `${appRecord.name} is disabled and was skipped.`));
+    } else if (!["command", "compose"].includes(appRecord.driver)) {
+      skipped.push(lifecycleSkip(appRecord, "unsupported-driver", `${appRecord.name} uses unsupported driver ${appRecord.driver}.`));
+    }
+  }
+
+  try {
+    ordered = selectBulkStartApps(records);
+  } catch (error) {
+    if (error instanceof DependencyCycleError) {
+      return lifecycleFailure(409, "dependency-cycle", error.message, { cycle: error.cycle, skipped, started: [], failed: [] });
+    }
+    return lifecycleFailure(500, "dependency-resolution-failed", error instanceof Error ? error.message : "Could not resolve app dependencies.", { skipped, started: [], failed: [] });
+  }
+
+  const startable = [];
+  for (const appRecord of ordered) {
+    const current = reconcileAppRuntimeState(appRecord.id) || appRecord;
+    if (isAppAlreadyRunning(current)) {
+      skipped.push(lifecycleSkip(current, "already-running", `${current.name} is already running.`));
+      continue;
+    }
+    startable.push(current);
+  }
+
+  const conflicts = await findBulkStartPortConflicts(startable);
+  if (conflicts.length > 0) {
+    return lifecycleFailure(409, "port-conflict", "Port conflict detected. Stop the existing process or change the configured port.", {
+      conflicts,
+      skipped,
+      started: [],
+      failed: []
+    });
+  }
+
+  const started = [];
+  const failed = [];
+  for (const appRecord of startable) {
+    const result = await withAppLifecycleQueue(appRecord.id, async () => startLocalApp(reconcileAppRuntimeState(appRecord.id) || appRecord));
+    if (result.ok) {
+      const reconciled = reconcileAppRuntimeState(result.app.id) || result.app;
+      started.push({ app: appToPublicDto(reconciled), pid: result.pid });
+    } else {
+      failed.push({ app: appToPublicDto(appRecord), code: result.code || "start-failed", error: result.error });
+    }
+  }
+
+  return {
+    ok: failed.length === 0,
+    status: failed.length === 0 ? 200 : 207,
+    started,
+    skipped,
+    failed,
+    apps: listApps(db).map((appRecord) => appToPublicDto(reconcileAppRuntimeState(appRecord.id) || appRecord))
+  };
 }
 
 function waitForChild(child) {
@@ -1659,7 +1794,7 @@ app.post("/apps/:id/restart", async (request, reply) => {
 
   if (!result) return;
   if (!result.ok) {
-    return reply.code(result.status).send({ error: result.error });
+    return sendLifecycleFailure(reply, result);
   }
 
   const reconciled = reconcileAppRuntimeState(result.app.id) || result.app;

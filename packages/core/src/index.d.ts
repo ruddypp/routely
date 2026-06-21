@@ -553,6 +553,25 @@ export function upsertWorkspaceConfigEntry(
 
 export type RoutelyServerMode = "local" | "production";
 export type RoutelyServerCheckStatus = "ok" | "warn" | "error";
+
+export interface DependencyNode {
+  name: string;
+  depends_on?: string[] | string | null;
+  dependsOn?: string[] | string | null;
+}
+
+export interface BulkStartNode extends DependencyNode {
+  driver?: string | null;
+  enabled?: boolean | null;
+}
+
+export class DependencyCycleError extends Error {
+  readonly cycle: string[];
+  constructor(cycle: string[]);
+}
+
+export function sortByDependencies<T extends DependencyNode>(items: T[]): T[];
+export function selectBulkStartApps<T extends BulkStartNode>(items: T[]): T[];
 export interface RoutelyServerCheck {
   id: string;
   label: string;

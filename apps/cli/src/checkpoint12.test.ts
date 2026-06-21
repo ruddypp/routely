@@ -236,7 +236,13 @@ describe("QA regression fixes", () => {
 
     const rejectedStart = await jsonRequest(baseUrl, `/apps/${created.body.app.id}/start`, { method: "POST" });
     expect(rejectedStart.response.status).toBe(400);
+    expect(rejectedStart.body).toMatchObject({ code: "disabled" });
     expect(rejectedStart.body.error).toContain("disabled");
+
+    const rejectedRestart = await jsonRequest(baseUrl, `/apps/${created.body.app.id}/restart`, { method: "POST" });
+    expect(rejectedRestart.response.status).toBe(400);
+    expect(rejectedRestart.body).toMatchObject({ code: "disabled" });
+    expect(rejectedRestart.body.error).toContain("disabled");
 
     const ps = await runCli(workspace, ["ps", "--json"]);
     expect(ps.code).toBe(0);
@@ -437,10 +443,94 @@ describe("QA regression fixes", () => {
     } else {
       expect(current.status).toBe("running");
       expect(startAgain.response.status).toBe(409);
+      expect(startAgain.body).toMatchObject({ code: "already-running" });
       expect(startAgain.body.error).toContain("already running");
     }
 
     await jsonRequest(baseUrl, `/apps/${app.id}/stop`, { method: "POST" });
+  });
+
+  it("starts all enabled local apps in dependency order and reports skipped resources", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace);
+    const command = `${process.execPath} -e "setInterval(() => {}, 1000)"`;
+    const api = await createApp(baseUrl, { name: "api", driver: "command", command, depends_on: ["worker"] });
+    const worker = await createApp(baseUrl, { name: "worker", driver: "command", command });
+    await createApp(baseUrl, { name: "disabled-compose", driver: "compose", compose_file: "compose.yml", compose_service: "disabled", enabled: false });
+    await createApp(baseUrl, { name: "prod-web", driver: "dockerfile", path: workspace, port: 3000 });
+
+    try {
+      const started = await jsonRequest(baseUrl, "/apps/start-all", { method: "POST" });
+      expect(started.response.status).toBe(200);
+      expect(started.body.started.map((item: { app: { name: string } }) => item.app.name)).toEqual(["worker", "api"]);
+      expect(started.body.skipped).toEqual(expect.arrayContaining([
+        expect.objectContaining({ app: expect.objectContaining({ name: "disabled-compose" }), code: "disabled" }),
+        expect.objectContaining({ app: expect.objectContaining({ name: "prod-web" }), code: "unsupported-driver" })
+      ]));
+
+      const repeated = await jsonRequest(baseUrl, "/apps/start-all", { method: "POST" });
+      expect(repeated.response.status).toBe(200);
+      expect(repeated.body.started).toEqual([]);
+      expect(repeated.body.skipped).toEqual(expect.arrayContaining([
+        expect.objectContaining({ app: expect.objectContaining({ name: "api" }), code: "already-running" }),
+        expect.objectContaining({ app: expect.objectContaining({ name: "worker" }), code: "already-running" })
+      ]));
+
+      const stoppedApi = await jsonRequest(baseUrl, `/apps/${api.id}/stop`, { method: "POST" });
+      expect(stoppedApi.response.status).toBe(200);
+      expect(stoppedApi.body.app).toMatchObject({ name: "api", enabled: true, status: "stopped" });
+
+      const notRunning = await jsonRequest(baseUrl, `/apps/${api.id}/stop`, { method: "POST" });
+      expect(notRunning.response.status).toBe(409);
+      expect(notRunning.body).toMatchObject({ code: "not-running" });
+
+      const disabledWorker = await jsonRequest(baseUrl, `/apps/${worker.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ enabled: false })
+      });
+      expect(disabledWorker.response.status).toBe(200);
+      expect(disabledWorker.body.app).toMatchObject({ name: "worker", enabled: false });
+
+      const stoppedWorker = await jsonRequest(baseUrl, `/apps/${worker.id}/stop`, { method: "POST" });
+      expect(stoppedWorker.response.status).toBe(200);
+      expect(stoppedWorker.body.app).toMatchObject({ name: "worker", enabled: false, status: "stopped" });
+    } finally {
+      await jsonRequest(baseUrl, `/apps/${api.id}/stop`, { method: "POST" }).catch(() => null);
+      await jsonRequest(baseUrl, `/apps/${worker.id}/stop`, { method: "POST" }).catch(() => null);
+    }
+  });
+
+  it("rejects Start All when enabled apps have duplicate host ports", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace);
+    const port = randomPort();
+    const command = `${process.execPath} -e "setInterval(() => {}, 1000)"`;
+    await createApp(baseUrl, { name: "api", driver: "command", command, port });
+    await createApp(baseUrl, { name: "worker", driver: "command", command, port });
+
+    const result = await jsonRequest(baseUrl, "/apps/start-all", { method: "POST" });
+
+    expect(result.response.status).toBe(409);
+    expect(result.body).toMatchObject({ code: "port-conflict" });
+    expect(result.body.conflicts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ port, appNames: expect.arrayContaining(["api", "worker"]) })
+    ]));
+    expect(result.body.started).toEqual([]);
+  });
+
+  it("rejects Start All when enabled app dependencies contain a cycle", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace);
+    const command = `${process.execPath} -e "setInterval(() => {}, 1000)"`;
+    await createApp(baseUrl, { name: "api", driver: "command", command, depends_on: ["worker"] });
+    await createApp(baseUrl, { name: "worker", driver: "command", command, depends_on: ["api"] });
+
+    const result = await jsonRequest(baseUrl, "/apps/start-all", { method: "POST" });
+
+    expect(result.response.status).toBe(409);
+    expect(result.body).toMatchObject({ code: "dependency-cycle" });
+    expect(result.body.error).toContain("Dependency cycle detected");
+    expect(result.body.started).toEqual([]);
   });
 
   it("reports an occupied dashboard port as ok when it is the Routely dashboard", async () => {

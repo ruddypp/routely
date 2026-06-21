@@ -12,6 +12,72 @@ export const BACKUP_RUN_STATUSES = ["queued", "running", "succeeded", "failed", 
 export const NOTIFICATION_CHANNEL_TYPES = ["webhook", "discord", "telegram"];
 export const NOTIFICATION_EVENTS = ["deploy_succeeded", "deploy_failed", "backup_failed"];
 
+export class DependencyCycleError extends Error {
+  constructor(cycle) {
+    super(`Dependency cycle detected: ${cycle.join(" -> ")}`);
+    this.name = "DependencyCycleError";
+    this.cycle = cycle;
+  }
+}
+
+export function sortByDependencies(items) {
+  const byName = new Map(items.map((item) => [item.name, item]));
+  const permanent = new Set();
+  const temporary = new Set();
+  const stack = [];
+  const sorted = [];
+
+  function visit(item) {
+    if (permanent.has(item.name)) {
+      return;
+    }
+
+    if (temporary.has(item.name)) {
+      const cycleStart = stack.indexOf(item.name);
+      throw new DependencyCycleError([...stack.slice(cycleStart), item.name]);
+    }
+
+    temporary.add(item.name);
+    stack.push(item.name);
+
+    for (const dependencyName of normalizeDependencies(item.depends_on ?? item.dependsOn)) {
+      const dependency = byName.get(dependencyName);
+      if (dependency) {
+        visit(dependency);
+      }
+    }
+
+    stack.pop();
+    temporary.delete(item.name);
+    permanent.add(item.name);
+    sorted.push(item);
+  }
+
+  for (const item of items) {
+    visit(item);
+  }
+
+  return sorted;
+}
+
+export function selectBulkStartApps(items) {
+  return sortByDependencies(
+    items.filter((item) => item.enabled !== false && (item.driver === "command" || item.driver === "compose"))
+  );
+}
+
+function normalizeDependencies(value) {
+  if (value == null || value === "") {
+    return [];
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item).trim()).filter(Boolean);
+  }
+
+  return [String(value).trim()].filter(Boolean);
+}
+
 const SECRET_ENV_PATTERN = /(SECRET|TOKEN|PASSWORD|PRIVATE|KEY)/i;
 const REDACTED_VALUE = "[redacted]";
 
