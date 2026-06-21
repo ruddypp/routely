@@ -1111,11 +1111,14 @@ async function runDockerfileDeployment(appRecord, deploymentId) {
   }
 }
 
-async function stopLocalApp(appRecord, reason = "stop") {
+async function stopLocalApp(appRecord, reason = "stop", options = {}) {
   if (appRecord.driver === "compose") {
     if (appRecord.status !== "running") {
       updateAppStatus(db, appRecord.id, "stopped");
       writeLogHeader(appRecord.name, `compose service already stopped for ${reason}`);
+      if (options.requireRunning) {
+        return lifecycleFailure(409, "not-running", `${appRecord.name} is not running.`);
+      }
       return { ok: true, app: getAppById(db, appRecord.id), stopped: [] };
     }
 
@@ -1130,7 +1133,7 @@ async function stopLocalApp(appRecord, reason = "stop") {
       return { ok: true, app: getAppById(db, appRecord.id), stopped: [] };
     } catch (error) {
       writeLogHeader(appRecord.name, `failed to stop compose service: ${error instanceof Error ? error.message : String(error)}`);
-      return { ok: false, status: 500, error: error instanceof Error ? error.message : "Failed to stop Compose service." };
+      return lifecycleFailure(500, "stop-failed", error instanceof Error ? error.message : "Failed to stop Compose service.");
     }
   }
 
@@ -1139,6 +1142,9 @@ async function stopLocalApp(appRecord, reason = "stop") {
   if (instances.length === 0) {
     updateAppStatus(db, appRecord.id, "stopped");
     writeLogHeader(appRecord.name, `no running managed process found for ${reason}`);
+    if (options.requireRunning) {
+      return lifecycleFailure(409, "not-running", `${appRecord.name} is not running.`);
+    }
     return { ok: true, app: getAppById(db, appRecord.id), stopped: [] };
   }
 
@@ -1733,6 +1739,19 @@ app.get("/apps", async () => {
   return { apps: listApps(db).map(appToPublicDto) };
 });
 
+app.post("/apps/start-all", async (request, reply) => {
+  const result = await startAllLocalApps();
+
+  if (!result.ok && result.status !== 207) {
+    return sendLifecycleFailure(reply, {
+      ...result,
+      apps: listApps(db).map((appRecord) => appToPublicDto(reconcileAppRuntimeState(appRecord.id) || appRecord))
+    });
+  }
+
+  return reply.code(result.status).send(result);
+});
+
 app.get("/apps/:id", async (request, reply) => {
   const record = findAppOrReply(request, reply);
   if (!record) return;
@@ -1750,7 +1769,7 @@ app.post("/apps/:id/start", async (request, reply) => {
   });
   if (!result) return;
   if (!result.ok) {
-    return reply.code(result.status).send({ error: result.error });
+    return sendLifecycleFailure(reply, result);
   }
 
   const reconciled = reconcileAppRuntimeState(result.app.id) || result.app;
@@ -1763,11 +1782,11 @@ app.post("/apps/:id/stop", async (request, reply) => {
   const result = await withAppLifecycleQueue(id, async () => {
     const record = findAppOrReply(request, reply);
     if (!record) return null;
-    return stopLocalApp(reconcileAppRuntimeState(record.id) || record);
+    return stopLocalApp(reconcileAppRuntimeState(record.id) || record, "stop", { requireRunning: true });
   });
   if (!result) return;
   if (!result.ok) {
-    return reply.code(result.status).send({ error: result.error });
+    return sendLifecycleFailure(reply, result);
   }
   const reconciled = reconcileAppRuntimeState(result.app.id) || result.app;
   return reply.code(200).send({ app: appToPublicDto(reconciled), stopped: result.stopped });
@@ -1782,7 +1801,7 @@ app.post("/apps/:id/restart", async (request, reply) => {
     const current = reconcileAppRuntimeState(record.id) || record;
     const validationError = validateStartableApp(current);
     if (validationError) {
-      return { ok: false, status: 400, error: validationError };
+      return validationError;
     }
 
     const stopResult = await stopLocalApp(current, "restart");
