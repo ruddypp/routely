@@ -12,6 +12,7 @@ import { SkeletonRows } from "@/components/ui/skeleton";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { ModuleHeader } from "@/components/dashboard/module-header";
 import type { DashboardModuleKey } from "@/components/dashboard/types";
+import { appActionBlockReason, appSupportsBulkStart, bulkStartSkipReason, bulkStartStateLabel, isAppRuntimeRunning, startAllBlockReason, startAllPlan, type BulkStartPlan } from "@/lib/app-lifecycle";
 import { APP_DRIVERS, APP_PRESETS, APP_TYPES, appDriverPatch, appFormFromDaemonApp, appFormPayload, appFormValidationError, blankAppForm, type AppFormState } from "@/lib/app-registry-form";
 
 type DaemonApp = {
@@ -89,6 +90,13 @@ type DaemonAppLifecycleResponse = {
   app: DaemonApp;
   pid?: number | null;
   stopped?: Array<{ pid: number; result: string }>;
+};
+
+type DaemonAppStartAllResponse = {
+  started: Array<{ app: DaemonApp; pid?: number | null }>;
+  skipped: Array<{ app: DaemonApp; code: string; reason: string }>;
+  failed: Array<{ app: DaemonApp; code: string; error: string }>;
+  apps: DaemonApp[];
 };
 
 type DaemonAppLogsResponse = {
@@ -680,6 +688,8 @@ export default function DashboardClient() {
   const [refreshing, setRefreshing] = useState(false);
   const [actionByAppId, setActionByAppId] = useState<Record<number, AppAction | null>>({});
   const [actionError, setActionError] = useState<string | null>(null);
+  const [startAllBusy, setStartAllBusy] = useState(false);
+  const [startAllResult, setStartAllResult] = useState<DaemonAppStartAllResponse | null>(null);
   const [selectedAppId, setSelectedAppId] = useState<number | null>(null);
   const [logs, setLogs] = useState<DaemonAppLogsResponse | null>(null);
   const [logsLoading, setLogsLoading] = useState(false);
@@ -1277,6 +1287,57 @@ export default function DashboardClient() {
   const dockerfileApps = appResources.filter((app) => app.driver === "dockerfile");
   const appModuleTabs: Record<"env" | "logs" | "health", InspectorTab> = { env: "env", logs: "logs", health: "health" };
   const moduleLoading = loading || refreshing;
+  const bulkStartPlan = useMemo(() => startAllPlan(apps), [apps]);
+  const startAllReason = startAllBlockReason(apps, connected, startAllBusy);
+
+  const runStartAll = useCallback(async () => {
+    const blocked = startAllBlockReason(apps, connected, startAllBusy);
+    if (blocked) {
+      setActionError(blocked);
+      return;
+    }
+
+    const startableIds = apps
+      .filter((app) => app.enabled && appSupportsBulkStart(app) && !isAppRuntimeRunning(app))
+      .map((app) => app.id);
+
+    setActionError(null);
+    setStartAllResult(null);
+    setStartAllBusy(true);
+    setActionByAppId((current) => ({
+      ...current,
+      ...Object.fromEntries(startableIds.map((id) => [id, "start" as AppAction]))
+    }));
+
+    try {
+      const response = await fetch("/api/apps/start-all", {
+        method: "POST",
+        cache: "no-store"
+      });
+      const data = (await response.json().catch(() => null)) as (Partial<DaemonAppStartAllResponse> & { error?: string }) | null;
+
+      if (!response.ok) {
+        throw new Error(data?.error || `Start All failed with HTTP ${response.status}.`);
+      }
+
+      const result = data as DaemonAppStartAllResponse;
+      setStartAllResult(result);
+      if (Array.isArray(result.apps)) setApps(result.apps);
+      const firstChangedApp = result.started[0]?.app || result.failed[0]?.app || null;
+      if (firstChangedApp) setSelectedAppId(firstChangedApp.id);
+      setLastUpdated(new Date().toISOString());
+      void poll();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : "Could not start enabled resources.");
+    } finally {
+      setStartAllBusy(false);
+      setActionByAppId((current) => {
+        const next = { ...current };
+        for (const id of startableIds) next[id] = null;
+        return next;
+      });
+    }
+  }, [apps, connected, poll, startAllBusy]);
 
   return (
     <DashboardShell
@@ -1354,7 +1415,7 @@ export default function DashboardClient() {
               />
             ) : null}
 
-            {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} deployingByAppId={deployingByAppId} deploymentsByAppId={latestDeploymentByAppId} disabledCount={disabledCount} domainsByAppId={domainsByAppId} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} server={serverStatus} serviceResources={serviceResources} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onDeploy={(app) => void deployApp(app)} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onSelect={setSelectedAppId} /> : null}
+            {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} deployingByAppId={deployingByAppId} deploymentsByAppId={latestDeploymentByAppId} disabledCount={disabledCount} domainsByAppId={domainsByAppId} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} server={serverStatus} serviceResources={serviceResources} startAllBusy={startAllBusy} startAllPlan={bulkStartPlan} startAllReason={startAllReason} startAllResult={startAllResult} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onDeploy={(app) => void deployApp(app)} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onSelect={setSelectedAppId} onStartAll={() => void runStartAll()} /> : null}
 
             {activeModule === "apps" || activeModule === "env" || activeModule === "logs" || activeModule === "health" ? <AppOperationsModule activeTab={activeModule === "apps" ? undefined : appModuleTabs[activeModule]} apps={apps} appResources={appResources} app={selectedApp} selectedAppId={selectedAppId} connected={connected} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} logs={logs} logsLoading={logsLoading} logsError={logsError} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} module={activeModule} server={serverStatus} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onLogs={(app) => void loadLogs(app)} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} /> : null}
 
@@ -1363,14 +1424,22 @@ export default function DashboardClient() {
   );
 }
 
-function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, deployingByAppId, deploymentsByAppId, disabledCount, domainsByAppId, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onDeploy, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onSelect, runningCount, selectedAppId, server, serviceResources, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; deployingByAppId: Record<number, boolean>; deploymentsByAppId: Map<number, DaemonDeployment>; disabledCount: number; domainsByAppId: Map<number, DaemonDomain[]>; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: () => void; onDeploy: (app: DaemonApp) => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onSelect: (id: number) => void; runningCount: number; selectedAppId: number | null; server: DaemonServerStatus | null; serviceResources: DaemonApp[]; stoppedCount: number }) {
+function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, deployingByAppId, deploymentsByAppId, disabledCount, domainsByAppId, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onDeploy, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onSelect, onStartAll, runningCount, selectedAppId, server, serviceResources, startAllBusy, startAllPlan: bulkPlan, startAllReason, startAllResult, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; deployingByAppId: Record<number, boolean>; deploymentsByAppId: Map<number, DaemonDeployment>; disabledCount: number; domainsByAppId: Map<number, DaemonDomain[]>; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: () => void; onDeploy: (app: DaemonApp) => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onSelect: (id: number) => void; onStartAll: () => void; runningCount: number; selectedAppId: number | null; server: DaemonServerStatus | null; serviceResources: DaemonApp[]; startAllBusy: boolean; startAllPlan: BulkStartPlan; startAllReason: string | null; startAllResult: DaemonAppStartAllResponse | null; stoppedCount: number }) {
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="apps" stats={<><MetricPill label="running" value={`${runningCount}/${apps.length}`} accent /><MetricPill label="services" value={String(serviceResources.length)} /><MetricPill label="stopped" value={String(stoppedCount)} /><MetricPill label="disabled" value={String(disabledCount)} /></>} actions={<PillButton onClick={onCreate} strong disabled={!connected}>Add resource</PillButton>} />
+      <ModuleHeader module="apps" stats={<><MetricPill label="running" value={`${runningCount}/${apps.length}`} accent /><MetricPill label="services" value={String(serviceResources.length)} /><MetricPill label="stopped" value={String(stoppedCount)} /><MetricPill label="disabled" value={String(disabledCount)} /></>} actions={<><Button onClick={onStartAll} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || "Start stopped enabled command and Compose resources"} variant="primary">Start All</Button><PillButton onClick={onCreate} strong disabled={!connected}>Add resource</PillButton></>} />
 
       {!connected && health ? <Alert title="Daemon offline" message={health.error || "Start Routely from the CLI to bring the local control plane online."} /> : null}
       {actionError ? <Alert title="Action failed" message={actionError} /> : null}
       {appsError ? <Alert title="Registry unavailable" message={appsError} /> : null}
+      {startAllResult ? <StartAllReport result={startAllResult} /> : null}
+
+      <div className="border-b border-white/5 bg-black/20 px-4 py-3">
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Start All scope</p>
+        <p className="mt-1 text-sm text-muted">
+          Starts {bulkPlan.stoppedStartableCount} stopped enabled command/Compose resources through <code className="font-mono text-foreground">/api/apps/start-all</code>. Disabled resources stay visible and skipped; Dockerfile lifecycle remains deferred. CLI fallback: <code className="font-mono text-foreground">routely up</code>.
+        </p>
+      </div>
 
       {formMode ? <AppForm mode={formMode} form={form} error={formError} saving={formSaving} onChange={onFormChange} onCancel={onFormCancel} onSubmit={onFormSubmit} /> : null}
 
@@ -1386,6 +1455,20 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
         )}
       </div>
     </section>
+  );
+}
+
+function StartAllReport({ result }: { result: DaemonAppStartAllResponse }) {
+  const variant: "danger" | "warning" | "success" = result.failed.length ? "danger" : result.skipped.length ? "warning" : "success";
+  const skipped = result.skipped.slice(0, 3).map((item) => `${item.app.name}: ${item.reason}`);
+  const failed = result.failed.slice(0, 3).map((item) => `${item.app.name}: ${item.error}`);
+  const details = [...skipped, ...failed];
+
+  return (
+    <UiAlert className="border-x-0 border-t-0" title="Start All report" variant={variant}>
+      <p>{result.started.length} started · {result.skipped.length} skipped · {result.failed.length} failed.</p>
+      {details.length ? <p className="mt-1">{details.join("; ")}</p> : null}
+    </UiAlert>
   );
 }
 
@@ -2076,6 +2159,10 @@ function AppRow({
   const disabledReason = !app.enabled ? "Disabled" : !connected ? "Offline" : null;
   const deployReason = deployBlockReason(app, connected, server);
   const pending = pendingStateLabel(app);
+  const bulkStartReason = bulkStartSkipReason(app);
+  const startReason = appActionBlockReason(app, "start", connected, busy);
+  const stopReason = appActionBlockReason(app, "stop", connected, busy);
+  const restartReason = appActionBlockReason(app, "restart", connected, busy);
 
   return (
     <article className={`grid gap-3 border-b border-white/5 px-3 py-3 transition hover:bg-white/[0.035] sm:px-4 xl:grid-cols-[minmax(240px,1.05fr)_minmax(180px,0.78fr)_minmax(170px,0.8fr)_auto] xl:items-center ${active ? "bg-white/[0.055] shadow-[3px_0_0_0_var(--accent)_inset]" : ""}`}>
@@ -2088,6 +2175,7 @@ function AppRow({
             <span className="flex min-w-0 items-center gap-2">
               <span className="block truncate text-sm font-bold">{app.name}</span>
               {disabledReason ? <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{disabledReason}</span> : null}
+              {bulkStartReason ? <span title={bulkStartReason} className="shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">{bulkStartStateLabel(app)}</span> : null}
               {app.needsRestart || app.needsRedeploy ? <span className="shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">pending</span> : null}
             </span>
             <span className="block truncate font-mono text-[11px] text-muted">{resourceLabel(app)} · {app.driver}/{app.preset}</span>
@@ -2106,13 +2194,14 @@ function AppRow({
           <div className="mt-1"><StatusBadge status={app.status} /></div>
         </div>
         <Meta label="Pending" value={pending} />
+        <Meta label="Start All" value={bulkStartStateLabel(app)} />
         <Meta label="Deploy" value={deployReason || (latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : "ready")} />
         <Meta label="Updated" value={timeAgo(app.updatedAt)} />
       </div>
       <div className="flex min-w-0 flex-wrap items-center gap-1.5 xl:justify-end xl:flex-nowrap">
-        <RoundAction label="Start" onClick={() => onAction("start")} disabled={busy || !connected || !app.enabled || running} active={currentAction === "start"} />
-        <RoundAction label="Stop" onClick={() => onAction("stop")} disabled={busy || !connected || !running} active={currentAction === "stop"} />
-        <RoundAction label="Restart" onClick={() => onAction("restart")} disabled={busy || !connected || !app.enabled} active={currentAction === "restart"} />
+        <RoundAction label="Start" onClick={() => onAction("start")} disabled={Boolean(startReason)} reason={startReason} active={currentAction === "start"} />
+        <RoundAction label="Stop" onClick={() => onAction("stop")} disabled={Boolean(stopReason)} reason={stopReason} active={currentAction === "stop"} />
+        <RoundAction label="Restart" onClick={() => onAction("restart")} disabled={Boolean(restartReason)} reason={restartReason} active={currentAction === "restart"} />
         <ActionLink href={localUrl}>Open</ActionLink>
         <PillButton onClick={onLogs} disabled={!connected}>Logs</PillButton>
         <PillButton onClick={onDeploy} disabled={Boolean(deployReason) || deploying}>{deploying ? "Deploying" : "Deploy"}</PillButton>
@@ -2301,13 +2390,16 @@ function DetailPanel({
     );
   }
 
-  const running = app.status === "running" || app.status === "starting";
   const localUrl = appUrl(app);
   const latestDeployment = deployments[0] || null;
   const deployReason = deployBlockReason(app, connected, server);
   const healthStatus = appHealth?.status || "unknown";
   const latestMetric = appMetrics[0] || null;
   const redeployPending = envRedeployLabel(app, appEnv?.pending.needsRedeploy);
+  const busy = Boolean(currentAction);
+  const startReason = !onAction ? "lifecycle action unavailable" : appActionBlockReason(app, "start", connected, busy);
+  const stopReason = !onAction ? "lifecycle action unavailable" : appActionBlockReason(app, "stop", connected, busy);
+  const restartReason = !onAction ? "lifecycle action unavailable" : appActionBlockReason(app, "restart", connected, busy);
 
   return (
     <aside className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:sticky lg:top-[84px]`}>
@@ -2321,13 +2413,14 @@ function DetailPanel({
           <StatusBadge status={app.status} />
         </div>
         <div className="mt-3 grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
-          <RoundAction label="Start" onClick={() => onAction?.("start")} disabled={!onAction || !connected || !app.enabled || running || Boolean(currentAction)} active={currentAction === "start"} />
-          <RoundAction label="Stop" onClick={() => onAction?.("stop")} disabled={!onAction || !connected || !running || Boolean(currentAction)} active={currentAction === "stop"} />
-          <RoundAction label="Restart" onClick={() => onAction?.("restart")} disabled={!onAction || !connected || !app.enabled || Boolean(currentAction)} active={currentAction === "restart"} />
+          <RoundAction label="Start" onClick={() => onAction?.("start")} disabled={Boolean(startReason)} reason={startReason} active={currentAction === "start"} />
+          <RoundAction label="Stop" onClick={() => onAction?.("stop")} disabled={Boolean(stopReason)} reason={stopReason} active={currentAction === "stop"} />
+          <RoundAction label="Restart" onClick={() => onAction?.("restart")} disabled={Boolean(restartReason)} reason={restartReason} active={currentAction === "restart"} />
           <PillButton onClick={onEdit} disabled={!onEdit || !connected}>Edit</PillButton>
           <ActionLink href={localUrl}>Open</ActionLink>
           <PillButton onClick={onDeploy} disabled={Boolean(deployReason) || deploying} strong>{deploying ? "Deploying" : "Deploy"}</PillButton>
         </div>
+        <p className="mt-2 text-[11px] text-muted">Start All state: {bulkStartStateLabel(app)}</p>
       </div>
 
       <div className="flex gap-1 overflow-x-auto border-b border-white/5 bg-black/20 px-2 py-2">
@@ -2747,9 +2840,9 @@ function SelectField({ disabled, label, onChange, value, values }: { disabled?: 
   );
 }
 
-function RoundAction({ active, disabled, label, onClick }: { active?: boolean; disabled?: boolean; label: string; onClick: () => void }) {
+function RoundAction({ active, disabled, label, onClick, reason }: { active?: boolean; disabled?: boolean; label: string; onClick: () => void; reason?: string | null }) {
   return (
-    <Button onClick={onClick} disabled={disabled} loading={active} loadingLabel="Working" variant={active ? "primary" : "secondary"}>
+    <Button onClick={onClick} disabled={disabled} loading={active} loadingLabel="Working" title={reason || undefined} aria-label={reason ? `${label}: ${reason}` : label} variant={active ? "primary" : "secondary"}>
       {active ? "Working" : label}
     </Button>
   );

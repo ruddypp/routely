@@ -48,6 +48,30 @@ export type DaemonAppLifecycleResponse = {
   stopped?: Array<{ pid: number; result: string }>;
 };
 
+export type DaemonAppLifecycleStart = {
+  app: DaemonApp;
+  pid?: number | null;
+};
+
+export type DaemonAppLifecycleSkip = {
+  app: DaemonApp;
+  code: string;
+  reason: string;
+};
+
+export type DaemonAppLifecycleFailure = {
+  app: DaemonApp;
+  code: string;
+  error: string;
+};
+
+export type DaemonAppStartAllResponse = {
+  started: DaemonAppLifecycleStart[];
+  skipped: DaemonAppLifecycleSkip[];
+  failed: DaemonAppLifecycleFailure[];
+  apps: DaemonApp[];
+};
+
 export type DaemonAppLogsResponse = {
   app: DaemonApp;
   logs: string;
