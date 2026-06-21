@@ -23,3 +23,11 @@ This file remains because `AGENTS.md` references it as the Maestro team coordina
 ## Rule
 
 All agents should read `docs/00-product-brief.md` through `docs/04-docs-map.md` first, then the relevant implementation reference docs for the task.
+
+## Routing Contract
+
+The user talks to Routely Lead. Lead instructs PM to produce plans, PRDs, acceptance criteria, and team assignments. PM routes product-experience work to UI/UX before implementation. UI/UX returns executable design criteria, then PM/Lead route implementation to Backend and Frontend.
+
+After implementation, Lead sends work to QA E2E and Security. QA and Security report back to Lead only. Lead waits for both reports, summarizes them, and sends the coordinated finding set to PM. PM turns that summary into owner-specific bug instructions: frontend findings go to Frontend, backend findings go to Backend, and cross-cutting findings get explicit owner splits.
+
+QA E2E and Security do not commit their own reports. Lead commits QA/Security reports when appropriate. PM, UI/UX, Frontend, and Backend commit their own owned changes after verification passes unless Lead or the user says otherwise.

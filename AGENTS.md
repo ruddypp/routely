@@ -6,11 +6,11 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## Routely Agent Workflow
 
-When implementing a public alpha slice from `docs/01-alpha-plan.md`, finish the work with a git commit after verification passes.
+When implementing a public alpha slice from `docs/01-alpha-plan.md`, finish owned implementation or planning work with a git commit after verification passes. QA E2E and Security are exceptions: they write reports and hand them to Routely Lead; Lead commits QA/Security reports when appropriate.
 
 Auto-commit rules:
 
-- Commit only the files changed for the current feature/checkpoint.
+- Commit only the files changed for the current feature/checkpoint. QA E2E and Security must not commit their own reports.
 - Do not include unrelated user changes from the dirty worktree.
 - Run the relevant checks first. At minimum, prefer `npm run lint` and the narrow build/test command for touched workspaces. For broad changes, run `npm run build --workspaces --if-present` when practical.
 - If a relevant check cannot be run or fails for an unrelated reason, document that in the final response and do not hide it in the commit message.
@@ -42,10 +42,10 @@ Use `docs/agents/team-workflow.md` as the team coordination contract.
 
 Role prompts for Maestro live under `.maestro/prompts/`:
 
-- `routely-lead.md`: user-facing lead and coordinator for setup/env/permission blockers.
-- `pm.md`: product planning, vertical slices, docs, handoffs, acceptance criteria.
-- `backend.md`: CLI, daemon, packages, storage, API contracts, integrations, tests.
-- `frontend.md`: dashboard, Next.js route handlers, UI state integration.
-- `uiux.md`: operational dashboard flows, design specs, copy, responsive/accessibility criteria.
-- `qa.md`: end-to-end QA, detailed bug docs, Frontend/Backend bug instructions.
-- `security.md`: security QA, trust-boundary audits, remediation instructions.
+- `routely-lead.md`: user-facing lead, traffic controller, QA/Security report collector, and final bug router.
+- `pm.md`: senior PM planning, PRDs, docs, handoffs, acceptance criteria, and owner-specific dev instructions.
+- `backend.md`: senior backend development for CLI, daemon, packages, storage, API contracts, integrations, and tests.
+- `frontend.md`: senior frontend development for dashboard, Next.js route handlers, UI state integration, and frontend tests.
+- `uiux.md`: senior product design for operational dashboard flows, executable design specs, copy, responsive/accessibility criteria.
+- `qa.md`: end-to-end QA report writer; reports to Lead only and does not commit reports.
+- `security.md`: security QA/trust-boundary report writer; reports to Lead only and does not commit reports.

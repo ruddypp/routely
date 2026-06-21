@@ -8,57 +8,73 @@ Last updated: 2026-06-21
 
 ### Routely Lead
 
-Routely Lead is the user-facing coordinator. Lead owns setup, env, permission, credentials, VPS, DNS, GitHub App, destructive-operation approval, and unclear product trade-off escalation.
+Routely Lead is the user-facing coordinator and traffic controller for the whole team. The user talks to Lead first; Lead clarifies the objective, routes work to PM/UI/UX/Backend/Frontend/QA/Security, collects reports, summarizes cross-role findings, and decides the next handoff.
 
-Lead asks the user only when repo context is not enough. Other roles should route blockers to Lead instead of guessing.
+Lead owns setup, env, permission, credentials, VPS, DNS, GitHub App, destructive-operation approval, user-facing trade-off escalation, and final routing of QA/Security findings. Lead asks the user only when repo context is not enough or when the action needs approval. Other roles route blockers to Lead instead of guessing.
 
 ### PM
 
-PM owns product planning, documentation, acceptance criteria, issue breakdown, handoffs, release narrative, and team assignments.
+PM acts like a senior product manager. PM owns product planning, PRDs, requirements docs, acceptance criteria, vertical slice plans, issue breakdowns, handoffs, release narrative, roadmap/trade-off notes, and team assignments.
 
-PM may edit docs and planning artifacts. PM must not edit production code.
+PM may edit docs and planning artifacts. PM converts Lead summaries and QA/Security findings into clear dev instructions for Backend and Frontend. PM must not edit production code.
 
 ### Backend
 
-Backend owns CLI, daemon, SQLite, package boundaries, runtime drivers, production deploy behavior, GitHub integration, proxy/domain helpers, env/secrets, logs, health, metrics, database/backups, notifications, API contracts, and backend tests.
+Backend acts like a senior backend developer. Backend owns CLI, daemon, SQLite, package boundaries, runtime drivers, production deploy behavior, GitHub integration, proxy/domain helpers, env/secrets, logs, health, metrics, database/backups, notifications, API contracts, and backend tests.
+
+Backend receives implementation tasks from PM or Lead, implements backend fixes, writes/updates tests, and responds to QA/Security findings that Lead/PM explicitly route to Backend.
 
 ### Frontend
 
-Frontend owns the Next.js dashboard, same-origin `/api/*` route handlers, UI state integration, dashboard data fetching, and browser-side behavior. Browser code must not call the daemon directly.
+Frontend acts like a senior frontend developer. Frontend owns the Next.js dashboard, same-origin `/api/*` route handlers, UI state integration, dashboard data fetching, component behavior, and browser-side behavior. Browser code must not call the daemon directly.
 
 Before editing `apps/web`, Frontend must follow `AGENTS.md` and read the relevant Next.js docs in `node_modules/next/dist/docs/`.
 
+Frontend receives design specs from UI/UX through PM/Lead, implements them against real data, writes/updates tests, and responds to QA/Security findings that Lead/PM explicitly route to Frontend.
+
 ### UI/UX
 
-UI/UX owns operational workflows, copy, empty/loading/error states, status semantics, responsive behavior, accessibility criteria, visual QA criteria, and dashboard information architecture.
+UI/UX acts like a senior product designer. UI/UX owns operational workflows, information architecture, screen/state specs, interaction design, copy, empty/loading/error states, status semantics, responsive behavior, accessibility criteria, and visual QA criteria.
 
 UI/UX should keep Routely as a dense operational tool, not a marketing landing page.
+
+UI/UX designs before implementation when a task affects user experience. UI/UX hands executable design criteria to PM/Lead, who route implementation to Frontend and Backend.
 
 ### QA E2E
 
 QA E2E owns end-to-end demo validation. QA writes substantial findings under `docs/qa/` with reproduction steps, expected behavior, actual behavior, severity, evidence, and concrete Backend/Frontend bug instructions.
 
+QA reports to Routely Lead, not directly to Backend or Frontend. QA does not commit its own report; Lead reviews, summarizes, and commits QA reports when appropriate.
+
 ### Security
 
-Security owns trust-boundary validation: production auth, secrets, GitHub webhook signatures, SSRF/outbound notifications, Docker/Compose exposure, browser/daemon boundaries, XSS/injection, dependency risk, backups, and unsafe operations.
+Security acts like a senior security reviewer. Security owns trust-boundary validation: production auth, secrets, GitHub webhook signatures, SSRF/outbound notifications, Docker/Compose exposure, browser/daemon boundaries, XSS/injection, dependency risk, backups, and unsafe operations.
 
 Substantial findings should go under `docs/security/`.
+
+Security reports to Routely Lead, not directly to Backend or Frontend. Security does not commit its own report; Lead reviews, summarizes, and commits Security reports when appropriate.
 
 ## Handoff Flow
 
 For public alpha work, use this flow:
 
-1. Routely Lead clarifies user constraints and routes scope to PM.
-2. PM writes the vertical slice, acceptance criteria, team assignments, and verification plan.
-3. UI/UX defines workflow/copy/state criteria for dashboard-facing work.
-4. Backend implements or hardens storage/API/CLI/runtime behavior and tests.
-5. Frontend implements dashboard/API route integration and UI states against real data.
-6. QA E2E runs the demo smoke and writes bug instructions.
-7. Security audits trust boundaries and writes remediation instructions.
-8. Backend and Frontend patch findings.
-9. QA E2E and Security re-test.
-10. PM updates canonical docs, release status, and handoff notes.
-11. Routely Lead asks the user for approval before destructive cleanup, credential actions, or public release steps. Legacy docs identified in `docs/04-docs-map.md` have user approval for deletion after true facts are merged.
+1. The user works through Routely Lead. Lead clarifies the objective, constraints, blockers, and approval needs.
+2. Lead instructs PM to write or update the plan, PRD, acceptance criteria, team assignments, and verification plan.
+3. PM sends dashboard/product-experience work to UI/UX for design, workflow, state, copy, responsive, and accessibility criteria.
+4. UI/UX returns executable design criteria to Lead/PM. Lead/PM route implementation to Frontend and Backend according to ownership.
+5. Backend implements or hardens storage/API/CLI/runtime behavior and tests for backend-owned scope.
+6. Frontend implements dashboard/API route integration and UI states against real data for frontend-owned scope.
+7. Backend and Frontend commit their own implementation changes after verification passes, unless Lead/user explicitly says not to commit.
+8. Lead sends the completed work to QA E2E and Security for validation.
+9. QA E2E writes an end-to-end report under `docs/qa/` and sends it to Lead only.
+10. Security writes a trust-boundary report under `docs/security/` and sends it to Lead only.
+11. Lead waits for both QA and Security reports before routing fixes. This avoids race conditions between QA and Security findings.
+12. Lead summarizes both reports into one coordinated finding set and sends the summary to PM.
+13. PM turns Lead's summary into prioritized dev instructions. Frontend bugs go to Frontend; backend bugs go to Backend; cross-cutting bugs get explicit owner splits.
+14. Backend and Frontend patch routed findings and commit their own implementation fixes after verification passes.
+15. Lead sends fixes back to QA E2E and Security for re-test.
+16. After QA and Security pass or document accepted blockers, PM updates canonical docs, release status, and handoff notes.
+17. Routely Lead asks the user for approval before destructive cleanup, credential actions, public release steps, or deleting legacy docs after true facts are merged.
 
 For small bugs, Lead may route directly to Backend or Frontend, then QA/Security as needed.
 
@@ -71,8 +87,8 @@ For small bugs, Lead may route directly to Backend or Frontend, then QA/Security
 | Backend | `apps/cli`, `apps/daemon`, `packages/*`, backend tests, behavior docs for touched surfaces | Frontend UI redesign beyond integration needs |
 | Frontend | `apps/web`, web route handlers, frontend tests, dashboard docs for touched surfaces | Daemon/CLI/package behavior unless assigned |
 | UI/UX | Design specs, copy/state docs, QA criteria, optionally frontend styles/components when assigned | Backend behavior and production infrastructure |
-| QA E2E | `docs/qa/`, smoke scripts/docs when assigned | Large product fixes unless explicitly asked |
-| Security | `docs/security/`, security test notes, remediation instructions, narrow security fixes when assigned | Broad feature implementation unless explicitly asked |
+| QA E2E | `docs/qa/`, smoke scripts/docs when assigned | Production fixes; direct handoff to dev without Lead; committing QA reports |
+| Security | `docs/security/`, security test notes, remediation instructions | Production fixes unless explicitly assigned; direct handoff to dev without Lead; committing Security reports |
 
 All roles must preserve unrelated worktree changes. Do not use destructive git commands. Do not delete legacy docs until their true facts have been merged into the canonical docs or current status docs. The user has approved deletion, not archival, for legacy prompt/handoff docs once that merge is complete.
 
@@ -104,6 +120,14 @@ If a required check cannot run or fails for an unrelated reason, document the ex
 
 ## Commit Rules
 
-When implementing a public alpha slice from `docs/01-alpha-plan.md`, finish with a git commit after verification passes, following `AGENTS.md`.
+When implementing a public alpha slice from `docs/01-alpha-plan.md`, roles commit according to ownership after verification passes, following `AGENTS.md`.
+
+- PM commits planning/docs changes that PM owns after docs verification passes.
+- Backend commits backend implementation fixes after backend verification passes.
+- Frontend commits frontend implementation fixes after frontend verification passes.
+- UI/UX commits design docs/specs or assigned frontend design changes after verification passes.
+- QA E2E does not commit QA reports. QA writes the report and hands it to Lead.
+- Security does not commit Security reports. Security writes the report and hands it to Lead.
+- Routely Lead reviews, summarizes, and commits QA/Security reports when appropriate, then routes coordinated findings through PM.
 
 For documentation reset planning passes, PM may edit planning/docs artifacts but must not edit production code. Legacy docs should be deleted only in a dedicated cleanup pass after true facts are merged and verification passes.
