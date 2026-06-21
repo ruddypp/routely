@@ -1,30 +1,54 @@
 ---
-type: launch-manifest
+type: report
 title: Routely Compose-First Execution Launch Manifest
+created: 2026-06-22
 tags:
-  - routely
   - maestro
   - auto-run
-created: 2026-06-22
+  - compose-first
+  - routely-alpha
+related:
+  - '[[REPLAN-01]]'
+  - '[[BACKEND-01]]'
+  - '[[FRONTEND-01]]'
 ---
 
 # Routely Compose-First Execution Launch Manifest
 
 ## Summary
 
-PM created and launched the Backend and Frontend Auto Run documents for the Compose-first execution plan. These documents implement the plan from [[Routely Public Alpha Plan]] through Backend-owned and Frontend-owned tasks only.
+PM launched the task-based Compose-first implementation Auto Run documents for Backend and Frontend on 2026-06-22. The generated documents are the execution handoff from [[REPLAN-01]] and are scoped to Backend and Frontend only.
 
-## Launched Documents
+## Agent Confirmation
 
-### Backend
+Command run:
 
-- Document: `/home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/BACKEND-01.md`
-- Target agent: `e2a663bf-0d9f-4cfb-9c03-3e49309356a5` (`Backend`)
-- Saved playbook name: `Routely Compose-First Backend Execution`
-- Saved playbook ID from CLI output: `732d985e-2c51-40e6-8222-d80989bdd80b`
-- Compatibility symlink created: `.maestro/playbooks/home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/BACKEND-01.md.md`
+```bash
+node /tmp/.mount_maestriig4I9/resources/maestro-cli.js list agents --json
+```
 
-Command:
+Relevant IDs confirmed from the command output:
+
+- Backend: `e2a663bf-0d9f-4cfb-9c03-3e49309356a5`
+- Frontend: `fbd438a5-13ce-40ef-93fa-6d867d6a5b95`
+
+## Documents Launched
+
+- Backend document: `/home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/BACKEND-01.md`
+- Frontend document: `/home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/FRONTEND-01.md`
+
+## Compatibility Symlinks
+
+Maestro CLI 0.17.1 stores absolute Auto Run document paths while the runner resolves them relative to `.maestro/playbooks`, so these compatibility symlinks were created before launch:
+
+- `.maestro/playbooks/home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/BACKEND-01.md.md` -> `/home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/BACKEND-01.md`
+- `.maestro/playbooks/home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/FRONTEND-01.md.md` -> `/home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/FRONTEND-01.md`
+
+## Save-As Command Outputs
+
+The requested `--save-as` commands were run first. CLI help for Maestro CLI 0.17.1 states `--save-as <name>` saves a playbook and does not launch it, so these outputs are recorded as saved-playbook evidence rather than launch evidence.
+
+Backend save command:
 
 ```bash
 node /tmp/.mount_maestriig4I9/resources/maestro-cli.js auto-run /home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/BACKEND-01.md --launch --agent e2a663bf-0d9f-4cfb-9c03-3e49309356a5 --save-as "Routely Compose-First Backend Execution"
@@ -33,18 +57,10 @@ node /tmp/.mount_maestriig4I9/resources/maestro-cli.js auto-run /home/ruddypp/Do
 Output:
 
 ```text
-Playbook 'Routely Compose-First Backend Execution' saved (ID: 732d985e-2c51-40e6-8222-d80989bdd80b)
+Playbook 'Routely Compose-First Backend Execution' saved (ID: 21d644ef-dad0-4e35-afd2-58ddd38bb5f6)
 ```
 
-### Frontend
-
-- Document: `/home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/FRONTEND-01.md`
-- Target agent: `fbd438a5-13ce-40ef-93fa-6d867d6a5b95` (`Frontend`)
-- Saved playbook name: `Routely Compose-First Frontend Execution`
-- Saved playbook ID from CLI output: `b75f196e-3d65-4910-9715-3877ed4804ab`
-- Compatibility symlink created: `.maestro/playbooks/home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/FRONTEND-01.md.md`
-
-Command:
+Frontend save command:
 
 ```bash
 node /tmp/.mount_maestriig4I9/resources/maestro-cli.js auto-run /home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/FRONTEND-01.md --launch --agent fbd438a5-13ce-40ef-93fa-6d867d6a5b95 --save-as "Routely Compose-First Frontend Execution"
@@ -53,35 +69,63 @@ node /tmp/.mount_maestriig4I9/resources/maestro-cli.js auto-run /home/ruddypp/Do
 Output:
 
 ```text
-Playbook 'Routely Compose-First Frontend Execution' saved (ID: b75f196e-3d65-4910-9715-3877ed4804ab)
+Playbook 'Routely Compose-First Frontend Execution' saved (ID: ec23ac65-5ec7-442b-b5ba-e4d7b2ecc769)
 ```
 
-## Agent Confirmation
+## Launch Command Outputs
 
-`node /tmp/.mount_maestriig4I9/resources/maestro-cli.js list agents --json` confirmed the required target agents before launch:
+Because `--save-as` is save-only in this CLI version, the documents were then launched without `--save-as` so the Auto Run engine would actually start them.
 
-- Backend: `e2a663bf-0d9f-4cfb-9c03-3e49309356a5`
-- Frontend: `fbd438a5-13ce-40ef-93fa-6d867d6a5b95`
+Backend launch command:
+
+```bash
+node /tmp/.mount_maestriig4I9/resources/maestro-cli.js auto-run /home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/BACKEND-01.md --launch --agent e2a663bf-0d9f-4cfb-9c03-3e49309356a5
+```
+
+Output:
+
+```text
+Auto-run launched with 1 document
+```
+
+Frontend launch command:
+
+```bash
+node /tmp/.mount_maestriig4I9/resources/maestro-cli.js auto-run /home/ruddypp/Documents/work/routely/.maestro/playbooks/2026-06-22-Routely-Compose-First-Execution/FRONTEND-01.md --launch --agent fbd438a5-13ce-40ef-93fa-6d867d6a5b95
+```
+
+Output:
+
+```text
+Auto-run launched with 1 document
+```
+
+Refresh command:
+
+```bash
+node /tmp/.mount_maestriig4I9/resources/maestro-cli.js refresh-auto-run
+```
+
+Output:
+
+```text
+Auto Run documents refreshed
+```
 
 ## Expected Completion Checks
 
-- Backend Auto Run completes every checkbox in `BACKEND-01.md` or records task blockers in the Backend Auto Run output.
-- Frontend Auto Run completes every checkbox in `FRONTEND-01.md` or records task blockers in the Frontend Auto Run output.
-- Backend commits only backend-owned files after each task's verification passes.
-- Frontend commits only frontend-owned files after each task's verification passes.
-- Any failed or skipped check includes the exact command and reason in the relevant Auto Run task output.
-- No QA E2E or Security reports are expected from these Backend/Frontend-only execution documents.
+- Backend Auto Run should check every task in [[BACKEND-01]] and create backend-owned commits only after each task's verification passes.
+- Frontend Auto Run should check every task in [[FRONTEND-01]] and create frontend-owned commits only after each task's verification passes.
+- Backend tasks should preserve Compose-backed app model, enablement/bulk start semantics, API contracts, local runner plus one-VPS parity, domain/proxy, env/secrets, database/backups, logs/deploy history, health checks, and relevant lint/build/test checks.
+- Frontend tasks should preserve required Next.js docs reading before editing `apps/web`, dashboard-first app creation/editing, Start All with per-app stop/disable, Dokploy-inspired 9Router-light IA, real-data operational screens, deferred-state honesty, tests, and web verification checks.
+- Any blocker should remain visible in the Auto Run task output and should not be hidden in commit messages.
 
-## Lead Verification
+## Routely Lead Verification
 
-Routely Lead should verify completion by:
+Routely Lead should verify completion by checking:
 
-1. Opening the Auto Run panel and confirming both saved playbooks exist with the IDs above.
-2. Confirming `BACKEND-01.md` and `FRONTEND-01.md` checkboxes are all complete or have explicit blocker output.
-3. Reviewing Backend and Frontend agent histories for task outputs and blocker notes.
-4. Checking `git log --oneline` for Backend/Frontend commits made after this manifest commit.
-5. Running or delegating the relevant final verification from `docs/03-demo-acceptance-plan.md` after Backend and Frontend finish.
-
-## Blockers
-
-No PM launch blockers were encountered. The CLI returned saved playbook IDs for both `--launch` commands; it did not print a separate launch confirmation line.
+1. Auto Run panel/history shows Backend ran `BACKEND-01.md` against `e2a663bf-0d9f-4cfb-9c03-3e49309356a5` and Frontend ran `FRONTEND-01.md` against `fbd438a5-13ce-40ef-93fa-6d867d6a5b95`.
+2. Every checkbox in `BACKEND-01.md` and `FRONTEND-01.md` is checked or has a clear blocker note from the owning agent.
+3. Git history contains only owner-appropriate Backend or Frontend commits for implementation work, plus this PM manifest/playbook commit.
+4. Verification outputs for each implementation task include the required lint, test, build, syntax, or typecheck commands listed in the task text.
+5. Any launch or execution blocker is routed back to Routely Lead rather than silently skipped.
