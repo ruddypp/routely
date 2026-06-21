@@ -632,6 +632,20 @@ function domainStepTone(domain: DaemonDomain, route: DaemonProxyRoute | undefine
   return domain.targetPort ? "ok" : "warn";
 }
 
+function tlsTone(status: string | null | undefined): "ok" | "warn" | "error" {
+  if (status === "active") return "ok";
+  if (status === "failed" || status === "error") return "error";
+  return "warn";
+}
+
+function httpsSummary(domains: DaemonDomain[]): string {
+  if (domains.length === 0) return "no domains";
+  if (domains.some((domain) => domain.tlsStatus === "failed" || domain.tlsStatus === "error")) return "TLS failed";
+  if (domains.every((domain) => domain.tlsStatus === "active")) return "active";
+  if (domains.some((domain) => domain.tlsStatus === "issuing")) return "certificate issuing";
+  return "certificate pending";
+}
+
 function deploymentSource(deployment: DaemonDeployment): string {
   const branch = deployment.branch ? `:${deployment.branch}` : "";
   const commit = deployment.commitSha ? ` @ ${deployment.commitSha.slice(0, 7)}` : "";
@@ -1654,7 +1668,7 @@ function DomainsModule({ apps, connected, domains, domainsError, domainsMeta, do
           <ResourceSection title="Add hostname" count={apps.length} />
           <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]"><UiSelect value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} label="App"><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</UiSelect><Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} /><div className="flex items-end"><PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton></div></div></div>
         </div>
-        <div className="min-w-0"><ResourceSection title="Hostnames" count={domains.length} />{domains.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS verification creates proxy route state.</div> : domains.map((domain) => { const action = domainActionByHostname[domain.hostname]; const route = proxyRoutes.find((item) => item.domainId === domain.id); const steps = [{ label: "Root", value: domainsMeta.rootDomain || "unset", tone: domainStepTone(domain, route, "root", Boolean(domainsMeta.rootDomain)) }, { label: "Host", value: domain.hostname, tone: domainStepTone(domain, route, "hostname", Boolean(domainsMeta.rootDomain)) }, { label: "DNS", value: domain.dnsStatus, tone: domainStepTone(domain, route, "dns", Boolean(domainsMeta.rootDomain)) }, { label: "Proxy", value: route?.enabled ? "ready" : "pending", tone: domainStepTone(domain, route, "proxy", Boolean(domainsMeta.rootDomain)) }, { label: "TLS", value: domain.tlsStatus, tone: domainStepTone(domain, route, "tls", Boolean(domainsMeta.rootDomain)) }, { label: "Target", value: route?.targetUrl || (domain.targetPort ? `:${domain.targetPort}` : "pending"), tone: domainStepTone(domain, route, "target", Boolean(domainsMeta.rootDomain)) }]; return <div key={domain.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{domain.hostname}</p><p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {route?.targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p></div><StatusBadge status={domain.status} /></div><div className="mt-3 grid gap-2 sm:grid-cols-3">{steps.map((step) => <ReadinessCard key={step.label} label={step.label} value={step.value} status={step.tone} />)}</div>{domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton><ActionLink href={domain.status === "ready" ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink><PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton></div></div>; })}</div>
+        <div className="min-w-0"><ResourceSection title="Hostnames" count={domains.length} />{domains.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS verification creates proxy route state.</div> : domains.map((domain) => { const action = domainActionByHostname[domain.hostname]; const route = proxyRoutes.find((item) => item.domainId === domain.id); const steps = [{ label: "Root", value: domainsMeta.rootDomain || "unset", tone: domainStepTone(domain, route, "root", Boolean(domainsMeta.rootDomain)) }, { label: "Host", value: domain.hostname, tone: domainStepTone(domain, route, "hostname", Boolean(domainsMeta.rootDomain)) }, { label: "DNS", value: domain.dnsStatus, tone: domainStepTone(domain, route, "dns", Boolean(domainsMeta.rootDomain)) }, { label: "Proxy", value: route?.enabled ? "ready" : "pending", tone: domainStepTone(domain, route, "proxy", Boolean(domainsMeta.rootDomain)) }, { label: "TLS", value: domain.tlsStatus, tone: domainStepTone(domain, route, "tls", Boolean(domainsMeta.rootDomain)) }, { label: "Target", value: route?.targetUrl || (domain.targetPort ? `:${domain.targetPort}` : "pending"), tone: domainStepTone(domain, route, "target", Boolean(domainsMeta.rootDomain)) }]; return <div key={domain.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{domain.hostname}</p><p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {route?.targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p></div><StatusBadge status={domain.status} /></div><div className="mt-3 grid gap-2 sm:grid-cols-3">{steps.map((step) => <ReadinessCard key={step.label} label={step.label} value={step.value} status={step.tone} />)}</div>{domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton><ActionLink href={domain.tlsStatus === "active" ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink><PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton></div></div>; })}</div>
       </div>
     </section>
   );
@@ -1714,7 +1728,7 @@ function DatabasesModule({ connected, databaseActionById, databaseForm, database
         <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
           <ResourceSection title="Create database" count={5} />
           <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]"><UiSelect value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} label="Type" options={["postgres", "mysql", "mariadb", "redis", "mongodb"]} /><Field label="Name" value={databaseForm.name} onChange={(value) => onDatabaseFormChange({ ...databaseForm, name: value })} placeholder="postgres" disabled={!connected || databaseSaving} /><div className="flex items-end"><PillButton strong onClick={onCreateDatabase} disabled={!connected || databaseSaving || !databaseForm.name.trim()}>{databaseSaving ? "Creating" : "Create"}</PillButton></div></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Runtime" value="Docker Compose service" /><Meta label="Secrets" value="env key names only" /></div></div>
-          <DeferredCapabilityList items={["Restore automation deferred", "External database exposure locked", "Raw env values hidden"]} />
+          <DeferredCapabilityList items={["Restore automation deferred", "External database exposure deferred", "Raw env values hidden"]} />
         </div>
         <div className="min-w-0"><ResourceSection title="Database ledger" count={databases.length} />{loading ? <LoadingRows /> : databases.length === 0 ? <DataEmpty title="No database services" detail="Create a supported internal Compose database when an app needs production state." /> : databases.map((database) => <DatabaseLedgerRow key={database.id} busy={databaseActionById[database.id]} connected={connected} database={database} onAction={onDatabaseAction} />)}</div>
       </div>
@@ -1730,7 +1744,7 @@ function BackupsModule({ backupActionById, backupForm, backupJobs, backupRuns, b
       <ModuleHeader module="backups" stats={<><ReadinessCard label="Jobs" value={loading ? "loading" : String(backupJobs.length)} status={backupJobs.length ? "ok" : "warn"} /><ReadinessCard label="Latest" value={latestRun?.status || "never"} status={latestRun?.status === "succeeded" ? "ok" : latestRun?.status === "failed" ? "error" : "warn"} /><ReadinessCard label="Failed" value={String(failedRuns.length)} status={failedRuns.length ? "error" : "ok"} /><ReadinessCard label="Storage" value="local files" status="ok" /></>} />
       {backupsError ? <Alert title="Backup action failed" message={backupsError} /> : null}
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]">
-        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Enable backup job" count={databases.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.9fr)_minmax(0,1fr)_100px_auto]"><UiSelect value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} label="Database"><option value="">Choose</option>{databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}</UiSelect><Field label="Schedule" value={backupForm.schedule} onChange={(value) => onBackupFormChange({ ...backupForm, schedule: value })} placeholder="0 2 * * *" disabled={!connected} mono /><Field label="Keep days" value={backupForm.retentionDays} onChange={(value) => onBackupFormChange({ ...backupForm, retentionDays: value })} placeholder="7" disabled={!connected} type="number" /><div className="flex items-end"><PillButton strong onClick={onEnableBackup} disabled={!connected || !backupForm.databaseId}>Enable</PillButton></div></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Storage" value="local backup directory" /><Meta label="Restore" value="deferred, not exposed" /></div></div><DeferredCapabilityList items={["External object storage deferred", "Restore UI locked until backend exists", "Backup files stay local"]} /><ResourceSection title="Backup jobs" count={backupJobs.length} />{loading ? <LoadingRows /> : backupJobs.length === 0 ? <DataEmpty title="No backup jobs" detail="Enable a job for a database to schedule local backups or run one manually." /> : backupJobs.map((job) => <BackupJobLedgerRow key={job.id} busy={backupActionById[job.id]} connected={connected} job={job} latestRun={backupRuns.find((run) => run.backupJobId === job.id) || null} onRunBackup={onRunBackup} onToggleBackup={onToggleBackup} />)}</div>
+        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Enable backup job" count={databases.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.9fr)_minmax(0,1fr)_100px_auto]"><UiSelect value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} label="Database"><option value="">Choose</option>{databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}</UiSelect><Field label="Schedule" value={backupForm.schedule} onChange={(value) => onBackupFormChange({ ...backupForm, schedule: value })} placeholder="0 2 * * *" disabled={!connected} mono /><Field label="Keep days" value={backupForm.retentionDays} onChange={(value) => onBackupFormChange({ ...backupForm, retentionDays: value })} placeholder="7" disabled={!connected} type="number" /><div className="flex items-end"><PillButton strong onClick={onEnableBackup} disabled={!connected || !backupForm.databaseId}>Enable</PillButton></div></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Storage" value="local backup directory" /><Meta label="Restore" value="deferred, not exposed" /></div></div><DeferredCapabilityList items={["External object storage deferred", "Restore UI deferred until backend exists", "Backup files stay local"]} /><ResourceSection title="Backup jobs" count={backupJobs.length} />{loading ? <LoadingRows /> : backupJobs.length === 0 ? <DataEmpty title="No backup jobs" detail="Enable a job for a database to schedule local backups or run one manually." /> : backupJobs.map((job) => <BackupJobLedgerRow key={job.id} busy={backupActionById[job.id]} connected={connected} job={job} latestRun={backupRuns.find((run) => run.backupJobId === job.id) || null} onRunBackup={onRunBackup} onToggleBackup={onToggleBackup} />)}</div>
         <div className="min-w-0"><ResourceSection title="Run history" count={backupRuns.length} />{loading ? <LoadingRows /> : backupRuns.length === 0 ? <DataEmpty title="No backup runs" detail="Manual and scheduled runs will appear here with file or failure message state." /> : backupRuns.map((run) => <BackupRunLedgerRow key={run.id} run={run} />)}</div>
       </div>
     </section>
@@ -1842,6 +1856,7 @@ function OverviewPanel({ apps, backupJobs, backupRuns, connected, deployments, d
   const failedDeploys = deployments.filter((deployment) => deployment.status === "failed").slice(0, 3);
   const recentDeploys = deployments.slice(0, 5);
   const backupFailures = backupRuns.filter((run) => run.status === "failed").slice(0, 3);
+  const domainAttention = domains.filter((domain) => domain.dnsStatus !== "verified" || domain.tlsStatus !== "active").slice(0, 4);
   const pendingApps = apps.filter((app) => app.needsRedeploy || app.needsRestart);
   const running = apps.filter((app) => app.status === "running").length;
   const stopped = apps.filter((app) => app.status === "stopped").length;
@@ -1854,6 +1869,7 @@ function OverviewPanel({ apps, backupJobs, backupRuns, connected, deployments, d
   const latestBackup = backupRuns[0] || null;
   const urgent = [
     ...failedDeploys.map((deployment) => ({ key: `deploy-${deployment.id}`, title: deployment.appName || `deployment ${deployment.id}`, detail: deployment.errorMessage || deployment.phase, tone: "error" as const, module: "deployments" as ModuleKey })),
+    ...domainAttention.map((domain) => ({ key: `domain-${domain.id}`, title: domain.hostname, detail: `${domain.dnsStatus} DNS · ${httpsSummary([domain])}`, tone: tlsTone(domain.tlsStatus), module: "domains" as ModuleKey })),
     ...pendingApps.slice(0, 5).map((app) => ({ key: `pending-${app.id}`, title: app.name, detail: pendingStateLabel(app), tone: "warn" as const, module: "apps" as ModuleKey })),
     ...backupFailures.map((run) => ({ key: `backup-${run.id}`, title: run.databaseName || `backup ${run.id}`, detail: run.message || "Backup failed", tone: "error" as const, module: "backups" as ModuleKey }))
   ].slice(0, 7);
@@ -1895,7 +1911,7 @@ function OverviewPanel({ apps, backupJobs, backupRuns, connected, deployments, d
           {recentDeploys.slice(0, 3).map((deployment) => <TimelineRow key={deployment.id} title={`#${deployment.id} ${deployment.appName || "app"}`} detail={`${deployment.status} · ${timeAgo(deployment.updatedAt)}`} tone={deployment.status === "failed" ? "error" : deployment.status === "succeeded" ? "ok" : "warn"} />)}
         </OverviewList>
         <OverviewList title="Domain readiness" empty="No domains configured." action="Domains" onAction={() => onSelect("domains")}>
-          {domains.slice(0, 4).map((domain) => <TimelineRow key={domain.id} title={domain.hostname} detail={`${domain.dnsStatus} DNS · ${domain.tlsStatus} TLS`} tone={statusTone(domain.dnsStatus === "verified" ? "ready" : domain.status)} />)}
+          {domains.slice(0, 4).map((domain) => <TimelineRow key={domain.id} title={domain.hostname} detail={`${domain.dnsStatus} DNS · ${httpsSummary([domain])}`} tone={domain.dnsStatus !== "verified" ? "warn" : tlsTone(domain.tlsStatus)} />)}
         </OverviewList>
         <OverviewList title="Backup state" empty="No backup jobs yet." action="Backups" onAction={() => onSelect("backups")}>
           {backupJobs.slice(0, 4).map((job) => <TimelineRow key={job.id} title={job.databaseName || `database ${job.databaseId}`} detail={`${job.enabled ? "enabled" : "disabled"} · ${job.lastRunStatus || "never run"}`} tone={job.lastRunStatus === "failed" ? "error" : job.enabled ? "ok" : "warn"} />)}
@@ -2059,8 +2075,8 @@ function ServerFoundationPanel({ connected, error, server }: { connected: boolea
           <h2 className="text-lg font-bold leading-tight sm:text-xl">Production readiness</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted">
             {server?.production
-              ? "Production mode is enabled. Infrastructure actions stay locked until their checkpoints ship."
-              : "Local mode is active. Server init prepares the one-VPS foundation without adding deploy actions yet."}
+              ? "Production mode is enabled. Deployments, domains, GitHub, backups, and notifications depend on the readiness checks below."
+              : "Local mode is active. Run server init and server doctor before using one-VPS deploy, domain, GitHub, backup, or notification workflows."}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -2092,10 +2108,10 @@ function ServerFoundationPanel({ connected, error, server }: { connected: boolea
 
       <div className="border-t border-white/5 bg-black/20 px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Future production</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Readiness blockers</span>
           {(server?.disabledProductionActions || ["deployments", "domains", "https", "github", "backups"]).map((item) => (
             <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/60">
-              {item} locked
+              {item} pending readiness
             </span>
           ))}
         </div>
@@ -2234,256 +2250,6 @@ function AppRow({
   );
 }
 
-// Kept during the IA split as reference for the older combined production panel.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function ProductionDeployPanel({
-  apps,
-  connected,
-  deployments,
-  domains,
-  domainsByAppId,
-  domainsError,
-  domainsMeta,
-  domainActionByHostname,
-  domainForm,
-  domainSaving,
-  deployingByAppId,
-  error,
-  github,
-  githubError,
-  githubForm,
-  githubSaving,
-  latestByAppId,
-  proxyRoutes,
-  rootDomainInput,
-  onAddDomain,
-  onDomainFormChange,
-  onDeploy,
-  onGithubConnect,
-  onGithubFormChange,
-  onLogs,
-  onRemoveDomain,
-  onRootDomainChange,
-  onSaveRootDomain,
-  onVerifyDomain,
-  server
-}: {
-  apps: DaemonApp[];
-  connected: boolean;
-  deployments: DaemonDeployment[];
-  domains: DaemonDomain[];
-  domainsByAppId: Map<number, DaemonDomain[]>;
-  domainsError: string | null;
-  domainsMeta: { rootDomain: string | null; serverPublicIp: string | null };
-  domainActionByHostname: Record<string, string | null>;
-  domainForm: { appId: string; hostname: string };
-  domainSaving: boolean;
-  deployingByAppId: Record<number, boolean>;
-  error: string | null;
-  github: DaemonGithubStatus | null;
-  githubError: string | null;
-  githubForm: { appId: string; fullName: string; branch: string; autoDeploy: boolean };
-  githubSaving: boolean;
-  latestByAppId: Map<number, DaemonDeployment>;
-  proxyRoutes: DaemonProxyRoute[];
-  rootDomainInput: string;
-  onAddDomain: () => void;
-  onDomainFormChange: (form: { appId: string; hostname: string }) => void;
-  onDeploy: (app: DaemonApp) => void;
-  onGithubConnect: () => void;
-  onGithubFormChange: (form: { appId: string; fullName: string; branch: string; autoDeploy: boolean }) => void;
-  onLogs: (deployment: DaemonDeployment) => void;
-  onRemoveDomain: (domain: DaemonDomain) => void;
-  onRootDomainChange: (value: string) => void;
-  onSaveRootDomain: () => void;
-  onVerifyDomain: (domain: DaemonDomain) => void;
-  server: DaemonServerStatus | null;
-}) {
-  const dockerReady = Boolean(server?.readiness?.checks.some((check) => check.id === "docker" && check.status === "ok"));
-  const dataReady = Boolean(server?.dataDir);
-  const authReady = Boolean(!server?.auth.required || server.auth.configured);
-  const ready = connected && dockerReady && dataReady && authReady;
-  const recent = deployments.slice(0, 4);
-  const recentDeliveries = github?.deliveries.slice(0, 4) || [];
-
-  return (
-    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
-      <div className="grid gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 xl:grid-cols-[0.85fr_1.15fr]">
-        <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Production deploy</p>
-          <h2 className="text-lg font-bold leading-tight sm:text-xl">Dockerfile vertical slice</h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted">
-            Dockerfile deployments run on temporary host ports, then verified domains generate Traefik-compatible HTTPS routes.
-          </p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <ReadinessCard label="Docker" value={dockerReady ? "ready" : "check"} status={dockerReady ? "ok" : "warn"} />
-          <ReadinessCard label="Auth" value={authReady ? "ready" : "missing"} status={authReady ? "ok" : "error"} />
-          <ReadinessCard label="Data dir" value={dataReady ? "ready" : "pending"} status={dataReady ? "ok" : "warn"} />
-          <ReadinessCard label="Domains" value={domains.length ? `${domains.length}` : "none"} status={domains.length ? "ok" : "warn"} />
-        </div>
-      </div>
-
-      {error ? <Alert title="Deployment action failed" message={error} /> : null}
-      {domainsError ? <Alert title="Domain or proxy action failed" message={domainsError} /> : null}
-      {githubError ? <Alert title="GitHub action failed" message={githubError} /> : null}
-
-      <div className="grid gap-0 xl:grid-cols-[minmax(0,1.05fr)_minmax(340px,0.95fr)]">
-        <div className="min-w-0 border-b border-white/5 lg:border-b-0 lg:border-r">
-          <ResourceSection title="Deployable Dockerfile apps" count={apps.length} />
-          {apps.length === 0 ? (
-            <div className="px-4 py-5 text-sm text-muted">No app is configured with the Dockerfile driver yet. Edit an app and set driver to dockerfile when its Dockerfile path is stable.</div>
-          ) : apps.map((app) => {
-            const latest = latestByAppId.get(app.id);
-            const deploying = Boolean(deployingByAppId[app.id]);
-            const disabled = !ready || deploying || !app.enabled;
-            return (
-              <div key={app.id} className="grid gap-3 border-b border-white/5 px-4 py-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="truncate text-sm font-bold">{app.name}</p>
-                    {latest ? <StatusBadge status={latest.status} /> : <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">never deployed</span>}
-                  </div>
-                  <p className="mt-1 truncate font-mono text-[11px] text-muted">{shortPath(app.path)} to Dockerfile</p>
-                  <p className="mt-1 text-[11px] text-muted">{latest?.hostPort ? `temporary URL http://127.0.0.1:${latest.hostPort}` : "temporary URL assigned after deploy"}</p>
-                  <p className="mt-1 truncate text-[11px] text-muted">{(domainsByAppId.get(app.id) || []).map((domain) => domain.hostname).join(", ") || "no production domains"}</p>
-                </div>
-                <div className="flex flex-wrap items-center gap-2 md:justify-end">
-                  {latest ? <PillButton onClick={() => onLogs(latest)}>Logs</PillButton> : null}
-                  <PillButton strong onClick={() => onDeploy(app)} disabled={disabled}>{deploying ? "Deploying" : "Deploy"}</PillButton>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="min-w-0">
-          <ResourceSection title="Domains, proxy, HTTPS" count={domains.length} />
-          <div className="border-b border-white/5 px-4 py-3">
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-              <Field label="Root domain" value={rootDomainInput} onChange={onRootDomainChange} placeholder="example.com" disabled={!connected || domainSaving} />
-              <div className="flex items-end">
-                <PillButton onClick={onSaveRootDomain} disabled={!connected || domainSaving || !rootDomainInput.trim()} strong>Save root</PillButton>
-              </div>
-            </div>
-            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-              <Meta label="Server IP" value={domainsMeta.serverPublicIp || "set ROUTELY_SERVER_PUBLIC_IP"} mono />
-              <Meta label="Wildcard" value={domainsMeta.rootDomain ? `*.${domainsMeta.rootDomain}` : "set root domain"} mono />
-            </div>
-          </div>
-
-          <div className="border-b border-white/5 px-4 py-3">
-            <div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]">
-              <UiSelect value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} label="App">
-                <option value="">Choose app</option>
-                {apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}
-              </UiSelect>
-              <Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} />
-              <div className="flex items-end">
-                <PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton>
-              </div>
-            </div>
-          </div>
-
-          {domains.length === 0 ? (
-            <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS must resolve before the route is marked ready.</div>
-          ) : domains.map((domain) => {
-            const action = domainActionByHostname[domain.hostname];
-            const route = proxyRoutes.find((item) => item.domainId === domain.id);
-            return (
-              <div key={domain.id} className="border-b border-white/5 px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-mono text-sm font-bold">{domain.hostname}</p>
-                    <p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {route?.targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p>
-                  </div>
-                  <StatusBadge status={domain.status} />
-                </div>
-                <div className="mt-3 grid grid-cols-3 gap-2">
-                  <ReadinessCard label="DNS" value={domain.dnsStatus} status={domain.dnsStatus === "verified" ? "ok" : "warn"} />
-                  <ReadinessCard label="TLS" value={domain.tlsStatus} status={domain.tlsStatus === "active" ? "ok" : "warn"} />
-                  <ReadinessCard label="Proxy" value={route?.enabled ? "ready" : "pending"} status={route?.enabled ? "ok" : "warn"} />
-                </div>
-                {domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton>
-                  <ActionLink href={domain.status === "ready" ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink>
-                  <PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton>
-                </div>
-              </div>
-            );
-          })}
-
-          <ResourceSection title="GitHub repository" count={github?.repositories.length || 0} />
-          <div className="border-b border-white/5 px-4 py-3">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <ReadinessCard label="App" value={github?.configured ? "configured" : "missing"} status={github?.configured ? "ok" : "warn"} />
-              <ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} />
-              <ReadinessCard label="Key" value={github?.privateKeyConfigured ? "ready" : "later"} status={github?.privateKeyConfigured ? "ok" : "warn"} />
-              <ReadinessCard label="Repos" value={String(github?.repositories.length || 0)} status={github?.repositories.length ? "ok" : "warn"} />
-            </div>
-            <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_110px_auto]">
-              <UiSelect value={githubForm.appId} onChange={(event) => onGithubFormChange({ ...githubForm, appId: event.target.value })} disabled={!connected || githubSaving} label="App">
-                <option value="">Choose app</option>
-                {apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}
-              </UiSelect>
-              <Field label="Repository" value={githubForm.fullName} onChange={(value) => onGithubFormChange({ ...githubForm, fullName: value })} placeholder="owner/repo" disabled={!connected || githubSaving} />
-              <Field label="Branch" value={githubForm.branch} onChange={(value) => onGithubFormChange({ ...githubForm, branch: value })} placeholder="main" disabled={!connected || githubSaving} />
-              <div className="flex items-end">
-                <PillButton onClick={onGithubConnect} disabled={!connected || githubSaving || !githubForm.appId || !githubForm.fullName.trim()} strong>{githubSaving ? "Saving" : "Connect"}</PillButton>
-              </div>
-            </div>
-            <label className="mt-3 flex items-center justify-between gap-3 rounded-md bg-black/20 px-3 py-2 text-xs">
-              <span><span className="font-bold">Auto deploy on push</span><span className="block text-muted">Only matching branch push events can queue deployments.</span></span>
-              <input type="checkbox" checked={githubForm.autoDeploy} onChange={(event) => onGithubFormChange({ ...githubForm, autoDeploy: event.target.checked })} disabled={githubSaving} className="h-4 w-4 accent-[var(--accent)]" />
-            </label>
-          </div>
-
-          {github?.repositories.length ? github.repositories.map((repo) => (
-            <div key={repo.id} className="border-b border-white/5 px-4 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate font-mono text-sm font-bold">{repo.fullName}</p>
-                  <p className="mt-1 text-[11px] text-muted">{repo.connectedAppName || "not connected"} · {repo.selectedBranch || repo.defaultBranch || "branch not set"} · {repo.private ? "private" : "public"}</p>
-                </div>
-                <StatusBadge status={repo.autoDeployEnabled ? "running" : "stopped"} />
-              </div>
-            </div>
-          )) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Connect a repository to store source metadata and enable signed push-to-deploy.</div>}
-
-          <ResourceSection title="Webhook deliveries" count={recentDeliveries.length} />
-          {recentDeliveries.length === 0 ? <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Signed push deliveries will appear here after GitHub sends webhooks.</div> : recentDeliveries.map((delivery) => (
-            <div key={delivery.deliveryId} className="border-b border-white/5 px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold">{delivery.repo || delivery.event}</p>
-                  <p className="mt-1 truncate font-mono text-[11px] text-muted">{delivery.branch || "-"} · {delivery.commitSha?.slice(0, 7) || "no commit"} · {timeAgo(delivery.receivedAt)}</p>
-                </div>
-                <StatusBadge status={delivery.status} />
-              </div>
-              {delivery.message ? <p className="mt-2 text-xs text-muted">{delivery.message}</p> : null}
-            </div>
-          ))}
-
-          <ResourceSection title="Recent deployment phases" count={recent.length} />
-          {recent.length === 0 ? (
-            <div className="px-4 py-5 text-sm text-muted">Deployment history will appear here after the first Dockerfile deploy.</div>
-          ) : recent.map((deployment) => (
-            <DeploymentSummaryRow key={deployment.id} deployment={deployment} onLogs={() => onLogs(deployment)} />
-          ))}
-          <div className="border-t border-white/5 bg-black/20 px-4 py-3">
-            <div className="flex flex-wrap gap-2">
-              {['Backups', 'Metrics', 'Rollback'].map((item) => (
-                <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/60">{item} locked</span>
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 function DeploymentSummaryRow({ deployment, onLogs }: { deployment: DaemonDeployment; onLogs: () => void }) {
   return (
     <button type="button" onClick={onLogs} className={`block w-full border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/[0.035] ${FOCUS_RING}`}>
@@ -2497,157 +2263,6 @@ function DeploymentSummaryRow({ deployment, onLogs }: { deployment: DaemonDeploy
         <StatusBadge status={deployment.status} />
       </div>
     </button>
-  );
-}
-
-// Kept during the IA split as reference for the older combined data panel.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-function DatabaseBackupPanel({
-  backupActionById,
-  backupForm,
-  backupJobs,
-  backupRuns,
-  backupsError,
-  connected,
-  databaseActionById,
-  databaseForm,
-  databaseSaving,
-  databases,
-  databasesError,
-  onBackupFormChange,
-  onCreateDatabase,
-  onDatabaseAction,
-  onDatabaseFormChange,
-  onEnableBackup,
-  onRunBackup,
-  onToggleBackup
-}: {
-  backupActionById: Record<number, string | null>;
-  backupForm: { databaseId: string; schedule: string; retentionDays: string };
-  backupJobs: DaemonBackupJob[];
-  backupRuns: DaemonBackupRun[];
-  backupsError: string | null;
-  connected: boolean;
-  databaseActionById: Record<number, string | null>;
-  databaseForm: { type: string; name: string };
-  databaseSaving: boolean;
-  databases: DaemonDatabase[];
-  databasesError: string | null;
-  onBackupFormChange: (form: { databaseId: string; schedule: string; retentionDays: string }) => void;
-  onCreateDatabase: () => void;
-  onDatabaseAction: (database: DaemonDatabase, action: "start" | "stop") => void;
-  onDatabaseFormChange: (form: { type: string; name: string }) => void;
-  onEnableBackup: () => void;
-  onRunBackup: (job: DaemonBackupJob) => void;
-  onToggleBackup: (job: DaemonBackupJob, enabled: boolean) => void;
-}) {
-  const latestRun = backupRuns[0] || null;
-  return (
-    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
-      <div className="grid gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 xl:grid-cols-[0.85fr_1.15fr]">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Databases & backups</p>
-          <h2 className="text-lg font-bold leading-tight sm:text-xl">Internal services with local-file backups</h2>
-          <p className="mt-1 max-w-2xl text-sm text-muted">Create supported database services, keep them internal by default, and run manual or scheduled local backups.</p>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <ReadinessCard label="Databases" value={String(databases.length)} status={databases.length ? "ok" : "warn"} />
-          <ReadinessCard label="Backups" value={String(backupJobs.length)} status={backupJobs.length ? "ok" : "warn"} />
-          <ReadinessCard label="Latest" value={latestRun?.status || "never"} status={latestRun?.status === "succeeded" ? "ok" : latestRun?.status === "failed" ? "error" : "warn"} />
-          <ReadinessCard label="Storage" value="local file" status="ok" />
-        </div>
-      </div>
-
-      {databasesError ? <Alert title="Database action failed" message={databasesError} /> : null}
-      {backupsError ? <Alert title="Backup action failed" message={backupsError} /> : null}
-
-      <div className="grid gap-0 xl:grid-cols-[minmax(0,1fr)_minmax(340px,0.9fr)]">
-        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
-          <ResourceSection title="Database services" count={databases.length} />
-          <div className="border-b border-white/5 px-4 py-3">
-            <div className="grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]">
-              <UiSelect value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} label="Type" options={["postgres", "mysql", "mariadb", "redis", "mongodb"]} />
-              <Field label="Name" value={databaseForm.name} onChange={(value) => onDatabaseFormChange({ ...databaseForm, name: value })} placeholder="postgres" disabled={!connected || databaseSaving} />
-              <div className="flex items-end"><PillButton strong onClick={onCreateDatabase} disabled={!connected || databaseSaving || !databaseForm.name.trim()}>{databaseSaving ? "Creating" : "Create"}</PillButton></div>
-            </div>
-          </div>
-
-          {databases.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No production database records yet. Create one to add a Compose-backed internal service.</div> : databases.map((database) => {
-            const busy = databaseActionById[database.id];
-            const running = database.status === "running";
-            return (
-              <div key={database.id} className="border-b border-white/5 px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold">{database.name}</p>
-                    <p className="mt-1 truncate font-mono text-[11px] text-muted">{database.image || database.type} · {database.composeService || "compose"} · {database.volumeName || "volume pending"}</p>
-                  </div>
-                  <StatusBadge status={database.status} />
-                </div>
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  <ReadinessCard label="Network" value={database.internal ? "internal" : "public"} status={database.internal ? "ok" : "error"} />
-                  <ReadinessCard label="Port" value={database.port ? `:${database.port}` : "none"} status="ok" />
-                  <ReadinessCard label="Env" value={`${database.envKeys.length} keys`} status="ok" />
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <PillButton onClick={() => onDatabaseAction(database, "start")} disabled={!connected || Boolean(busy) || running}>{busy === "start" ? "Starting" : "Start"}</PillButton>
-                  <PillButton onClick={() => onDatabaseAction(database, "stop")} disabled={!connected || Boolean(busy) || !running}>{busy === "stop" ? "Stopping" : "Stop"}</PillButton>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="min-w-0">
-          <ResourceSection title="Backup jobs" count={backupJobs.length} />
-          <div className="border-b border-white/5 px-4 py-3">
-            <div className="grid gap-2 sm:grid-cols-[minmax(120px,0.9fr)_minmax(0,1fr)_100px_auto]">
-              <UiSelect value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} label="Database">
-                <option value="">Choose</option>
-                {databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}
-              </UiSelect>
-              <Field label="Schedule" value={backupForm.schedule} onChange={(value) => onBackupFormChange({ ...backupForm, schedule: value })} placeholder="0 2 * * *" disabled={!connected} mono />
-              <Field label="Keep days" value={backupForm.retentionDays} onChange={(value) => onBackupFormChange({ ...backupForm, retentionDays: value })} placeholder="7" disabled={!connected} type="number" />
-              <div className="flex items-end"><PillButton strong onClick={onEnableBackup} disabled={!connected || !backupForm.databaseId}>Enable</PillButton></div>
-            </div>
-          </div>
-
-          {backupJobs.length === 0 ? <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Enable backups for a database to schedule local backup files and run manual backups.</div> : backupJobs.map((job) => {
-            const busy = backupActionById[job.id];
-            return (
-              <div key={job.id} className="border-b border-white/5 px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold">{job.databaseName || `database ${job.databaseId}`}</p>
-                    <p className="mt-1 truncate font-mono text-[11px] text-muted">{job.schedule || "manual only"} · retain {job.retentionDays}d · {job.localDir || "default backup dir"}</p>
-                  </div>
-                  <StatusBadge status={job.enabled ? "running" : "stopped"} />
-                </div>
-                {job.lastRunMessage ? <p className="mt-2 text-xs text-muted">Last run: {job.lastRunStatus || "unknown"} · {job.lastRunAt ? timeAgo(job.lastRunAt) : "never"} · {job.lastRunMessage}</p> : null}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <PillButton onClick={() => onRunBackup(job)} disabled={!connected || Boolean(busy)}>{busy === "run" ? "Running" : "Run now"}</PillButton>
-                  <PillButton onClick={() => onToggleBackup(job, !job.enabled)} disabled={!connected || Boolean(busy)}>{job.enabled ? "Disable" : "Enable"}</PillButton>
-                </div>
-              </div>
-            );
-          })}
-
-          <ResourceSection title="Backup runs" count={backupRuns.length} />
-          {backupRuns.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Backup run history will appear here after a manual or scheduled run.</div> : backupRuns.slice(0, 6).map((run) => (
-            <div key={run.id} className="border-b border-white/5 px-4 py-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold">#{run.id} {run.databaseName || `database ${run.databaseId}`}</p>
-                  <p className="mt-1 truncate font-mono text-[11px] text-muted">{run.trigger} · {run.finishedAt ? timeAgo(run.finishedAt) : timeAgo(run.createdAt)} · {formatBytes(run.sizeBytes)}</p>
-                </div>
-                <StatusBadge status={run.status} />
-              </div>
-              <p className="mt-2 truncate text-xs text-muted">{run.filePath || run.message || "no backup file"}</p>
-            </div>
-          ))}
-        </div>
-      </div>
-    </section>
   );
 }
 
@@ -2840,9 +2455,9 @@ function DetailPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-1 border-b border-white/5 bg-black/20 px-2 py-2 sm:grid-cols-7">
+      <div className="flex gap-1 overflow-x-auto border-b border-white/5 bg-black/20 px-2 py-2">
         {(["overview", "runtime", "env", "logs", "health", "deployments", "domains"] as const).map((item) => (
-          <button key={item} type="button" onClick={() => setTab(item)} className={`rounded-full px-2 py-1.5 text-[11px] font-bold capitalize ${FOCUS_RING} ${selectedTab === item ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground"}`}>{item}</button>
+          <button key={item} type="button" onClick={() => setTab(item)} className={`min-w-[5.8rem] rounded-full px-2 py-1.5 text-center text-[11px] font-bold capitalize ${FOCUS_RING} ${selectedTab === item ? "bg-surface-raised text-foreground" : "text-muted hover:text-foreground"}`}>{item}</button>
         ))}
       </div>
 
@@ -2959,14 +2574,14 @@ function DetailPanel({
               </div>
               <div className="mt-3 grid grid-cols-3 gap-2">
                 <ReadinessCard label="DNS" value={domain.dnsStatus} status={domain.dnsStatus === "verified" ? "ok" : "warn"} />
-                <ReadinessCard label="TLS" value={domain.tlsStatus} status={domain.tlsStatus === "active" ? "ok" : "warn"} />
+                <ReadinessCard label="TLS" value={domain.tlsStatus} status={tlsTone(domain.tlsStatus)} />
                 <ReadinessCard label="Target" value={domain.targetPort ? `:${domain.targetPort}` : "pending"} status={domain.targetPort ? "ok" : "warn"} />
               </div>
             </div>
           ))}
           <dl className="grid grid-cols-2 gap-x-3 gap-y-3 border-t border-white/5 px-4 py-4 text-xs">
             <Meta label="Proxy exposure" value={app.internal || app.type === "database" ? "blocked" : "allowed after DNS verification"} />
-            <Meta label="HTTPS" value={domains.some((domain) => domain.tlsStatus === "active") ? "active" : domains.some((domain) => domain.tlsStatus === "issuing") ? "issuing" : "pending"} />
+            <Meta label="HTTPS" value={httpsSummary(domains)} />
             <Meta label="Public routes" value={domains.map((domain) => `${domain.hostname}:${domain.tlsStatus}`).join(", ") || "none"} mono wide />
           </dl>
         </div>
