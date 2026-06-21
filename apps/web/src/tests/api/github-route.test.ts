@@ -27,7 +27,7 @@ describe("GitHub route handlers", () => {
       })
     );
 
-    const response = await GET_STATUS();
+    const response = await GET_STATUS(new Request("http://localhost/api/github/status"));
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -38,7 +38,7 @@ describe("GitHub route handlers", () => {
   it("returns daemon-unreachable failures for GitHub status", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("connect ECONNREFUSED"));
 
-    const response = await GET_STATUS();
+    const response = await GET_STATUS(new Request("http://localhost/api/github/status"));
     const body = await response.json();
 
     expect(response.status).toBe(503);

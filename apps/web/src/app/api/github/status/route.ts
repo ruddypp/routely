@@ -2,7 +2,7 @@ import { daemonFetch, daemonProxyResponse, type DaemonGithubStatusResponse } fro
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const result = await daemonFetch<DaemonGithubStatusResponse>("/github/status");
+export async function GET(request: Request) {
+  const result = await daemonFetch<DaemonGithubStatusResponse>("/github/status", undefined, { request });
   return daemonProxyResponse(result);
 }

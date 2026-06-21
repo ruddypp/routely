@@ -7,6 +7,6 @@ export async function POST(request: Request) {
   const result = await daemonFetch<{ rootDomain: string; instructions: Record<string, unknown> }>("/domains/root", {
     method: "POST",
     body: JSON.stringify(body)
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }

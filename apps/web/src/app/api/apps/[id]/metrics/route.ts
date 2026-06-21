@@ -8,6 +8,6 @@ export async function GET(request: Request, { params }: Context) {
   const { id } = await params;
   const url = new URL(request.url);
   const query = url.search || "";
-  const result = await daemonFetch(`/apps/${encodeURIComponent(id)}/metrics${query}`);
+  const result = await daemonFetch(`/apps/${encodeURIComponent(id)}/metrics${query}`, undefined, { request });
   return daemonProxyResponse(result);
 }

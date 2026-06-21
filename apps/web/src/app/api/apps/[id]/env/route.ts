@@ -4,9 +4,9 @@ export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ id: string }> };
 
-export async function GET(_request: Request, { params }: Context) {
+export async function GET(request: Request, { params }: Context) {
   const { id } = await params;
-  const result = await daemonFetch<DaemonAppEnvResponse>(`/apps/${encodeURIComponent(id)}/env`);
+  const result = await daemonFetch<DaemonAppEnvResponse>(`/apps/${encodeURIComponent(id)}/env`, undefined, { request });
   return daemonProxyResponse(result);
 }
 
@@ -16,6 +16,6 @@ export async function POST(request: Request, { params }: Context) {
   const result = await daemonFetch<DaemonAppEnvResponse>(`/apps/${encodeURIComponent(id)}/env`, {
     method: "POST",
     body: JSON.stringify(body)
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }

@@ -374,22 +374,85 @@ export type DaemonResult<T> =
   | { ok: true; status: number; data: T }
   | { ok: false; status: number; error: string };
 
+export type DaemonFetchOptions = {
+  request?: Request;
+  public?: boolean;
+};
+
+const DASHBOARD_AUTH_ERROR = "Routely dashboard API requires an admin token.";
+
+function dashboardAuthRequired() {
+  return process.env.ROUTELY_ENV === "production";
+}
+
+function configuredAdminToken() {
+  const token = process.env.ROUTELY_ADMIN_TOKEN?.trim();
+  return token || null;
+}
+
+function cookieValue(cookieHeader: string | null, name: string) {
+  if (!cookieHeader) return null;
+  for (const item of cookieHeader.split(";")) {
+    const [rawKey, ...rawValue] = item.trim().split("=");
+    if (rawKey === name) {
+      try {
+        return decodeURIComponent(rawValue.join("="));
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+
+function callerToken(request?: Request) {
+  if (!request) return null;
+  const authorization = request.headers.get("authorization") || "";
+  if (authorization.toLowerCase().startsWith("bearer ")) {
+    return authorization.slice(7).trim();
+  }
+  return request.headers.get("x-routely-admin-token")?.trim()
+    || cookieValue(request.headers.get("cookie"), "routely_admin_token")?.trim()
+    || null;
+}
+
+export function isDashboardRequestAuthorized(request?: Request) {
+  if (!dashboardAuthRequired()) return true;
+  const expected = configuredAdminToken();
+  const provided = callerToken(request);
+  return Boolean(expected && provided && provided === expected);
+}
+
+export function dashboardUnauthorizedResponse() {
+  return Response.json({ error: DASHBOARD_AUTH_ERROR }, { status: 401 });
+}
+
+export function dashboardUnauthorizedResult<T>(): DaemonResult<T> {
+  return { ok: false, status: 401, error: DASHBOARD_AUTH_ERROR };
+}
+
 /**
  * Fetch a daemon endpoint with a short timeout. Network/timeout failures are
  * returned as a structured error rather than thrown, so Route Handlers can map
  * them to a clean 503 instead of a stack trace.
  */
-export async function daemonFetch<T>(path: string, init?: RequestInit): Promise<DaemonResult<T>> {
+export async function daemonFetch<T>(path: string, init?: RequestInit, options: DaemonFetchOptions = {}): Promise<DaemonResult<T>> {
+  if (!options.public && !isDashboardRequestAuthorized(options.request)) {
+    return dashboardUnauthorizedResult<T>();
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 2500);
   const adminToken = process.env.ROUTELY_ADMIN_TOKEN;
 
   try {
-    const headers = {
-      ...(init?.body == null ? {} : { "content-type": "application/json" }),
-      ...(adminToken ? { authorization: `Bearer ${adminToken}` } : {}),
-      ...(init?.headers || {})
-    };
+    const headers = new Headers(init?.headers);
+    if (init?.body != null && !headers.has("content-type")) {
+      headers.set("content-type", "application/json");
+    }
+    if (!options.public && adminToken) {
+      headers.set("authorization", `Bearer ${adminToken}`);
+    }
     const response = await fetch(`${DAEMON_URL}${path}`, {
       ...init,
       cache: "no-store",

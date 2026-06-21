@@ -3,8 +3,8 @@ import { daemonFetch, type DaemonHealth } from "@/lib/daemon";
 // Always reflect live daemon state; never cache.
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const result = await daemonFetch<DaemonHealth>("/health");
+export async function GET(request: Request) {
+  const result = await daemonFetch<DaemonHealth>("/health", undefined, { request });
 
   if (!result.ok) {
     return Response.json(

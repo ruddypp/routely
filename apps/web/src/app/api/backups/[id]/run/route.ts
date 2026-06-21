@@ -11,6 +11,6 @@ export async function POST(request: Request, { params }: Context) {
   const result = await daemonFetch<BackupsResponse>(`/backups/${encodeURIComponent(id)}/run`, {
     method: "POST",
     body: JSON.stringify(body)
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }

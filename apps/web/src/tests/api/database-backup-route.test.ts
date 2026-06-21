@@ -67,7 +67,7 @@ describe("database and backup route handlers", () => {
       new Response(JSON.stringify({ database, app: { id: 9, name: "postgres" } }), { status: 201, headers: { "content-type": "application/json" } })
     );
 
-    const listResponse = await GET_DATABASES();
+    const listResponse = await GET_DATABASES(new Request("http://localhost/api/databases"));
     expect(listResponse.status).toBe(200);
     expect((await listResponse.json()).databases[0].internal).toBe(true);
 
@@ -91,7 +91,7 @@ describe("database and backup route handlers", () => {
       new Response(JSON.stringify({ jobs: [backupJob], runs: [backupRun], job: backupJob, run: backupRun }), { status: 200, headers: { "content-type": "application/json" } })
     );
 
-    expect((await GET_BACKUPS()).status).toBe(200);
+    expect((await GET_BACKUPS(new Request("http://localhost/api/backups"))).status).toBe(200);
     expect((await POST_BACKUP(new Request("http://localhost/api/backups", { method: "POST", body: JSON.stringify({ databaseId: 3 }) }))).status).toBe(200);
     expect((await RUN_BACKUP(new Request("http://localhost/api/backups/4/run", { method: "POST", body: JSON.stringify({ trigger: "manual" }) }), { params: Promise.resolve({ id: "4" }) })).status).toBe(200);
     expect(fetchMock).toHaveBeenLastCalledWith("http://127.0.0.1:9977/backups/4/run", expect.objectContaining({ method: "POST" }));

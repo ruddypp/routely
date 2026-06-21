@@ -40,7 +40,7 @@ describe("notification route handlers", () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(new Response(JSON.stringify({ channels: [channel], attempts: [attempt], channel }), { status: 200, headers: { "content-type": "application/json" } })));
     vi.stubGlobal("fetch", fetchMock);
 
-    expect((await GET()).status).toBe(200);
+    expect((await GET(new Request("http://localhost/api/notifications"))).status).toBe(200);
     const create = await POST(new Request("http://localhost/api/notifications", { method: "POST", body: JSON.stringify({ type: "discord", name: "deploys", url: "https://discord.example" }) }));
     expect(create.status).toBe(200);
     expect(fetchMock).toHaveBeenLastCalledWith("http://127.0.0.1:9977/notifications", expect.objectContaining({ method: "POST" }));
@@ -54,6 +54,8 @@ describe("notification route handlers", () => {
     await PATCH(new Request("http://localhost/api/notifications/1", { method: "PATCH", body: JSON.stringify({ enabled: false }) }), { params: Promise.resolve({ id: "1" }) });
     await TEST(new Request("http://localhost/api/notifications/1/test", { method: "POST", body: JSON.stringify({}) }), { params: Promise.resolve({ id: "1" }) });
 
-    expect(fetchMock).toHaveBeenLastCalledWith("http://127.0.0.1:9977/notifications/1/test", expect.objectContaining({ headers: expect.objectContaining({ authorization: "Bearer test-token" }) }));
+    expect(fetchMock).toHaveBeenLastCalledWith("http://127.0.0.1:9977/notifications/1/test", expect.objectContaining({ headers: expect.any(Headers) }));
+    const headers = fetchMock.mock.calls.at(-1)?.[1]?.headers as Headers;
+    expect(headers.get("authorization")).toBe("Bearer test-token");
   });
 });

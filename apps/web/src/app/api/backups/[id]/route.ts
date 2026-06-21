@@ -11,6 +11,6 @@ export async function PATCH(request: Request, { params }: Context) {
   const result = await daemonFetch<BackupsResponse>(`/backups/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(body)
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }

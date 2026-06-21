@@ -9,6 +9,6 @@ export async function GET(request: Request, { params }: Context) {
   const url = new URL(request.url);
   const after = url.searchParams.get("after");
   const query = after ? `?after=${encodeURIComponent(after)}` : "";
-  const result = await daemonFetch<DaemonDeploymentLogsResponse>(`/deployments/${encodeURIComponent(id)}/logs${query}`);
+  const result = await daemonFetch<DaemonDeploymentLogsResponse>(`/deployments/${encodeURIComponent(id)}/logs${query}`, undefined, { request });
   return daemonProxyResponse(result);
 }

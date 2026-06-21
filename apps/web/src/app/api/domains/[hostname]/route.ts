@@ -4,10 +4,10 @@ export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ hostname: string }> };
 
-export async function DELETE(_request: Request, { params }: Context) {
+export async function DELETE(request: Request, { params }: Context) {
   const { hostname } = await params;
   const result = await daemonFetch<{ ok: boolean; hostname: string }>(`/domains/${encodeURIComponent(hostname)}`, {
     method: "DELETE"
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }

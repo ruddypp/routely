@@ -1,10 +1,14 @@
-import { DAEMON_URL } from "@/lib/daemon";
+import { DAEMON_URL, dashboardUnauthorizedResponse, isDashboardRequestAuthorized } from "@/lib/daemon";
 
 export const dynamic = "force-dynamic";
 
 type Context = { params: Promise<{ id: string }> };
 
 export async function GET(request: Request, { params }: Context) {
+  if (!isDashboardRequestAuthorized(request)) {
+    return dashboardUnauthorizedResponse();
+  }
+
   const { id } = await params;
   const url = new URL(request.url);
   const adminToken = process.env.ROUTELY_ADMIN_TOKEN;

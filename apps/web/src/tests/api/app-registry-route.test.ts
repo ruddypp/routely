@@ -23,6 +23,7 @@ const app = {
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.ROUTELY_ADMIN_TOKEN;
+  delete process.env.ROUTELY_ENV;
 });
 
 describe("GET /api/apps", () => {
@@ -34,7 +35,7 @@ describe("GET /api/apps", () => {
       })
     );
 
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/apps"));
     const body = await response.json();
 
     expect(response.status).toBe(401);
@@ -52,7 +53,7 @@ describe("GET /api/apps", () => {
       })
     );
 
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/apps"));
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -60,9 +61,33 @@ describe("GET /api/apps", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:9977/apps",
       expect.objectContaining({
-        headers: expect.objectContaining({ authorization: `Bearer ${token}` })
+        headers: expect.any(Headers)
       })
     );
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("authorization")).toBe(`Bearer ${token}`);
+  });
+
+  it("requires a caller admin token in production", async () => {
+    process.env.ROUTELY_ENV = "production";
+    process.env.ROUTELY_ADMIN_TOKEN = "test-token";
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ apps: [app] }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const unauthorized = await GET(new Request("http://localhost/api/apps"));
+    const unauthorizedBody = await unauthorized.json();
+    const authorized = await GET(new Request("http://localhost/api/apps", {
+      headers: { "x-routely-admin-token": "test-token" }
+    }));
+
+    expect(unauthorized.status).toBe(401);
+    expect(unauthorizedBody.error).toContain("admin token");
+    expect(authorized.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 

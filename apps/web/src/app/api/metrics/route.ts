@@ -5,6 +5,6 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const url = new URL(request.url);
   const query = url.search || "";
-  const result = await daemonFetch(`/metrics${query}`);
+  const result = await daemonFetch(`/metrics${query}`, undefined, { request });
   return daemonProxyResponse(result);
 }

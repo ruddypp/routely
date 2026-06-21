@@ -15,14 +15,14 @@ export async function PATCH(request: Request, context: { params: Promise<{ id: s
   const result = await daemonFetch<NotificationsResponse>(`/notifications/${encodeURIComponent(id)}`, {
     method: "PATCH",
     body: JSON.stringify(body)
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }
 
-export async function DELETE(_request: Request, context: { params: Promise<{ id: string }> }) {
+export async function DELETE(request: Request, context: { params: Promise<{ id: string }> }) {
   const { id } = await context.params;
   const result = await daemonFetch<NotificationsResponse>(`/notifications/${encodeURIComponent(id)}`, {
     method: "DELETE"
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }

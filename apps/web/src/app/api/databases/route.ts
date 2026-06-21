@@ -2,8 +2,8 @@ import { daemonFetch, daemonProxyResponse, type DaemonDatabase, type DaemonApp }
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const result = await daemonFetch<{ databases: DaemonDatabase[] }>("/databases");
+export async function GET(request: Request) {
+  const result = await daemonFetch<{ databases: DaemonDatabase[] }>("/databases", undefined, { request });
   return daemonProxyResponse(result);
 }
 
@@ -12,6 +12,6 @@ export async function POST(request: Request) {
   const result = await daemonFetch<{ app: DaemonApp; database: DaemonDatabase }>("/databases", {
     method: "POST",
     body: JSON.stringify(body)
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }

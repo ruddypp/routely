@@ -33,7 +33,7 @@ describe("GET /api/server/status", () => {
       })
     );
 
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/server/status"));
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -45,4 +45,3 @@ describe("GET /api/server/status", () => {
     );
   });
 });
-

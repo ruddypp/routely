@@ -14,6 +14,6 @@ export async function POST(request: Request, context: { params: Promise<{ id: st
   const result = await daemonFetch<NotificationsResponse>(`/notifications/${encodeURIComponent(id)}/test`, {
     method: "POST",
     body: JSON.stringify(body)
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }

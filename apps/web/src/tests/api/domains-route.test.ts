@@ -31,7 +31,7 @@ describe("domain route handlers", () => {
       })
     );
 
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/domains"));
     const body = await response.json();
 
     expect(response.status).toBe(200);
@@ -47,7 +47,7 @@ describe("domain route handlers", () => {
       })
     );
 
-    const response = await GET();
+    const response = await GET(new Request("http://localhost/api/domains"));
     const body = await response.json();
 
     expect(response.status).toBe(401);
@@ -95,7 +95,7 @@ describe("domain route handlers", () => {
       })
     );
 
-    const response = await GET_PROXY();
+    const response = await GET_PROXY(new Request("http://localhost/api/proxy/routes"));
     const body = await response.json();
 
     expect(response.status).toBe(200);

@@ -20,6 +20,7 @@ const app = {
 afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.ROUTELY_ADMIN_TOKEN;
+  delete process.env.ROUTELY_ENV;
 });
 
 describe("POST /api/apps/:id/start", () => {
@@ -60,8 +61,10 @@ describe("POST /api/apps/:id/start", () => {
     expect(fetchMock).toHaveBeenCalledWith(
       "http://127.0.0.1:9977/apps/7/start",
       expect.objectContaining({
-        headers: expect.objectContaining({ authorization: "Bearer test-token" })
+        headers: expect.any(Headers)
       })
     );
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("authorization")).toBe("Bearer test-token");
   });
 });

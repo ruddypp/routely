@@ -2,8 +2,8 @@ import { daemonFetch, daemonProxyResponse, type DaemonGithubInstallation } from 
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
-  const result = await daemonFetch<{ installations: DaemonGithubInstallation[] }>("/github/installations");
+export async function GET(request: Request) {
+  const result = await daemonFetch<{ installations: DaemonGithubInstallation[] }>("/github/installations", undefined, { request });
   return daemonProxyResponse(result);
 }
 
@@ -12,6 +12,6 @@ export async function POST(request: Request) {
   const result = await daemonFetch<{ installation: DaemonGithubInstallation }>("/github/installations", {
     method: "POST",
     body: JSON.stringify(body)
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }

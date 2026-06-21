@@ -10,14 +10,14 @@ export async function PATCH(request: Request, { params }: Context) {
   const result = await daemonFetch<DaemonAppEnvResponse>(`/apps/${encodeURIComponent(id)}/env/${encodeURIComponent(key)}`, {
     method: "PATCH",
     body: JSON.stringify(body)
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }
 
-export async function DELETE(_request: Request, { params }: Context) {
+export async function DELETE(request: Request, { params }: Context) {
   const { id, key } = await params;
   const result = await daemonFetch<DaemonAppEnvResponse>(`/apps/${encodeURIComponent(id)}/env/${encodeURIComponent(key)}`, {
     method: "DELETE"
-  });
+  }, { request });
   return daemonProxyResponse(result);
 }
