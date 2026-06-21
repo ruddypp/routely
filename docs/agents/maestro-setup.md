@@ -6,6 +6,23 @@ Maestro agents for Routely are configured to use Codex with working directory:
 /home/ruddypp/Documents/work/routely
 ```
 
+## 9Router / Codex Routing
+
+Codex should run through local 9router, not directly against one Codex account.
+
+Required local setup:
+
+```text
+9router endpoint: http://127.0.0.1:20128/v1
+Codex model_provider: 9router
+Codex model: routely-auto
+Codex subagent model: routely-auto
+```
+
+The `routely-auto` combo is configured in the local 9router SQLite DB and is intended to fall back across Codex accounts first, then other configured providers/models if Codex capacity is unavailable. 9router must be running before starting Maestro agents.
+
+If an agent was already running before this config changed, restart that Maestro agent/session so Codex reloads `~/.codex/config.toml` and uses `routely-auto`.
+
 ## Agents
 
 | Role | Maestro name | Agent ID |
