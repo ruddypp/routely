@@ -6,7 +6,17 @@ This file is the domain glossary for agents working on Routely. Keep it free of 
 
 **Routely** — The product: a local-first app runner that grows into a single-VPS production control plane for solo developers.
 
+**Solo operator** — The intended Routely user: one developer who owns the instance, manages their own apps, and does not need team/RBAC workflows.
+
 **App registry** — The shared list of apps and services Routely manages. It is the mental model that connects local development and production operations.
+
+**Managed app** — An app or service entry Routely can run, stop, disable, observe, and deploy from the dashboard.
+
+**App enablement** — The user-controlled state that decides whether a managed app participates in bulk start operations while keeping the app registered for later use.
+
+**Bulk start** — The operator action that starts all enabled managed apps together while still allowing individual apps to be stopped or disabled afterward.
+
+**Compose-backed app** — A managed app whose runtime is described as a Compose project so Routely can treat different stacks through one operational model.
 
 **Local runner** — The local workflow started by `routely`, responsible for starting registered local apps/services, showing status, streaming logs, and stopping managed processes on exit.
 
@@ -17,6 +27,8 @@ This file is the domain glossary for agents working on Routely. Keep it free of 
 **Daemon** — The private HTTP process that owns Routely runtime operations and state access. Browser code must not call it directly.
 
 **Dashboard** — The Next.js web UI for local and production operations. Dashboard browser code calls same-origin `/api/*` route handlers.
+
+**Dashboard-first management** — The product principle that app registration, lifecycle controls, deployment setup, and operational diagnosis should be doable from the dashboard without requiring manual config editing for normal use.
 
 **Dashboard API route** — A same-origin Next.js route handler that proxies or adapts daemon behavior for the dashboard.
 
