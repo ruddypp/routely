@@ -27,7 +27,6 @@ If an agent was already running before this config changed, restart that Maestro
 
 | Role | Maestro name | Agent ID |
 | --- | --- | --- |
-| Lead | `routely` | `63dca434-ed89-4b97-88a1-24710ef4ac50` |
 | Lead | `Routely Lead` | `029cb2c2-7b3b-4ee5-a375-9d8d2d55bf00` |
 | Product Manager | `PM` | `6598d93e-6f19-4975-af91-4648eb992591` |
 | Backend | `Backend` | `e2a663bf-0d9f-4cfb-9c03-3e49309356a5` |
@@ -36,7 +35,7 @@ If an agent was already running before this config changed, restart that Maestro
 | QA | `QA E2E` | `b666873c-5096-4b18-9c9f-8359d844c561` |
 | Security | `Security` | `9dc9ab4d-841c-45e1-bd6f-8fb64e1fef99` |
 
-`routely` and `Routely Lead` both use the Routely Lead prompt. Keep one or use both as needed.
+Use `Routely Lead` as the only Lead agent.
 
 ## Role Prompts
 
@@ -54,7 +53,7 @@ The team workflow contract lives in `docs/agents/team-workflow.md`.
 
 ## Recommended Flow
 
-1. Start with `routely` or `Routely Lead` to define the objective and blockers.
+1. Start with `Routely Lead` to define the objective and blockers.
 2. Send planning work to `PM`.
 3. Send dashboard design details to `UI UX`.
 4. Send platform/API/CLI/storage implementation to `Backend`.
