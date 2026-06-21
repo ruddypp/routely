@@ -63,7 +63,7 @@ Server and production operations:
 - Production private daemon paths require admin bearer token auth.
 - Server-side dashboard/API calls can forward `ROUTELY_ADMIN_TOKEN` without exposing it to browser code.
 - Dockerfile deploy foundations exist with deployment history and logs.
-- Compose helpers exist, and production Compose-backed app parity is the target hardening path.
+- A narrow Compose-backed production deploy path exists for one registered Compose app/service on the Routely host; broader production Compose parity still needs fresh VPS verification.
 - Domain/proxy/HTTPS state exists with Traefik-compatible helpers.
 - GitHub signed webhook validation and repo/branch auto-deploy foundations exist.
 - Env/secrets storage, masking, injection, restart/redeploy-needed state, and redaction helpers exist.
@@ -77,7 +77,7 @@ Server and production operations:
 - Verified app enable/disable UX and Start All semantics across config, daemon/API, CLI, and dashboard.
 - Dashboard app creation/editing that is usable without manual config editing for the normal path.
 - Fresh one-VPS verification for deploy path, domain, DNS, HTTPS, env/secrets, logs, deploy history, health, database, and backup state.
-- Production Compose parity or explicit public-alpha copy that labels Dockerfile deploys as the current bridge.
+- Fresh one-service Compose deploy verification on a VPS, plus explicit public-alpha copy for any Compose cases still outside the verified bridge.
 - GitHub push demo with one successful deploy and one intentional broken deploy.
 - Complete production login/session UI or clear alpha access guidance.
 - Installer/service-manager guidance for running Routely itself on a VPS.

@@ -33,9 +33,9 @@ The MVP is defined by three demos:
 - A dashboard at `http://localhost:3030` that talks to same-origin `/api/*` routes, not directly to the daemon from browser code.
 - A daemon at `http://127.0.0.1:9977` in local mode.
 - SQLite state under `<workspace>/.routely/routely.db` and logs under `<workspace>/.routely/logs`.
-- Production vertical slices for Dockerfile deploys, domains/proxy state, signed GitHub webhooks, env/secrets, health/metrics, production database records, local-file backups, and webhook/Discord/Telegram notifications.
+- Production vertical slices for Dockerfile deploys, a narrow one-service Compose-backed deploy path, domains/proxy state, signed GitHub webhooks, env/secrets, health/metrics, production database records, local-file backups, and webhook/Discord/Telegram notifications.
 
-These production slices are alpha foundations, not a finished Dokploy replacement or verified production Compose parity. Dashboard-first app setup, Start All/per-app stop/disable controls, full production service installation/upgrade automation, login UI, rollback, external backup storage, public app catalogs, and broad VPS operations remain deferred until verified.
+These production slices are alpha foundations, not a finished Dokploy replacement or broad production Compose parity. Dashboard-first app setup, Start All/per-app stop/disable controls, multi-service Compose orchestration beyond one registered app/service, full production service installation/upgrade automation, login UI, rollback, external backup storage, public app catalogs, and broad VPS operations remain deferred until verified.
 
 ## Requirements
 
