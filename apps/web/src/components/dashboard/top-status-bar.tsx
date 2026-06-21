@@ -16,6 +16,7 @@ export function TopStatusBar({ connected, daemonUrl, loading, mode, onRefresh, r
         <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:gap-2">
           <StatusChip tone={connected ? "ok" : "error"} label="daemon" value={connected ? "connected" : "offline"} detail={daemonUrl} />
           <StatusChip tone={modeLabel === "production" ? "warn" : "ok"} label="mode" value={modeLabel} />
+          <StatusChip tone="muted" label="scope" value="solo / one VPS" />
           <StatusChip tone={refreshing || loading ? "warn" : "muted"} label="state" value={loading ? "loading" : refreshing ? "refreshing" : `updated ${updated}`} />
           <button
             type="button"

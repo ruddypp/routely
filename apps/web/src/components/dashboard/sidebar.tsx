@@ -9,7 +9,7 @@ export function Sidebar({ activeModule, connected, onSelect }: { activeModule: D
         <div className="routely-mark" aria-hidden="true">R</div>
         <div className="min-w-0">
           <p className="truncate text-sm font-bold leading-tight">Routely</p>
-          <p className="truncate text-[11px] text-muted">Local control plane</p>
+          <p className="truncate text-[11px] text-muted">Solo ops: local → one VPS</p>
         </div>
       </div>
 
@@ -18,7 +18,7 @@ export function Sidebar({ activeModule, connected, onSelect }: { activeModule: D
           <span className={`h-2 w-2 rounded-full ${connected ? "bg-accent" : "bg-negative"}`} aria-hidden="true" />
           <p className="text-[11px] font-bold text-foreground">daemon {connected ? "online" : "offline"}</p>
         </div>
-        <p className="mt-1 font-mono text-[10px] text-muted">same-origin /api/*</p>
+        <p className="mt-1 font-mono text-[10px] text-muted">same-origin /api/* · solo mode</p>
       </div>
 
       <nav className="mt-5 space-y-4" aria-label="Dashboard modules">

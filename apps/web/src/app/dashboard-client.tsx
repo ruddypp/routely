@@ -1753,8 +1753,8 @@ function OverviewPanel({ apps, backupJobs, backupRuns, connected, deployments, d
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
       <div className="grid gap-4 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.9fr)] xl:items-start">
         <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Command center</p>
-          <h1 className="text-xl font-bold leading-tight">Local control plane</h1>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Solo operator console</p>
+          <h1 className="text-xl font-bold leading-tight">Local-to-one-VPS operations</h1>
           <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
             <Meta label="Daemon" value={connected ? "connected" : "offline"} />
             <Meta label="Mode" value={server?.mode || "local"} />
@@ -1772,12 +1772,12 @@ function OverviewPanel({ apps, backupJobs, backupRuns, connected, deployments, d
       {healthchecksUnavailable ? <Alert title="Some overview data is stale" message={healthchecksUnavailable} /> : null}
       <div className="grid gap-3 px-4 py-4 xl:grid-cols-[1.05fr_0.95fr]">
         <div className="grid gap-3 sm:grid-cols-2">
-          <OverviewStatusCard title="Fleet" action="Apps" onAction={() => onSelect("apps")} items={[`running ${running}`, `stopped ${stopped}`, `crashed ${crashed}`, `disabled ${disabled}`]} tone={crashed ? "error" : pendingApps.length ? "warn" : "ok"} />
+          <OverviewStatusCard title="Resources" action="Apps" onAction={() => onSelect("apps")} items={[`running ${running}`, `stopped ${stopped}`, `crashed ${crashed}`, `disabled ${disabled}`]} tone={crashed ? "error" : pendingApps.length ? "warn" : "ok"} />
           <OverviewStatusCard title="Latest deploy" action="Deploy" onAction={() => onSelect("deployments")} items={latestDeploy ? [latestDeploy.appName || `app ${latestDeploy.appId}`, `${latestDeploy.status} · ${latestDeploy.phase}`, timeAgo(latestDeploy.updatedAt)] : ["no deployments", "Dockerfile apps can deploy"]} tone={latestDeploy ? statusTone(latestDeploy.status) : "warn"} />
           <OverviewStatusCard title="Domains & proxy" action="Domains" onAction={() => onSelect("domains")} items={[domainsMeta.rootDomain || "root unset", `${verifiedDomains}/${domains.length} DNS ready`, `${enabledRoutes} proxy routes`]} tone={domains.length && verifiedDomains === domains.length ? "ok" : domains.length ? "warn" : "warn"} />
-          <OverviewStatusCard title="GitHub & backups" action="System" onAction={() => onSelect(githubConnected ? "backups" : "github")} items={[github?.configured ? "GitHub app configured" : "GitHub app missing", githubConnected ? "repo connected" : "no repo connected", latestBackup ? `${latestBackup.status} backup · ${timeAgo(latestBackup.updatedAt)}` : `${backupJobs.length} backup jobs`]} tone={backupFailures.length ? "error" : githubConnected || backupJobs.length ? "ok" : "warn"} />
+          <OverviewStatusCard title="GitHub & backups" action="Release" onAction={() => onSelect(githubConnected ? "backups" : "github")} items={[github?.configured ? "GitHub app configured" : "GitHub app missing", githubConnected ? "repo connected" : "no repo connected", latestBackup ? `${latestBackup.status} backup · ${timeAgo(latestBackup.updatedAt)}` : `${backupJobs.length} backup jobs`]} tone={backupFailures.length ? "error" : githubConnected || backupJobs.length ? "ok" : "warn"} />
         </div>
-        <OverviewList title="Urgent next actions" empty="No urgent action. Fleet is clean." action="Review" onAction={() => onSelect(urgent[0]?.module || "apps")}>
+        <OverviewList title="Urgent next actions" empty="No urgent action. Operations are clean." action="Review" onAction={() => onSelect(urgent[0]?.module || "apps")}>
           {urgent.map((item) => <TimelineRow key={item.key} title={item.title} detail={item.detail} tone={item.tone} />)}
         </OverviewList>
       </div>
@@ -1946,12 +1946,12 @@ function ServerFoundationPanel({ connected, error, server }: { connected: boolea
     <section className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
       <div className="grid gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 lg:grid-cols-[1.1fr_1.4fr] lg:items-center">
         <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Server foundation</p>
-          <h2 className="text-lg font-bold leading-tight sm:text-xl">Production readiness</h2>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Server status</p>
+          <h2 className="text-lg font-bold leading-tight sm:text-xl">One-VPS readiness</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted">
             {server?.production
-              ? "Production mode is enabled. Deployments, domains, GitHub, backups, and notifications depend on the readiness checks below."
-              : "Local mode is active. Run server init and server doctor before using one-VPS deploy, domain, GitHub, backup, or notification workflows."}
+              ? "Production mode is enabled for a single server. Deployments, domains, GitHub, backups, and notifications depend on the readiness checks below."
+              : "Local mode is active. Run server init and server doctor before using the one-VPS deploy, domain, GitHub, backup, or notification workflows."}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">

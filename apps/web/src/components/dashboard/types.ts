@@ -12,6 +12,7 @@ export type DashboardModuleKey =
   | "env"
   | "databases"
   | "backups"
+  | "server"
   | "settings";
 
 export type DashboardModule = {
@@ -22,28 +23,33 @@ export type DashboardModule = {
 };
 
 export type DashboardNavGroup = {
-  label: "Control" | "Deploy" | "Data" | "System";
+  label: "Operate" | "Release" | "Observe" | "Data" | "Node";
   modules: DashboardModule[];
 };
 
 export const DASHBOARD_NAV_GROUPS: DashboardNavGroup[] = [
   {
-    label: "Control",
+    label: "Operate",
     modules: [
-      { key: "overview", label: "Overview", summary: "Fleet command", signal: true },
-      { key: "apps", label: "Apps", summary: "Local registry", signal: true },
-      { key: "logs", label: "Logs", summary: "Runtime output" },
-      { key: "health", label: "Health", summary: "Checks and failures" },
-      { key: "metrics", label: "Metrics", summary: "Host and app samples" }
+      { key: "overview", label: "Overview", summary: "Local → one VPS", signal: true },
+      { key: "apps", label: "Apps / Services", summary: "Registry + Start", signal: true }
     ]
   },
   {
-    label: "Deploy",
+    label: "Release",
     modules: [
-      { key: "deployments", label: "Deployments", summary: "Dockerfile releases" },
-      { key: "domains", label: "Domains", summary: "DNS and proxy", signal: true },
-      { key: "github", label: "GitHub", summary: "Repos and webhooks" },
-      { key: "env", label: "Env", summary: "Secrets and pending state" }
+      { key: "deployments", label: "Deployments", summary: "Dockerfile bridge" },
+      { key: "domains", label: "Domains", summary: "DNS / proxy / TLS", signal: true },
+      { key: "github", label: "GitHub", summary: "Signed push deploy" },
+      { key: "env", label: "Env / Secrets", summary: "Redacted metadata" }
+    ]
+  },
+  {
+    label: "Observe",
+    modules: [
+      { key: "logs", label: "Logs", summary: "Local + deploy output" },
+      { key: "health", label: "Health", summary: "Checks / failures" },
+      { key: "metrics", label: "Metrics", summary: "Host + app samples" }
     ]
   },
   {
@@ -54,8 +60,11 @@ export const DASHBOARD_NAV_GROUPS: DashboardNavGroup[] = [
     ]
   },
   {
-    label: "System",
-    modules: [{ key: "settings", label: "Settings", summary: "Notifications and server", signal: true }]
+    label: "Node",
+    modules: [
+      { key: "server", label: "Server Status", summary: "One-VPS readiness", signal: true },
+      { key: "settings", label: "Notifications / Settings", summary: "Alerts + deferred", signal: true }
+    ]
   }
 ];
 
