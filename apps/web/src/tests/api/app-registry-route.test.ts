@@ -89,6 +89,21 @@ describe("GET /api/apps", () => {
     expect(authorized.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("rejects malformed admin token cookies without proxying", async () => {
+    process.env.ROUTELY_ENV = "production";
+    process.env.ROUTELY_ADMIN_TOKEN = "test-token";
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    const response = await GET(new Request("http://localhost/api/apps", {
+      headers: { cookie: "routely_admin_token=%E0%A4%A" }
+    }));
+    const body = await response.json();
+
+    expect(response.status).toBe(401);
+    expect(body.error).toContain("admin token");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/apps", () => {
