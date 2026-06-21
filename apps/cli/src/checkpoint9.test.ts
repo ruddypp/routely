@@ -2,7 +2,7 @@ import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { evaluateHttpHealthcheck, evaluateRuntimeHealth, formatSseEvent, healthcheckToPublicDto, metricSampleToPublicDto } from "@routely/core";
+import { evaluateHttpHealthcheck, evaluateRuntimeHealth, formatSseEvent, healthSummaryToPublicDto, healthcheckToPublicDto, metricSampleToPublicDto } from "@routely/core";
 import {
   initializeRoutely,
   listHealthchecksForApp,
@@ -22,6 +22,7 @@ describe("checkpoint 9 logs, metrics, and health", () => {
     });
     expect(evaluateHttpHealthcheck({ expectedStatus: 200, httpStatus: 503, responseTimeMs: 10 }).status).toBe("unhealthy");
     expect(evaluateRuntimeHealth({ running: false, message: "container exited" })).toEqual({ status: "unhealthy", message: "container exited" });
+    expect(evaluateRuntimeHealth({ available: false, message: "healthcheck deferred" })).toEqual({ status: "unavailable", message: "healthcheck deferred" });
   });
 
   it("frames deployment logs as SSE events", () => {
@@ -50,9 +51,21 @@ describe("checkpoint 9 logs, metrics, and health", () => {
     recordMetricSample(db, { appId: app.id, scope: "container", cpuPercent: 3.5, memoryBytes: 1024, memoryLimitBytes: 4096, message: "docker stats" });
 
     expect(healthcheckToPublicDto(health).responseTimeMs).toBe(37);
+    expect(healthSummaryToPublicDto(listHealthchecksForApp(db, app.id))).toMatchObject({ status: "healthy", available: true, message: "HTTP 204 in 37ms" });
     expect(listHealthchecksForApp(db, app.id)).toHaveLength(1);
     const metrics = listMetricSamplesForApp(db, app.id);
     expect(metricSampleToPublicDto(metrics[0]).cpuPercent).toBe(3.5);
     db.close();
+  });
+
+  it("summarizes missing healthchecks as unavailable for dashboard diagnosis", () => {
+    expect(healthSummaryToPublicDto([])).toEqual({
+      status: "unknown",
+      available: false,
+      reason: "unavailable",
+      message: "No healthcheck results recorded yet.",
+      checkedAt: null,
+      checks: []
+    });
   });
 });

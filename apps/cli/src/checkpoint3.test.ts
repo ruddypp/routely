@@ -41,7 +41,8 @@ describe("checkpoint 3 config and preset helpers", () => {
           depends_on: ["postgres"],
           healthcheck: { path: "/", expected_status: 200 },
           domains: ["web.example.test"],
-          source: { type: "github", repo: "owner/web", branch: "main", auto_deploy: { enabled: true, branches: ["main"] } },
+          source: { type: "github", repo: "owner/web", branch: "main" },
+          auto_deploy: { enabled: false, branches: ["preview"] },
           compose_file: "./compose.yml",
           compose_service: "web",
           enabled: false
@@ -56,7 +57,7 @@ describe("checkpoint 3 config and preset helpers", () => {
     expect(config.apps[0].depends_on).toEqual(["postgres"]);
     expect(config.apps[0].healthcheck?.expected_status).toBe(200);
     expect(config.apps[0].domains).toEqual(["web.example.test"]);
-    expect(config.apps[0].source?.auto_deploy?.branches).toEqual(["main"]);
+    expect(config.apps[0].source?.auto_deploy).toEqual({ enabled: false, branches: ["preview"] });
     expect(config.apps[0].compose_file).toBe("./compose.yml");
     expect(config.apps[0].compose_service).toBe("web");
 
@@ -66,10 +67,24 @@ describe("checkpoint 3 config and preset helpers", () => {
     expect(exported.depends_on).toEqual(["postgres"]);
     expect(exported.healthcheck).toEqual({ path: "/", expected_status: 200 });
     expect(exported.domains).toEqual(["web.example.test"]);
-    expect(exported.source).toEqual({ type: "github", repo: "owner/web", branch: "main", auto_deploy: { enabled: true, branches: ["main"] } });
+    expect(exported.source).toEqual({ type: "github", repo: "owner/web", branch: "main", auto_deploy: { enabled: false, branches: ["preview"] } });
     expect(exported.compose_file).toBe("./compose.yml");
     expect(exported.compose_service).toBe("web");
     expect(exported.enabled).toBe(false);
+  });
+
+  it("rejects unsupported app fields instead of silently dropping them", () => {
+    expect(() =>
+      normalizeWorkspaceConfig({
+        apps: [
+          {
+            name: "web",
+            command: "npm run dev",
+            launch_plan: "not supported"
+          }
+        ]
+      })
+    ).toThrow(/Unsupported app field: launch_plan/);
   });
 
   it("preserves compose metadata and enablement while redacting secret-like env values", () => {

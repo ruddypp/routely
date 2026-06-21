@@ -764,12 +764,29 @@ export function syncWorkspaceConfig(db, loaded) {
       const resolvedPath =
         item.path && !isAbsolute(item.path) ? resolve(baseDir, item.path) : item.path || null;
 
-      upsertApp(db, {
+      const saved = upsertApp(db, {
         ...item,
         path: resolvedPath,
         // Keep the live runtime status; fall back to the config default otherwise.
         status: existing ? existing.status : item.status
       });
+
+      const databaseType = databaseTypeForConfigItem(item, saved);
+      if (databaseType) {
+        upsertDatabase(db, {
+          appId: saved.id,
+          name: saved.name,
+          type: databaseType,
+          status: saved.status,
+          internal: saved.internal,
+          image: saved.image,
+          port: saved.port,
+          composeService: saved.compose_service || saved.name,
+          composeFile: saved.compose_file,
+          volumeName: firstNamedVolume(saved.volumes) || `${saved.name}_data`,
+          env: saved.env || {}
+        });
+      }
 
       synced.push(item.name);
     }
@@ -777,6 +794,23 @@ export function syncWorkspaceConfig(db, loaded) {
 
   apply(entries);
   return synced;
+}
+
+function databaseTypeForConfigItem(item, saved) {
+  const candidate = saved?.preset || item?.preset || item?.type;
+  if ((saved?.type || item?.type) !== "database") return null;
+  try {
+    return normalizeDatabaseType(candidate);
+  } catch {
+    return null;
+  }
+}
+
+function firstNamedVolume(volumes = []) {
+  const volume = (volumes || []).find((item) => typeof item === "string" && item.includes(":"));
+  if (!volume) return null;
+  const [name] = volume.split(":");
+  return name || null;
 }
 
 export function getAppById(db, appId) {
@@ -1157,6 +1191,7 @@ function parseDatabaseRecord(row) {
 function parseBackupJobRecord(row) {
   return {
     ...row,
+    database_env: row.database_env ? parseJsonObject(row.database_env) : {},
     database_id: Number(row.database_id),
     enabled: Boolean(row.enabled),
     retention_days: Number(row.retention_days || 7)
@@ -1166,6 +1201,7 @@ function parseBackupJobRecord(row) {
 function parseBackupRunRecord(row) {
   return {
     ...row,
+    database_env: row.database_env ? parseJsonObject(row.database_env) : {},
     backup_job_id: Number(row.backup_job_id),
     database_id: Number(row.database_id),
     size_bytes: row.size_bytes == null ? null : Number(row.size_bytes)
@@ -1227,7 +1263,7 @@ export function upsertDatabase(db, input = {}) {
   const payload = {
     appId: input.appId ?? input.app_id ?? existing?.app_id ?? null,
     status: input.status || existing?.status || "stopped",
-    internal: input.internal == null ? true : Boolean(input.internal),
+    internal: input.internal === false && (input.allowPublic === true || input.allow_public === true) ? false : true,
     image: input.image || existing?.image || null,
     port: input.port == null || input.port === "" ? null : Number(input.port),
     composeService: input.composeService || input.compose_service || existing?.compose_service || name,
@@ -1306,6 +1342,7 @@ export function upsertBackupJob(db, input = {}) {
 export function getBackupJobById(db, backupJobId) {
   const row = db.prepare(`
     SELECT backup_jobs.*, databases.name AS database_name, databases.type AS database_type,
+      databases.env AS database_env,
       latest.status AS last_run_status, latest.finished_at AS last_run_at, latest.message AS last_run_message
     FROM backup_jobs
     JOIN databases ON databases.id = backup_jobs.database_id
@@ -1320,6 +1357,7 @@ export function getBackupJobById(db, backupJobId) {
 export function getBackupJobForDatabase(db, databaseId) {
   const row = db.prepare(`
     SELECT backup_jobs.*, databases.name AS database_name, databases.type AS database_type,
+      databases.env AS database_env,
       latest.status AS last_run_status, latest.finished_at AS last_run_at, latest.message AS last_run_message
     FROM backup_jobs
     JOIN databases ON databases.id = backup_jobs.database_id
@@ -1334,6 +1372,7 @@ export function getBackupJobForDatabase(db, databaseId) {
 export function listBackupJobs(db) {
   return db.prepare(`
     SELECT backup_jobs.*, databases.name AS database_name, databases.type AS database_type,
+      databases.env AS database_env,
       latest.status AS last_run_status, latest.finished_at AS last_run_at, latest.message AS last_run_message
     FROM backup_jobs
     JOIN databases ON databases.id = backup_jobs.database_id
@@ -1379,7 +1418,7 @@ export function updateBackupRun(db, backupRunId, patch = {}) {
 
 export function getBackupRunById(db, backupRunId) {
   const row = db.prepare(`
-    SELECT backup_runs.*, databases.name AS database_name, databases.type AS database_type
+    SELECT backup_runs.*, databases.name AS database_name, databases.type AS database_type, databases.env AS database_env
     FROM backup_runs
     JOIN databases ON databases.id = backup_runs.database_id
     WHERE backup_runs.id = ?
@@ -1390,7 +1429,7 @@ export function getBackupRunById(db, backupRunId) {
 export function listBackupRuns(db, options = {}) {
   const limit = Number.isInteger(options.limit) ? options.limit : 50;
   return db.prepare(`
-    SELECT backup_runs.*, databases.name AS database_name, databases.type AS database_type
+    SELECT backup_runs.*, databases.name AS database_name, databases.type AS database_type, databases.env AS database_env
     FROM backup_runs
     JOIN databases ON databases.id = backup_runs.database_id
     ORDER BY backup_runs.created_at DESC, backup_runs.id DESC
@@ -1401,7 +1440,7 @@ export function listBackupRuns(db, options = {}) {
 export function listBackupRunsForJob(db, backupJobId, options = {}) {
   const limit = Number.isInteger(options.limit) ? options.limit : 50;
   return db.prepare(`
-    SELECT backup_runs.*, databases.name AS database_name, databases.type AS database_type
+    SELECT backup_runs.*, databases.name AS database_name, databases.type AS database_type, databases.env AS database_env
     FROM backup_runs
     JOIN databases ON databases.id = backup_runs.database_id
     WHERE backup_runs.backup_job_id = ?

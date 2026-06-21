@@ -80,6 +80,16 @@ async function jsonRequest(baseUrl: string, path: string, init: RequestInit = {}
   return { response, body };
 }
 
+async function waitForDeploymentStatus(baseUrl: string, deploymentId: number, status: string) {
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
+    const result = await jsonRequest(baseUrl, `/deployments/${deploymentId}/logs`);
+    if (result.body.deployment?.status === status) return result;
+    await new Promise((resolveWait) => setTimeout(resolveWait, 100));
+  }
+  throw new Error(`Deployment ${deploymentId} did not reach ${status}.`);
+}
+
 async function createApp(baseUrl: string, input: Record<string, unknown>) {
   const { response, body } = await jsonRequest(baseUrl, "/apps", {
     method: "POST",
@@ -387,6 +397,105 @@ describe("QA regression fixes", () => {
     expect(detail.body.app.env).toEqual({});
   });
 
+  it("redacts app secrets from failed deployment metadata and logs", async () => {
+    const workspace = await createWorkspace();
+    const secretPath = join(workspace, "raw-secret-source");
+    const { baseUrl } = await startDaemon(workspace);
+    const app = await createApp(baseUrl, { name: "web", driver: "dockerfile", path: secretPath, port: 3000 });
+
+    await jsonRequest(baseUrl, `/apps/${app.id}/env`, {
+      method: "POST",
+      body: JSON.stringify({ key: "SECRET_PATH", value: secretPath, isSecret: true, scope: "production" })
+    });
+
+    const queued = await jsonRequest(baseUrl, `/apps/${app.id}/deployments`, { method: "POST" });
+    expect(queued.response.status).toBe(202);
+    const failed = await waitForDeploymentStatus(baseUrl, queued.body.deployment.id, "failed");
+
+    expect(failed.body.deployment.phase).toBe("preparing");
+    expect(failed.body.deployment.logsUrl).toBe(`/deployments/${queued.body.deployment.id}/logs`);
+    expect(failed.body.deployment.errorMessage).toContain("[redacted]");
+    expect(JSON.stringify(failed.body)).not.toContain(secretPath);
+  });
+
+  it("reports internal Compose HTTP healthchecks as unavailable without probing unpublished ports", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace);
+    const app = await createApp(baseUrl, {
+      name: "postgres",
+      type: "database",
+      driver: "compose",
+      image: "postgres:16",
+      internal: true,
+      port: 5432,
+      healthcheck: { path: "/health", expected_status: 200 }
+    });
+    const { db } = initializeRoutely(workspace);
+    const deployment = createDeployment(db, { appId: app.id, containerPort: 5432 });
+    updateDeployment(db, deployment.id, {
+      status: "succeeded",
+      phase: "succeeded",
+      containerName: "compose:routely_test/postgres",
+      hostPort: null,
+      finishedAt: "2026-06-22T00:00:00.000Z"
+    });
+    db.close();
+
+    const health = await jsonRequest(baseUrl, `/apps/${app.id}/health`);
+
+    expect(health.response.status).toBe(200);
+    expect(health.body.health).toMatchObject({
+      status: "unavailable",
+      available: false,
+      reason: "unavailable"
+    });
+    expect(health.body.health.message).toContain("no reachable host port");
+    expect(health.body.health.checks[0]).toMatchObject({
+      target: "compose",
+      deploymentId: deployment.id,
+      status: "unavailable"
+    });
+  });
+
+  it("returns failed backup run metadata without serving sensitive backup files", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace);
+
+    const created = await jsonRequest(baseUrl, "/databases", {
+      method: "POST",
+      body: JSON.stringify({ type: "postgres", name: "qa-postgres" })
+    });
+    expect(created.response.status).toBe(201);
+
+    const enabled = await jsonRequest(baseUrl, "/backups", {
+      method: "POST",
+      body: JSON.stringify({ database: "qa-postgres", enabled: true, schedule: null, retentionDays: 7 })
+    });
+    expect(enabled.response.status).toBe(201);
+
+    const run = await jsonRequest(baseUrl, `/backups/${enabled.body.job.id}/run`, {
+      method: "POST",
+      body: JSON.stringify({ trigger: "manual" })
+    });
+
+    expect(run.response.status).toBe(500);
+    expect(run.body.error).toBeTruthy();
+    expect(run.body.run).toMatchObject({
+      status: "failed",
+      trigger: "manual",
+      storageType: "local",
+      storageStatus: "metadata-only",
+      restoreStatus: "deferred",
+      downloadUrl: null,
+      filePath: null
+    });
+    expect(run.body.run.file).toMatchObject({
+      available: false,
+      servesFile: false,
+      downloadUrl: null
+    });
+  });
+
   it("rejects unsafe notification targets before saving channels", async () => {
     const workspace = await createWorkspace();
     const { baseUrl } = await startDaemon(workspace);
@@ -416,6 +525,38 @@ describe("QA regression fixes", () => {
 
     expect(statuses).toEqual([202, 409]);
     expect(first.body.deployment.id).toBe(second.body.deployment.id);
+  });
+
+  it("rejects production deploys that cannot honestly run", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace);
+    const commandApp = await createApp(baseUrl, {
+      name: "worker",
+      driver: "command",
+      command: `${process.execPath} -e "setInterval(() => {}, 1000)"`
+    });
+    const incompleteCompose = await createApp(baseUrl, { name: "api", driver: "compose" });
+    const disabledCompose = await createApp(baseUrl, {
+      name: "disabled-api",
+      driver: "compose",
+      compose_file: "compose.yml",
+      compose_service: "api",
+      enabled: false
+    });
+
+    const unsupported = await jsonRequest(baseUrl, `/apps/${commandApp.id}/deployments`, { method: "POST" });
+    expect(unsupported.response.status).toBe(400);
+    expect(unsupported.body).toMatchObject({ code: "unsupported-driver" });
+    expect(unsupported.body.error).toContain("Dockerfile and Compose apps only");
+
+    const missingComposeMetadata = await jsonRequest(baseUrl, `/apps/${incompleteCompose.id}/deployments`, { method: "POST" });
+    expect(missingComposeMetadata.response.status).toBe(400);
+    expect(missingComposeMetadata.body).toMatchObject({ code: "missing-compose-metadata" });
+    expect(missingComposeMetadata.body.error).toContain("compose_file or image");
+
+    const disabled = await jsonRequest(baseUrl, `/apps/${disabledCompose.id}/deployments`, { method: "POST" });
+    expect(disabled.response.status).toBe(400);
+    expect(disabled.body).toMatchObject({ code: "disabled" });
   });
 
   it("serializes overlapping lifecycle actions so reported status and start conflicts agree", async () => {

@@ -1,4 +1,4 @@
-import { mkdtemp } from "node:fs/promises";
+import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -7,15 +7,18 @@ import {
   backupRunToPublicDto,
   backupScheduleDue,
   databaseToPublicDto,
+  loadWorkspaceConfig,
   normalizeBackupSchedule,
   selectBackupRunsForRetention
 } from "@routely/core";
 import {
   createBackupRun,
+  getDatabaseByName,
   getBackupJobForDatabase,
   initializeRoutely,
   listBackupRuns,
   listDatabases,
+  syncWorkspaceConfig,
   updateBackupRun,
   upsertBackupJob,
   upsertDatabase
@@ -53,14 +56,67 @@ describe("checkpoint 10 databases and backups", () => {
     });
     const job = upsertBackupJob(db, { databaseId: database.id, schedule: "0 2 * * *", retentionDays: 3 });
     const run = createBackupRun(db, { backupJobId: job.id, trigger: "manual" });
-    const finished = updateBackupRun(db, run.id, { status: "succeeded", filePath: "/tmp/postgres.sql", sizeBytes: 12, finishedAt: "2026-06-18T00:00:00.000Z" });
+    const finished = updateBackupRun(db, run.id, {
+      status: "succeeded",
+      filePath: "/tmp/postgres.sql",
+      sizeBytes: 12,
+      message: "completed backup with password secret",
+      finishedAt: "2026-06-18T00:00:00.000Z"
+    });
+    const publicAttempt = upsertDatabase(db, { name: "public-postgres", type: "postgres", internal: false });
 
-    expect(listDatabases(db)).toHaveLength(1);
+    expect(listDatabases(db)).toHaveLength(2);
     expect(databaseToPublicDto(database).envKeys).toEqual(["POSTGRES_DB", "POSTGRES_PASSWORD"]);
     expect(JSON.stringify(databaseToPublicDto(database))).not.toContain("secret");
-    expect(backupJobToPublicDto(getBackupJobForDatabase(db, database.id)!).schedule).toBe("0 2 * * *");
-    expect(backupRunToPublicDto(finished!).filePath).toBe("/tmp/postgres.sql");
+    expect(databaseToPublicDto(publicAttempt).internal).toBe(true);
+    const jobDto = backupJobToPublicDto(getBackupJobForDatabase(db, database.id)!);
+    expect(jobDto.schedule).toBe("0 2 * * *");
+    expect(jobDto.storageType).toBe("local");
+    expect(jobDto.restoreStatus).toBe("deferred");
+    const runDto = backupRunToPublicDto(finished!);
+    expect(runDto.filePath).toBe("/tmp/postgres.sql");
+    expect(runDto.fileName).toBe("postgres.sql");
+    expect(runDto.file.available).toBe(true);
+    expect(runDto.file.servesFile).toBe(false);
+    expect(runDto.downloadUrl).toBeNull();
+    expect(runDto.message).not.toContain("secret");
+    expect(runDto.message).toContain("[redacted]");
+    expect(backupRunToPublicDto({ ...finished!, status: "failed" }).file.available).toBe(false);
     expect(listBackupRuns(db)).toHaveLength(1);
+    db.close();
+  });
+
+  it("syncs database services into internal-only database records", async () => {
+    const root = await mkdtemp(join(tmpdir(), "routely-database-sync-"));
+    await writeFile(join(root, "routely.yml"), `version: 1
+name: db-sync
+apps: []
+services:
+  - name: postgres
+    type: database
+    preset: postgres
+    driver: compose
+    image: postgres:16
+    port: 5432
+    internal: false
+    env:
+      POSTGRES_DB: app
+      POSTGRES_PASSWORD: secret
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+`, "utf8");
+
+    const loaded = loadWorkspaceConfig(root)!;
+    const { db } = initializeRoutely(root);
+    expect(syncWorkspaceConfig(db, loaded)).toEqual(["postgres"]);
+
+    const database = getDatabaseByName(db, "postgres")!;
+    const dto = databaseToPublicDto(database);
+    expect(dto.internal).toBe(true);
+    expect(dto.connectionScope).toBe("internal-only");
+    expect(dto.volumeName).toBe("postgres_data");
+    expect(dto.envKeys).toEqual(["POSTGRES_DB", "POSTGRES_PASSWORD"]);
+    expect(JSON.stringify(dto)).not.toContain("secret");
     db.close();
   });
 });

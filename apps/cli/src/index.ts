@@ -48,12 +48,13 @@ import {
   syncWorkspaceConfig,
   clearAppEnvPendingFlags,
   updateAppStatus,
-  upsertApp
+  upsertApp,
+  upsertDatabase
 } from "@routely/db";
 import { startCommandApp, startComposeService, stopComposeService } from "@routely/drivers";
 import { createDatabaseService, detectPreset, getAppPreset } from "@routely/presets";
 import { validateHostname } from "@routely/proxy";
-import { DependencyCycleError, sortByDependencies } from "./dependencies.js";
+import { DependencyCycleError, selectBulkStartApps } from "./dependencies.js";
 import { resolveInstallRoot, resolveWorkspaceRoot } from "./paths.js";
 import { findDuplicatePorts, findExistingRoutelyDashboard, findUnavailablePorts, isPortAvailable, probeRoutelyDaemon, probeRoutelyDashboard } from "./ports.js";
 
@@ -139,7 +140,8 @@ Usage:
   routely logs [app]       Print app logs, optionally with --follow
   routely restart [app]    Restart one command app
   routely health <app>     Show app health and latest metric samples
-  routely deploy <app>     Trigger a Dockerfile production deployment, optionally with --watch
+  routely deploy <app>     Trigger a Dockerfile or Compose production deployment, optionally with --watch
+  routely deployments [app] List deployment history and log links
   routely env <app> list
   routely env <app> set KEY=value [--secret] [--scope all|local|production]
   routely env <app> unset KEY
@@ -309,11 +311,15 @@ type RoutelyDatabaseDto = {
   type: string;
   status: string;
   internal: boolean;
+  connectionScope: "internal-only" | "public-requested";
   image: string | null;
   port: number | null;
   composeService: string | null;
+  composeFile: string | null;
   volumeName: string | null;
   envKeys: string[];
+  createdAt: string;
+  updatedAt: string;
 };
 
 type RoutelyBackupJobDto = {
@@ -324,10 +330,29 @@ type RoutelyBackupJobDto = {
   enabled: boolean;
   schedule: string | null;
   retentionDays: number;
+  retentionStatus: string;
+  storageType: "local";
+  storageStatus: "metadata-only";
+  restoreStatus: "deferred";
   localDir: string | null;
+  storage: {
+    type: "local";
+    localDir: string | null;
+    external: false;
+    servesFiles: false;
+  };
+  retention: {
+    days: number;
+    mode: "local-successful-runs";
+    prunesAfterSuccessfulBackup: true;
+    externalStorage: false;
+    restoreSupported: false;
+  };
   lastRunStatus: string | null;
   lastRunAt: string | null;
   lastRunMessage: string | null;
+  createdAt: string;
+  updatedAt: string;
 };
 
 type RoutelyBackupRunDto = {
@@ -338,11 +363,26 @@ type RoutelyBackupRunDto = {
   databaseType: string | null;
   status: string;
   trigger: string;
+  storageType: "local";
+  storageStatus: "metadata-only";
+  restoreStatus: "deferred";
+  downloadUrl: null;
   filePath: string | null;
+  fileName: string | null;
+  file: {
+    available: boolean;
+    path: string | null;
+    name: string | null;
+    sizeBytes: number | null;
+    servesFile: false;
+    downloadUrl: null;
+  };
   sizeBytes: number | null;
   message: string | null;
+  startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
+  updatedAt: string;
 };
 
 type RoutelyBackupsResponse = {
@@ -780,6 +820,19 @@ async function dbCommand(args: string[]): Promise<void> {
   }) as unknown as RoutelyAppInput;
   const { db } = initializeRoutely(workspaceRoot);
   const saved = upsertApp(db, payload);
+  const database = upsertDatabase(db, {
+    appId: saved.id,
+    name: saved.name,
+    type: saved.preset,
+    status: saved.status,
+    internal: saved.internal,
+    image: saved.image,
+    port: saved.port,
+    composeService: saved.compose_service || saved.name,
+    composeFile: saved.compose_file,
+    volumeName: saved.volumes?.[0]?.split(":")?.[0] || `${saved.name}_data`,
+    env: saved.env || {}
+  });
   const configWrite = upsertWorkspaceConfigEntry(workspaceRoot, payload, "services");
 
   console.log(`Registered ${saved.name}.`);
@@ -787,6 +840,7 @@ async function dbCommand(args: string[]): Promise<void> {
   console.log(`Driver:  ${saved.driver}`);
   console.log(`Image:   ${saved.image}`);
   console.log(`Port:    ${saved.port}`);
+  console.log(`Scope:   ${database.internal ? "internal-only" : "public-requested"}`);
   console.log(`Config:  ${configWrite.configPath}`);
   db.close();
 }
@@ -802,10 +856,10 @@ async function backupCommand(args: string[]): Promise<void> {
     }
     if (result.data.jobs.length === 0) console.log("No backup jobs configured yet.");
     for (const job of result.data.jobs) {
-      console.log(`job:${job.id}\t${job.databaseName || job.databaseId}\t${job.enabled ? "enabled" : "disabled"}\t${job.schedule || "manual"}\tretention:${job.retentionDays}d\tlast:${job.lastRunStatus || "never"}`);
+      console.log(`job:${job.id}\t${job.databaseName || job.databaseId}\t${job.enabled ? "enabled" : "disabled"}\t${job.schedule || "manual"}\tretention:${job.retentionDays}d/${job.retentionStatus}\tstorage:${job.storageType}\trestore:${job.restoreStatus}\tlast:${job.lastRunStatus || "never"}`);
     }
     for (const run of result.data.runs.slice(0, 10)) {
-      console.log(`run:${run.id}\t${run.databaseName || run.databaseId}\t${run.status}\t${run.trigger}\t${run.filePath || run.message || "-"}`);
+      console.log(`run:${run.id}\t${run.databaseName || run.databaseId}\t${run.status}\t${run.trigger}\t${run.fileName || run.message || "-"}\tsize:${formatBytes(run.sizeBytes)}\tstorage:${run.storageType}`);
     }
     return;
   }
@@ -873,7 +927,7 @@ async function backupCommand(args: string[]): Promise<void> {
     console.error(`Backup failed: ${result.error}`);
     process.exit(1);
   }
-  console.log(`Backup ${result.data.run?.status}: ${result.data.run?.filePath || result.data.run?.message || "no file"}`);
+  console.log(`Backup ${result.data.run?.status}: ${result.data.run?.fileName || result.data.run?.message || "no local file metadata"}`);
 }
 
 async function notifyCommand(args: string[]): Promise<void> {
@@ -1000,7 +1054,7 @@ async function upCommand(): Promise<void> {
   let shuttingDown = false;
 
   try {
-    apps = sortByDependencies(listApps(db).filter((app) => app.enabled && ["command", "compose"].includes(app.driver)));
+    apps = selectBulkStartApps(listApps(db));
   } catch (error) {
     if (error instanceof DependencyCycleError) {
       console.error(error.message);
@@ -1399,7 +1453,8 @@ async function deployCommand(args: string[]): Promise<void> {
 
   const deployment = result.data.deployment;
   console.log(`Queued deployment ${deployment.id} for ${app.name}.`);
-  console.log(`Status: ${deployment.status}`);
+  console.log(`Status: ${deployment.status}\tPhase: ${deployment.phase}`);
+  console.log(`Logs: ${deployment.logsUrl}`);
 
   if (flags.watch || flags.w) {
     await watchDeployment(deployment.id);
@@ -1426,22 +1481,59 @@ async function watchDeployment(deploymentId: number): Promise<void> {
 
     const status = result.data.deployment.status;
     if (status !== lastStatus) {
-      console.log(`Deployment status: ${status}`);
+      console.log(`Deployment status: ${status}\tPhase: ${result.data.deployment.phase}`);
       lastStatus = status;
     }
 
     if (status === "succeeded") {
-      const url = result.data.deployment.hostPort ? `http://127.0.0.1:${result.data.deployment.hostPort}` : "temporary port unavailable";
+      const url = result.data.deployment.hostPort
+        ? `http://127.0.0.1:${result.data.deployment.hostPort}`
+        : result.data.deployment.containerName || "no public host port";
       console.log(`Deployment succeeded: ${url}`);
       return;
     }
 
     if (status === "failed") {
-      console.error(`Deployment failed: ${result.data.deployment.errorMessage || "unknown error"}`);
+      console.error(`Deployment failed in ${result.data.deployment.phase}: ${result.data.deployment.errorMessage || "unknown error"}`);
+      console.error(`Logs: ${result.data.deployment.logsUrl}`);
       process.exit(1);
     }
 
     await sleep(1000);
+  }
+}
+
+async function deploymentsCommand(args: string[]): Promise<void> {
+  const appName = String(args[0] || "").trim();
+  let path = "/deployments";
+
+  if (appName) {
+    const { db } = initializeRoutely(workspaceRoot);
+    syncConfig(db);
+    const app = getAppByName(db, appName);
+    db.close();
+    if (!app) {
+      console.error(`App not found: ${appName}`);
+      process.exit(1);
+    }
+    path = `/deployments?appId=${app.id}`;
+  }
+
+  const result = await daemonRequest<{ deployments: RoutelyDeploymentDto[] }>(path);
+  if (!result.ok) {
+    console.error(`Could not list deployments: ${result.error}`);
+    process.exit(1);
+  }
+
+  if (result.data.deployments.length === 0) {
+    console.log(appName ? `No deployments recorded for ${appName}.` : "No deployments recorded yet.");
+    return;
+  }
+
+  for (const deployment of result.data.deployments) {
+    const source = deployment.repo ? `${deployment.repo}:${deployment.branch || "-"}` : deployment.sourceType || "local";
+    const failure = deployment.status === "failed" ? `\terror:${deployment.errorMessage || "unknown"}` : "";
+    console.log(`#${deployment.id}\t${deployment.appName || deployment.appId}\t${deployment.status}\tphase:${deployment.phase}\t${source}\tlogs:${deployment.logsUrl}${failure}`);
   }
 }
 
@@ -1840,6 +1932,9 @@ switch (command) {
     break;
   case "deploy":
     await deployCommand(argv.slice(1));
+    break;
+  case "deployments":
+    await deploymentsCommand(argv.slice(1));
     break;
   case "env":
     await envCommand(argv.slice(1));

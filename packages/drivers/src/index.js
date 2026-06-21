@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, isAbsolute, resolve } from "node:path";
 
 export const routelyDriversVersion = "0.1.0";
 
@@ -67,9 +67,12 @@ export function composeConfigToYaml(config) {
 }
 
 export function writeComposeConfig(app, workspaceRoot) {
-  const composeDir = resolve(workspaceRoot, ".routely", "compose");
-  mkdirSync(composeDir, { recursive: true });
-  const composePath = app.compose_file || resolve(composeDir, `${safeName(app.name)}.compose.yml`);
+  const composePath = resolveComposeFile(app, workspaceRoot);
+  if (app.compose_file && existsSync(composePath)) {
+    return composePath;
+  }
+
+  mkdirSync(dirname(composePath), { recursive: true });
   writeFileSync(composePath, composeConfigToYaml(buildComposeConfig(app)), "utf8");
   return composePath;
 }
@@ -78,10 +81,11 @@ export function startComposeService(app, workspaceRoot, options = {}) {
   const composeFile = writeComposeConfig(app, workspaceRoot);
   const project = options.project || composeProjectName(workspaceRoot);
   const serviceName = app.compose_service || app.name;
-  return spawn("docker", ["compose", "-p", project, "-f", composeFile, "up", "-d", serviceName], {
+  return spawn("docker", composeUpArgs({ project, composeFile, serviceName }), {
     cwd: workspaceRoot,
     shell: false,
-    stdio: options.stdio || "inherit"
+    stdio: options.stdio || "inherit",
+    env: { ...process.env, ...(options.env || {}) }
   });
 }
 
@@ -89,11 +93,40 @@ export function stopComposeService(app, workspaceRoot, options = {}) {
   const composeFile = writeComposeConfig(app, workspaceRoot);
   const project = options.project || composeProjectName(workspaceRoot);
   const serviceName = app.compose_service || app.name;
-  return spawn("docker", ["compose", "-p", project, "-f", composeFile, "stop", serviceName], {
+  return spawn("docker", composeStopArgs({ project, composeFile, serviceName }), {
     cwd: workspaceRoot,
     shell: false,
-    stdio: options.stdio || "inherit"
+    stdio: options.stdio || "inherit",
+    env: { ...process.env, ...(options.env || {}) }
   });
+}
+
+export function resolveComposeFile(app, workspaceRoot) {
+  if (app.compose_file) {
+    return isAbsolute(app.compose_file) ? app.compose_file : resolve(workspaceRoot, app.compose_file);
+  }
+  return resolve(workspaceRoot, ".routely", "compose", `${safeName(app.name)}.compose.yml`);
+}
+
+export function composeUpArgs({ project, composeFile, serviceName }) {
+  if (!project) throw new Error("Compose project is required.");
+  if (!composeFile) throw new Error("Compose file is required.");
+  if (!serviceName) throw new Error("Compose service name is required.");
+  return ["compose", "-p", project, "-f", composeFile, "up", "-d", serviceName];
+}
+
+export function composeStopArgs({ project, composeFile, serviceName }) {
+  if (!project) throw new Error("Compose project is required.");
+  if (!composeFile) throw new Error("Compose file is required.");
+  if (!serviceName) throw new Error("Compose service name is required.");
+  return ["compose", "-p", project, "-f", composeFile, "stop", serviceName];
+}
+
+export function composePsRunningArgs({ project, composeFile, serviceName }) {
+  if (!project) throw new Error("Compose project is required.");
+  if (!composeFile) throw new Error("Compose file is required.");
+  if (!serviceName) throw new Error("Compose service name is required.");
+  return ["compose", "-p", project, "-f", composeFile, "ps", "--status", "running", "-q", serviceName];
 }
 
 export function buildDockerfileImageTag(appName, deploymentId) {

@@ -12,6 +12,52 @@ export const BACKUP_RUN_STATUSES = ["queued", "running", "succeeded", "failed", 
 export const NOTIFICATION_CHANNEL_TYPES = ["webhook", "discord", "telegram"];
 export const NOTIFICATION_EVENTS = ["deploy_succeeded", "deploy_failed", "backup_failed"];
 
+const SECRET_ENV_PATTERN = /(SECRET|TOKEN|PASSWORD|PRIVATE|KEY)/i;
+const REDACTED_VALUE = "[redacted]";
+const APP_INPUT_KEYS = new Set([
+  "id",
+  "server_id",
+  "serverId",
+  "name",
+  "type",
+  "preset",
+  "driver",
+  "path",
+  "command",
+  "install",
+  "dev",
+  "build",
+  "start",
+  "env",
+  "envKeys",
+  "port",
+  "ports",
+  "depends_on",
+  "dependsOn",
+  "healthcheck",
+  "domains",
+  "source",
+  "auto_deploy",
+  "autoDeploy",
+  "image",
+  "internal",
+  "volumes",
+  "compose_file",
+  "composeFile",
+  "compose_service",
+  "composeService",
+  "needs_restart",
+  "needsRestart",
+  "needs_redeploy",
+  "needsRedeploy",
+  "enabled",
+  "status",
+  "created_at",
+  "createdAt",
+  "updated_at",
+  "updatedAt"
+]);
+
 export class DependencyCycleError extends Error {
   constructor(cycle) {
     super(`Dependency cycle detected: ${cycle.join(" -> ")}`);
@@ -77,9 +123,6 @@ function normalizeDependencies(value) {
 
   return [String(value).trim()].filter(Boolean);
 }
-
-const SECRET_ENV_PATTERN = /(SECRET|TOKEN|PASSWORD|PRIVATE|KEY)/i;
-const REDACTED_VALUE = "[redacted]";
 
 function enumValue(value, allowed, fallback, label) {
   const normalized = value || fallback;
@@ -243,6 +286,7 @@ function inferServiceType(input) {
 }
 
 export function normalizeAppInput(input) {
+  assertSupportedAppInputFields(input);
   const name = String(input.name || "").trim();
 
   if (!name) {
@@ -254,7 +298,7 @@ export function normalizeAppInput(input) {
 
   return {
     name,
-    server_id: input.server_id == null ? 1 : Number(input.server_id),
+    server_id: (input.server_id ?? input.serverId) == null ? 1 : Number(input.server_id ?? input.serverId),
     type: enumValue(input.type, APP_TYPES, "app", "app type"),
     preset: input.preset || "custom",
     driver: enumValue(input.driver, APP_DRIVERS, "command", "app driver"),
@@ -267,10 +311,10 @@ export function normalizeAppInput(input) {
     env: normalizeStringMap(input.env),
     port,
     ports,
-    depends_on: normalizeDependsOn(input.depends_on),
+    depends_on: normalizeDependsOn(input.depends_on ?? input.dependsOn),
     healthcheck: normalizeHealthcheck(input.healthcheck),
     domains: normalizeStringArray(input.domains),
-    source: normalizeSource(input.source),
+    source: normalizeSource(input.source, input.auto_deploy ?? input.autoDeploy),
     image: stringOrNull(input.image),
     internal: input.internal == null ? false : Boolean(input.internal),
     volumes: normalizeStringArray(input.volumes),
@@ -279,6 +323,17 @@ export function normalizeAppInput(input) {
     enabled: input.enabled == null ? true : Boolean(input.enabled),
     status: input.status || "stopped"
   };
+}
+
+function assertSupportedAppInputFields(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return;
+  }
+
+  const unsupported = Object.keys(input).filter((key) => !APP_INPUT_KEYS.has(key));
+  if (unsupported.length > 0) {
+    throw new Error(`Unsupported app field${unsupported.length === 1 ? "" : "s"}: ${unsupported.join(", ")}`);
+  }
 }
 
 function stringOrNull(value) {
@@ -346,27 +401,29 @@ function normalizeHealthcheck(value) {
     return null;
   }
 
+  const expectedStatus = value.expected_status ?? value.expectedStatus;
   const normalized = {
     path: stringOrNull(value.path),
-    expected_status:
-      value.expected_status == null || value.expected_status === "" ? null : Number(value.expected_status)
+    expected_status: expectedStatus == null || expectedStatus === "" ? null : Number(expectedStatus)
   };
 
   return normalized.path || normalized.expected_status ? normalized : null;
 }
 
-function normalizeSource(value) {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
+function normalizeSource(value, autoDeployInput) {
+  const hasSource = value && typeof value === "object" && !Array.isArray(value);
+  const autoDeploy = autoDeployInput ?? (hasSource ? value.auto_deploy ?? value.autoDeploy : null);
+
+  if (!hasSource && !autoDeploy) {
     return null;
   }
 
   const source = {
-    type: stringOrNull(value.type),
-    repo: stringOrNull(value.repo),
-    branch: stringOrNull(value.branch)
+    type: stringOrNull(hasSource ? value.type : null),
+    repo: stringOrNull(hasSource ? value.repo : null),
+    branch: stringOrNull(hasSource ? value.branch : null)
   };
 
-  const autoDeploy = value.auto_deploy || value.autoDeploy;
   if (autoDeploy && typeof autoDeploy === "object" && !Array.isArray(autoDeploy)) {
     source.auto_deploy = {
       enabled: autoDeploy.enabled == null ? true : Boolean(autoDeploy.enabled),
@@ -445,6 +502,7 @@ export function appToPublicDto(app) {
 }
 
 export function deploymentToPublicDto(deployment) {
+  const logsUrl = `/deployments/${deployment.id}/logs`;
   return {
     id: deployment.id,
     appId: deployment.app_id,
@@ -462,6 +520,8 @@ export function deploymentToPublicDto(deployment) {
     hostPort: deployment.host_port == null ? null : Number(deployment.host_port),
     containerPort: deployment.container_port == null ? null : Number(deployment.container_port),
     errorMessage: deployment.error_message || null,
+    logsUrl,
+    logsStreamUrl: `/deployments/${deployment.id}/logs/stream`,
     startedAt: deployment.started_at || null,
     finishedAt: deployment.finished_at || null,
     createdAt: deployment.created_at,
@@ -482,6 +542,7 @@ export function deploymentLogToPublicDto(log) {
 }
 
 export function healthcheckToPublicDto(row) {
+  const status = row.last_status || "unknown";
   return {
     id: row.id,
     appId: row.app_id,
@@ -489,13 +550,33 @@ export function healthcheckToPublicDto(row) {
     target: row.target || "runtime",
     path: row.path || null,
     expectedStatus: row.expected_status == null ? null : Number(row.expected_status),
-    status: row.last_status || "unknown",
+    status,
+    available: status !== "unknown" && status !== "unavailable",
     httpStatus: row.last_http_status == null ? null : Number(row.last_http_status),
     responseTimeMs: row.last_response_time_ms == null ? null : Number(row.last_response_time_ms),
     message: row.last_message || null,
     checkedAt: row.last_checked_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
+  };
+}
+
+export function healthSummaryToPublicDto(checks = [], options = {}) {
+  const publicChecks = (checks || []).map((check) => healthcheckToPublicDto(check));
+  const latest = publicChecks[0] || null;
+  const status = latest?.status || "unknown";
+  const available = latest ? latest.available : false;
+  const reason = latest
+    ? status === "unavailable" || status === "unknown" ? status : null
+    : options.reason || "unavailable";
+
+  return {
+    status,
+    available,
+    reason,
+    message: latest?.message || options.message || "No healthcheck results recorded yet.",
+    checkedAt: latest?.checkedAt || null,
+    checks: publicChecks
   };
 }
 
@@ -519,6 +600,7 @@ export function metricSampleToPublicDto(row) {
 
 export function databaseToPublicDto(row) {
   const env = row.env && typeof row.env === "object" ? row.env : {};
+  const internal = Boolean(row.internal);
   return {
     id: row.id,
     appId: row.app_id,
@@ -526,7 +608,8 @@ export function databaseToPublicDto(row) {
     name: row.name,
     type: row.type,
     status: row.status || "stopped",
-    internal: Boolean(row.internal),
+    internal,
+    connectionScope: internal ? "internal-only" : "public-requested",
     image: row.image || null,
     port: row.port == null ? null : Number(row.port),
     composeService: row.compose_service || null,
@@ -539,6 +622,8 @@ export function databaseToPublicDto(row) {
 }
 
 export function backupJobToPublicDto(row) {
+  const retentionDays = Number(row.retention_days || 7);
+  const localDir = row.local_dir || null;
   return {
     id: row.id,
     databaseId: row.database_id,
@@ -546,17 +631,38 @@ export function backupJobToPublicDto(row) {
     databaseType: row.database_type || null,
     enabled: Boolean(row.enabled),
     schedule: row.schedule || null,
-    retentionDays: Number(row.retention_days || 7),
-    localDir: row.local_dir || null,
+    retentionDays,
+    retentionStatus: retentionDays > 0 ? "local-prune-after-success" : "disabled",
+    storageType: "local",
+    storageStatus: "metadata-only",
+    restoreStatus: "deferred",
+    localDir,
+    storage: {
+      type: "local",
+      localDir,
+      external: false,
+      servesFiles: false
+    },
+    retention: {
+      days: retentionDays,
+      mode: "local-successful-runs",
+      prunesAfterSuccessfulBackup: true,
+      externalStorage: false,
+      restoreSupported: false
+    },
     lastRunStatus: row.last_run_status || null,
     lastRunAt: row.last_run_at || null,
-    lastRunMessage: row.last_run_message || null,
+    lastRunMessage: redactDatabaseMessage(row.last_run_message, row),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
 }
 
 export function backupRunToPublicDto(row) {
+  const filePath = row.file_path || null;
+  const sizeBytes = row.size_bytes == null ? null : Number(row.size_bytes);
+  const fileName = filePath ? filePath.split(/[\\/]/).filter(Boolean).at(-1) || null : null;
+  const fileAvailable = row.status === "succeeded" && Boolean(filePath);
   return {
     id: row.id,
     backupJobId: row.backup_job_id,
@@ -565,14 +671,40 @@ export function backupRunToPublicDto(row) {
     databaseType: row.database_type || null,
     status: row.status,
     trigger: row.trigger || "manual",
-    filePath: row.file_path || null,
-    sizeBytes: row.size_bytes == null ? null : Number(row.size_bytes),
-    message: row.message || null,
+    storageType: "local",
+    storageStatus: "metadata-only",
+    restoreStatus: "deferred",
+    downloadUrl: null,
+    filePath,
+    fileName,
+    file: {
+      available: fileAvailable,
+      path: filePath,
+      name: fileName,
+      sizeBytes,
+      servesFile: false,
+      downloadUrl: null
+    },
+    sizeBytes,
+    message: redactDatabaseMessage(row.message, row),
     startedAt: row.started_at || null,
     finishedAt: row.finished_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at
   };
+}
+
+function redactDatabaseMessage(message, row) {
+  if (!message) return null;
+  let env = row.database_env && typeof row.database_env === "object" ? row.database_env : {};
+  if (typeof row.database_env === "string") {
+    try {
+      env = JSON.parse(row.database_env);
+    } catch {
+      env = {};
+    }
+  }
+  return redactSecrets(message, Object.values(env));
 }
 
 export function normalizeDatabaseType(type) {
@@ -650,7 +782,8 @@ function cronFieldMatches(field, value) {
 export function selectBackupRunsForRetention(runs = [], retentionDays = 7, now = new Date()) {
   const cutoff = now.getTime() - Math.max(1, Number(retentionDays || 7)) * 24 * 60 * 60 * 1000;
   return (runs || []).filter((run) => {
-    if (run.status !== "succeeded" || !run.file_path) return false;
+    const filePath = run.file_path || run.filePath;
+    if (run.status !== "succeeded" || !filePath) return false;
     const finishedAt = run.finished_at || run.finishedAt || run.updated_at || run.updatedAt;
     return finishedAt ? new Date(finishedAt).getTime() < cutoff : false;
   });
@@ -688,6 +821,10 @@ export function evaluateHttpHealthcheck(input = {}) {
 }
 
 export function evaluateRuntimeHealth(input = {}) {
+  if (input.available === false) {
+    return { status: "unavailable", message: input.message || "runtime health is unavailable" };
+  }
+
   if (input.running) {
     return { status: "healthy", message: input.message || "runtime is running" };
   }

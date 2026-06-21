@@ -3,6 +3,11 @@ export interface DependencyNode {
   depends_on?: string[] | string | null;
 }
 
+export interface BulkStartNode extends DependencyNode {
+  driver?: string | null;
+  enabled?: boolean | null;
+}
+
 export class DependencyCycleError extends Error {
   constructor(readonly cycle: string[]) {
     super(`Dependency cycle detected: ${cycle.join(" -> ")}`);
@@ -48,6 +53,12 @@ export function sortByDependencies<T extends DependencyNode>(items: T[]): T[] {
   }
 
   return sorted;
+}
+
+export function selectBulkStartApps<T extends BulkStartNode>(items: T[]): T[] {
+  return sortByDependencies(
+    items.filter((item) => item.enabled !== false && (item.driver === "command" || item.driver === "compose"))
+  );
 }
 
 function normalizeDependencies(value: DependencyNode["depends_on"]): string[] {

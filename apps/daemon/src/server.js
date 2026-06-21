@@ -24,6 +24,7 @@ import {
   evaluateRuntimeHealth,
   formatSseEvent,
   healthcheckToPublicDto,
+  healthSummaryToPublicDto,
   loadWorkspaceConfig,
   mergeAppEnv,
   metricSampleToPublicDto,
@@ -60,6 +61,7 @@ import {
   getDomainByHostname,
   getActiveDeploymentForApp,
   getAppById,
+  getAppByName,
   getGithubSourceForApp,
   getLatestSuccessfulDeploymentForApp,
   getServerFoundationState,
@@ -120,7 +122,9 @@ import {
 import {
   buildDockerfileContainerName,
   buildDockerfileImageTag,
+  composePsRunningArgs,
   composeProjectName,
+  composeUpArgs,
   dockerBuildArgs,
   dockerInspectRunningArgs,
   dockerRemoveContainerArgs,
@@ -435,6 +439,22 @@ function validateStartableApp(appRecord) {
   return null;
 }
 
+function validateDeployableApp(appRecord) {
+  if (!appRecord.enabled) {
+    return lifecycleFailure(400, "disabled", `${appRecord.name} is disabled.`);
+  }
+
+  if (!["dockerfile", "compose"].includes(appRecord.driver)) {
+    return lifecycleFailure(400, "unsupported-driver", `Production deploy currently supports Dockerfile and Compose apps only. ${appRecord.name} uses ${appRecord.driver}.`);
+  }
+
+  if (appRecord.driver === "compose" && !appRecord.compose_file && !appRecord.image) {
+    return lifecycleFailure(400, "missing-compose-metadata", `${appRecord.name} needs compose_file or image metadata before it can be deployed with Compose.`);
+  }
+
+  return null;
+}
+
 function lifecycleFailure(status, code, error, details = {}) {
   return { ok: false, status, code, error, ...details };
 }
@@ -503,7 +523,7 @@ async function startLocalApp(appRecord) {
     if (appRecord.driver === "compose") {
       const logPath = ensureLogPath(appRecord.name);
       const fd = openSync(logPath, "a");
-      const child = startComposeService(appRecord, workspaceRoot, { stdio: ["ignore", fd, fd] });
+      const child = startComposeService(appRecord, workspaceRoot, { stdio: ["ignore", fd, fd], env: runtimeEnvForApp(appRecord, "local") });
       await waitForChild(child);
       closeSync(fd);
       updateAppStatus(db, appRecord.id, "running");
@@ -661,13 +681,14 @@ function waitForChild(child) {
   });
 }
 
-function waitForLoggedChild(child, deploymentId, phase) {
+function waitForLoggedChild(child, deploymentId, phase, options = {}) {
+  const redact = typeof options.redact === "function" ? options.redact : (value) => value;
   return new Promise((resolveWait, rejectWait) => {
     child.stdout?.on("data", (chunk) => {
-      appendDeploymentLog(db, deploymentId, { phase, stream: "stdout", message: chunk.toString("utf8") });
+      appendDeploymentLog(db, deploymentId, { phase, stream: "stdout", message: redact(chunk.toString("utf8")) });
     });
     child.stderr?.on("data", (chunk) => {
-      appendDeploymentLog(db, deploymentId, { phase, stream: "stderr", message: chunk.toString("utf8") });
+      appendDeploymentLog(db, deploymentId, { phase, stream: "stderr", message: redact(chunk.toString("utf8")) });
     });
     child.on("error", rejectWait);
     child.on("exit", (code) => {
@@ -702,6 +723,11 @@ async function allocateDeploymentPort(deploymentId) {
 
 function deploymentUrl(deployment) {
   return deployment.host_port ? `http://127.0.0.1:${deployment.host_port}` : null;
+}
+
+function deploymentTargetDescription(deployment) {
+  if (!deployment) return "deployment target unavailable";
+  return deploymentUrl(deployment) || deployment.container_name || "no public host port";
 }
 
 function publicDomainDto(domain) {
@@ -850,6 +876,16 @@ function appendDeploymentLogForApp(appRecord, deploymentId, input) {
   });
 }
 
+function deploymentContainerPortForApp(appRecord) {
+  if (appRecord.driver === "dockerfile") {
+    return appRecord.port || 3000;
+  }
+  if (appRecord.driver === "compose") {
+    return appRecord.port || appRecord.ports?.[0] || null;
+  }
+  return null;
+}
+
 function queueDeploymentForApp(appRecord, source = {}) {
   const active = getActiveDeploymentForApp(db, appRecord.id);
   if (active) {
@@ -868,7 +904,7 @@ function queueDeploymentForApp(appRecord, source = {}) {
     previous: latest
       ? { imageTag: latest.image_tag, containerName: latest.container_name }
       : {},
-    containerPort: appRecord.port || 3000
+    containerPort: deploymentContainerPortForApp(appRecord)
   });
   appendDeploymentLogForApp(appRecord, deployment.id, {
     phase: "queued",
@@ -876,7 +912,7 @@ function queueDeploymentForApp(appRecord, source = {}) {
       ? `queued GitHub deployment for ${appRecord.name} at ${source.commitSha}`
       : `queued deployment for ${appRecord.name}`
   });
-  void runDockerfileDeployment(appRecord, deployment.id);
+  void runDeployment(appRecord, deployment.id);
   return { created: true, deployment };
 }
 
@@ -970,11 +1006,19 @@ function createDomainForPayload(payload = {}) {
   return { ok: true, domain: publicDomainDto(getDomainByHostname(db, hostname)) };
 }
 
-async function runHealthcheck(appRecord, deployment) {
-  if (!deployment.container_name) {
-    throw new Error("Deployment container name is missing.");
+async function runComposeServiceHealthcheck(appRecord, deployment) {
+  const composeFile = writeComposeConfig(appRecord, workspaceRoot);
+  const project = composeProjectName(workspaceRoot);
+  const serviceName = appRecord.compose_service || appRecord.name;
+  const result = await captureChild(spawnDocker(composePsRunningArgs({ project, composeFile, serviceName }), { cwd: workspaceRoot, env: runtimeEnvForApp(appRecord, "production"), stdio: ["ignore", "pipe", "pipe"] }));
+  const containerId = result.stdout.trim();
+  if (!containerId) {
+    throw new Error(`Compose service ${serviceName} is not running in project ${project}.`);
   }
+  appendDeploymentLogForApp(appRecord, deployment.id, { phase: "healthchecking", message: `compose service ${serviceName} is running (${containerId})` });
+}
 
+async function runHealthcheck(appRecord, deployment) {
   const healthPath = appRecord.healthcheck?.path;
   if (healthPath && deployment.host_port) {
     const expected = Number(appRecord.healthcheck?.expected_status || 200);
@@ -998,26 +1042,36 @@ async function runHealthcheck(appRecord, deployment) {
     throw lastError || new Error("Healthcheck did not pass.");
   }
 
+  if (appRecord.driver === "compose") {
+    await runComposeServiceHealthcheck(appRecord, deployment);
+    return;
+  }
+
+  if (!deployment.container_name) {
+    throw new Error("Deployment container name is missing.");
+  }
+
   const inspect = spawnDocker(dockerInspectRunningArgs(deployment.container_name), { cwd: workspaceRoot, stdio: ["ignore", "pipe", "pipe"] });
-  await waitForLoggedChild(inspect, deployment.id, "healthchecking");
+  await waitForLoggedChild(inspect, deployment.id, "healthchecking", { redact: (message) => redactForApp(appRecord, message) });
 }
 
-async function removeContainerIfPresent(containerName, deploymentId, phase = "starting") {
+async function removeContainerIfPresent(containerName, deploymentId, phase = "starting", appRecord = null) {
   if (!containerName) return;
+  const options = appRecord ? { redact: (message) => redactForApp(appRecord, message) } : {};
   try {
-    await waitForLoggedChild(spawnDocker(dockerRemoveContainerArgs(containerName), { cwd: workspaceRoot, stdio: ["ignore", "pipe", "pipe"] }), deploymentId, phase);
+    await waitForLoggedChild(spawnDocker(dockerRemoveContainerArgs(containerName), { cwd: workspaceRoot, stdio: ["ignore", "pipe", "pipe"] }), deploymentId, phase, options);
   } catch {
     // docker rm returns non-zero when the container is absent; absence is fine here.
   }
 }
 
 async function markDeploymentFailed(appRecord, deploymentId, phase, error, containerName) {
-  const message = error instanceof Error ? error.message : String(error);
+  const message = redactForApp(appRecord, error instanceof Error ? error.message : String(error));
   appendDeploymentLogForApp(appRecord, deploymentId, { phase, stream: "stderr", message });
   upsertHealthcheckResult(db, {
     appId: appRecord.id,
     deploymentId,
-    target: containerName ? "container" : "runtime",
+    target: appRecord.driver === "compose" ? "compose" : containerName ? "container" : "runtime",
     path: appRecord.healthcheck?.path || null,
     expectedStatus: appRecord.healthcheck?.expected_status || 200,
     status: "unhealthy",
@@ -1036,7 +1090,49 @@ async function markDeploymentFailed(appRecord, deploymentId, phase, error, conta
     resourceType: "deployment",
     resourceId: deploymentId
   });
-  await removeContainerIfPresent(containerName, deploymentId, phase);
+  await removeContainerIfPresent(containerName, deploymentId, phase, appRecord);
+}
+
+async function markDeploymentSucceeded(appRecord, deploymentId) {
+  updateDeployment(db, deploymentId, {
+    status: "succeeded",
+    phase: "succeeded",
+    errorMessage: null,
+    finishedAt: new Date().toISOString()
+  });
+  updateAppStatus(db, appRecord.id, "running");
+  await evaluateAppHealth(appRecord);
+  clearAppEnvPendingFlags(db, appRecord.id, { redeploy: true });
+  const routes = materializeProxyRoutesForApp(appRecord.id);
+  if (routes.length > 0) {
+    appendDeploymentLogForApp(appRecord, deploymentId, { phase: "succeeded", message: `refreshed ${routes.length} proxy route(s)` });
+  }
+  appendDeploymentLogForApp(appRecord, deploymentId, { phase: "succeeded", message: `deployment succeeded at ${deploymentTargetDescription(getDeploymentById(db, deploymentId))}` });
+  void notifyEvent("deploy_succeeded", {
+    appName: appRecord.name,
+    deploymentId,
+    resourceType: "deployment",
+    resourceId: deploymentId
+  });
+}
+
+async function runDeployment(appRecord, deploymentId) {
+  if (appRecord.driver === "dockerfile") {
+    await runDockerfileDeployment(appRecord, deploymentId);
+    return;
+  }
+  if (appRecord.driver === "compose") {
+    await runComposeDeployment(appRecord, deploymentId);
+    return;
+  }
+
+  await markDeploymentFailed(
+    appRecord,
+    deploymentId,
+    "preparing",
+    new Error(`${appRecord.name} uses driver ${appRecord.driver}. Production deploy currently supports dockerfile and compose apps only.`),
+    null
+  );
 }
 
 async function runDockerfileDeployment(appRecord, deploymentId) {
@@ -1070,15 +1166,16 @@ async function runDockerfileDeployment(appRecord, deploymentId) {
 
     updateDeployment(db, deploymentId, { status: "building", phase: "building" });
     appendDeploymentLogForApp(appRecord, deploymentId, { phase: "building", message: `docker ${dockerBuildArgs({ context, dockerfile, imageTag }).join(" ")}` });
-    await waitForLoggedChild(spawnDocker(dockerBuildArgs({ context, dockerfile, imageTag }), { cwd: context }), deploymentId, "building");
+    await waitForLoggedChild(spawnDocker(dockerBuildArgs({ context, dockerfile, imageTag }), { cwd: context }), deploymentId, "building", { redact: (message) => redactForApp(appRecord, message) });
 
     updateDeployment(db, deploymentId, { status: "starting", phase: "starting" });
-    await removeContainerIfPresent(containerName, deploymentId, "starting");
+    await removeContainerIfPresent(containerName, deploymentId, "starting", appRecord);
     appendDeploymentLogForApp(appRecord, deploymentId, { phase: "starting", message: `starting ${containerName} on temporary port ${hostPort}` });
     await waitForLoggedChild(
       spawnDocker(dockerRunArgs({ containerName, imageTag, hostPort, containerPort, env: runtimeEnvForApp(appRecord, "production") }), { cwd: context }),
       deploymentId,
-      "starting"
+      "starting",
+      { redact: (message) => redactForApp(appRecord, message) }
     );
 
     deployment = getDeploymentById(db, deploymentId);
@@ -1086,28 +1183,44 @@ async function runDockerfileDeployment(appRecord, deploymentId) {
     appendDeploymentLogForApp(appRecord, deploymentId, { phase: "healthchecking", message: appRecord.healthcheck?.path ? "running HTTP healthcheck" : "checking container state" });
     await runHealthcheck(appRecord, deployment);
 
-    updateDeployment(db, deploymentId, {
-      status: "succeeded",
-      phase: "succeeded",
-      errorMessage: null,
-      finishedAt: new Date().toISOString()
-    });
-    updateAppStatus(db, appRecord.id, "running");
-    await evaluateAppHealth(appRecord);
-    clearAppEnvPendingFlags(db, appRecord.id, { redeploy: true });
-    const routes = materializeProxyRoutesForApp(appRecord.id);
-    if (routes.length > 0) {
-      appendDeploymentLogForApp(appRecord, deploymentId, { phase: "succeeded", message: `refreshed ${routes.length} proxy route(s)` });
-    }
-    appendDeploymentLogForApp(appRecord, deploymentId, { phase: "succeeded", message: `deployment succeeded at ${deploymentUrl(getDeploymentById(db, deploymentId))}` });
-    void notifyEvent("deploy_succeeded", {
-      appName: appRecord.name,
-      deploymentId,
-      resourceType: "deployment",
-      resourceId: deploymentId
-    });
+    await markDeploymentSucceeded(appRecord, deploymentId);
   } catch (error) {
     await markDeploymentFailed(appRecord, deploymentId, getDeploymentById(db, deploymentId)?.phase || "failed", error, containerName);
+  }
+}
+
+async function runComposeDeployment(appRecord, deploymentId) {
+  let composeFile = null;
+  const project = composeProjectName(workspaceRoot);
+  const serviceName = appRecord.compose_service || appRecord.name;
+  const containerPort = deploymentContainerPortForApp(appRecord);
+  const hostPort = appRecord.internal ? null : containerPort;
+  const composeRef = `compose:${project}/${serviceName}`;
+  const composeEnv = runtimeEnvForApp(appRecord, "production");
+
+  try {
+    updateDeployment(db, deploymentId, { status: "preparing", phase: "preparing" });
+    composeFile = writeComposeConfig(appRecord, workspaceRoot);
+    appendDeploymentLogForApp(appRecord, deploymentId, { phase: "preparing", message: `preparing Compose deployment for ${appRecord.name} using ${composeFile}#${serviceName}` });
+
+    if (!(await dockerAvailable())) {
+      throw new Error("Docker is not available to the Routely daemon.");
+    }
+
+    updateDeployment(db, deploymentId, { containerName: composeRef, hostPort, containerPort });
+    updateDeployment(db, deploymentId, { status: "starting", phase: "starting" });
+    const args = composeUpArgs({ project, composeFile, serviceName });
+    appendDeploymentLogForApp(appRecord, deploymentId, { phase: "starting", message: `docker ${args.join(" ")}` });
+    await waitForLoggedChild(spawnDocker(args, { cwd: workspaceRoot, env: composeEnv }), deploymentId, "starting", { redact: (message) => redactForApp(appRecord, message) });
+
+    const deployment = getDeploymentById(db, deploymentId);
+    updateDeployment(db, deploymentId, { status: "healthchecking", phase: "healthchecking" });
+    appendDeploymentLogForApp(appRecord, deploymentId, { phase: "healthchecking", message: appRecord.healthcheck?.path ? "running HTTP healthcheck" : "checking Compose service state" });
+    await runHealthcheck(appRecord, deployment);
+
+    await markDeploymentSucceeded(appRecord, deploymentId);
+  } catch (error) {
+    await markDeploymentFailed(appRecord, deploymentId, getDeploymentById(db, deploymentId)?.phase || "failed", error, null);
   }
 }
 
@@ -1217,16 +1330,62 @@ async function inspectContainerRunning(containerName) {
   }
 }
 
+function healthcheckHttpBaseUrl(appRecord, latestDeployment) {
+  if (latestDeployment?.host_port) {
+    return deploymentUrl(latestDeployment);
+  }
+  if (appRecord.driver === "compose" && appRecord.internal) {
+    return null;
+  }
+  return appRecord.port ? `http://127.0.0.1:${appRecord.port}` : null;
+}
+
+async function inspectComposeServiceRunning(appRecord) {
+  const project = composeProjectName(workspaceRoot);
+  const composeFile = writeComposeConfig(appRecord, workspaceRoot);
+  const serviceName = appRecord.compose_service || appRecord.name;
+
+  try {
+    const result = await captureChild(spawnDocker(composePsRunningArgs({ project, composeFile, serviceName }), { cwd: workspaceRoot, stdio: ["ignore", "pipe", "pipe"] }));
+    const containerId = result.stdout.trim();
+    return {
+      running: Boolean(containerId),
+      message: containerId
+        ? `Compose service ${serviceName} is running (${containerId}).`
+        : `Compose service ${serviceName} is not running in project ${project}.`
+    };
+  } catch (error) {
+    return {
+      available: false,
+      message: `Compose health unavailable for ${serviceName}: ${error instanceof Error ? error.message : String(error)}`
+    };
+  }
+}
+
 async function evaluateAppHealth(appRecord) {
   reconcileRuntimeState();
   const latestDeployment = getLatestSuccessfulDeploymentForApp(db, appRecord.id);
   const healthPath = appRecord.healthcheck?.path || null;
   const expectedStatus = Number(appRecord.healthcheck?.expected_status || 200);
-  const target = latestDeployment?.container_name ? "container" : "runtime";
+  const target = appRecord.driver === "compose" ? "compose" : latestDeployment?.container_name ? "container" : "runtime";
   let result;
 
-  if (healthPath && (latestDeployment?.host_port || appRecord.port)) {
-    const base = latestDeployment?.host_port ? deploymentUrl(latestDeployment) : `http://127.0.0.1:${appRecord.port}`;
+  if (!appRecord.enabled) {
+    result = evaluateRuntimeHealth({ available: false, message: `${appRecord.name} is disabled; healthchecks are deferred until it is enabled.` });
+    return upsertHealthcheckResult(db, {
+      appId: appRecord.id,
+      deploymentId: latestDeployment?.id || null,
+      target,
+      path: healthPath,
+      expectedStatus,
+      status: result.status,
+      message: result.message
+    });
+  }
+
+  const httpBaseUrl = healthcheckHttpBaseUrl(appRecord, latestDeployment);
+  if (healthPath && httpBaseUrl) {
+    const base = httpBaseUrl;
     const url = `${base}${healthPath.startsWith("/") ? healthPath : `/${healthPath}`}`;
     const started = Date.now();
     try {
@@ -1248,6 +1407,32 @@ async function evaluateAppHealth(appRecord) {
     });
   }
 
+  if (healthPath) {
+    result = evaluateRuntimeHealth({ available: false, message: `${appRecord.name} has HTTP health path ${healthPath} but no reachable host port is configured.` });
+    return upsertHealthcheckResult(db, {
+      appId: appRecord.id,
+      deploymentId: latestDeployment?.id || null,
+      target,
+      path: healthPath,
+      expectedStatus,
+      status: result.status,
+      message: result.message
+    });
+  }
+
+  if (appRecord.driver === "compose") {
+    const inspected = await inspectComposeServiceRunning(appRecord);
+    result = evaluateRuntimeHealth(inspected);
+    return upsertHealthcheckResult(db, {
+      appId: appRecord.id,
+      deploymentId: latestDeployment?.id || null,
+      target,
+      expectedStatus,
+      status: result.status,
+      message: result.message
+    });
+  }
+
   if (latestDeployment?.container_name) {
     const inspected = await inspectContainerRunning(latestDeployment.container_name);
     result = evaluateRuntimeHealth(inspected);
@@ -1262,7 +1447,15 @@ async function evaluateAppHealth(appRecord) {
   }
 
   const running = appRecord.driver === "compose" ? appRecord.status === "running" : runningInstancesForApp(appRecord.id).length > 0;
-  result = evaluateRuntimeHealth({ running, message: running ? `${appRecord.name} is running` : `${appRecord.name} has no active runtime` });
+  result = evaluateRuntimeHealth({
+    running,
+    available: running || appRecord.status !== "stopped",
+    message: running
+      ? `${appRecord.name} is running`
+      : appRecord.status === "stopped"
+        ? `${appRecord.name} is stopped; start it before healthchecks run.`
+        : `${appRecord.name} reports ${appRecord.status} but has no active runtime.`
+  });
   return upsertHealthcheckResult(db, {
     appId: appRecord.id,
     target,
@@ -1505,7 +1698,7 @@ async function startDatabaseRecord(databaseRecord) {
   const fd = openSync(logPath, "a");
   try {
     writeLogHeader(appRecord.name, "starting production database service");
-    await waitForChild(startComposeService(appRecord, workspaceRoot, { stdio: ["ignore", fd, fd] }));
+    await waitForChild(startComposeService(appRecord, workspaceRoot, { stdio: ["ignore", fd, fd], env: runtimeEnvForApp(appRecord, "production") }));
     updateAppStatus(db, appRecord.id, "running");
     return updateDatabaseStatus(db, databaseRecord.id, "running");
   } finally {
@@ -1522,7 +1715,7 @@ async function stopDatabaseRecord(databaseRecord) {
   const fd = openSync(logPath, "a");
   try {
     writeLogHeader(appRecord.name, "stopping production database service");
-    await waitForChild(stopComposeService(appRecord, workspaceRoot, { stdio: ["ignore", fd, fd] }));
+    await waitForChild(stopComposeService(appRecord, workspaceRoot, { stdio: ["ignore", fd, fd], env: runtimeEnvForApp(appRecord, "production") }));
     updateAppStatus(db, appRecord.id, "stopped");
     return updateDatabaseStatus(db, databaseRecord.id, "stopped");
   } finally {
@@ -1588,13 +1781,15 @@ async function runBackupJob(job, trigger = "manual") {
 
 function pruneBackupRuns(job) {
   const stale = selectBackupRunsForRetention(listBackupRunsForJob(db, job.id, { limit: 500 }), job.retention_days);
+  const pruned = [];
   for (const run of stale) {
     try {
       if (run.file_path && existsSync(run.file_path)) unlinkSync(run.file_path);
+      pruned.push(run.id);
     } catch {}
   }
-  markBackupRunsPruned(db, stale.map((run) => run.id));
-  return stale;
+  markBackupRunsPruned(db, pruned);
+  return stale.filter((run) => pruned.includes(run.id));
 }
 
 app.get("/health", async (request) => {
@@ -1881,19 +2076,15 @@ app.get("/apps/:id/health", async (request, reply) => {
   if (!record) return;
 
   const shouldRefresh = request.query?.refresh !== "false";
-  const latestDeployment = getLatestSuccessfulDeploymentForApp(db, record.id);
   if (shouldRefresh) {
     await evaluateAppHealth(record);
   }
-  const checks = listHealthchecksForApp(db, record.id).map(healthcheckToPublicDto);
-  const latest = checks[0] || null;
+  const latestDeployment = getLatestSuccessfulDeploymentForApp(db, record.id);
+  const checks = listHealthchecksForApp(db, record.id);
   return {
     app: appToPublicDto(getAppById(db, record.id) || record),
     latestDeployment: latestDeployment ? deploymentToPublicDto(latestDeployment) : null,
-    health: {
-      status: latest?.status || "unknown",
-      checks
-    }
+    health: healthSummaryToPublicDto(checks)
   };
 });
 
@@ -1902,7 +2093,11 @@ app.post("/apps/:id/health", async (request, reply) => {
   if (!record) return;
 
   const check = await evaluateAppHealth(record);
-  return reply.code(200).send({ app: appToPublicDto(getAppById(db, record.id) || record), healthcheck: healthcheckToPublicDto(check), health: { status: check.last_status || "unknown", checks: listHealthchecksForApp(db, record.id).map(healthcheckToPublicDto) } });
+  return reply.code(200).send({
+    app: appToPublicDto(getAppById(db, record.id) || record),
+    healthcheck: healthcheckToPublicDto(check),
+    health: healthSummaryToPublicDto(listHealthchecksForApp(db, record.id))
+  });
 });
 
 app.get("/apps/:id/metrics", async (request, reply) => {
@@ -2066,8 +2261,12 @@ app.post("/backups/:id/run", async (request, reply) => {
   const job = getBackupJobById(db, Number(request.params.id));
   if (!job) return reply.code(404).send({ error: `Backup job ${request.params.id} not found.` });
   const run = await runBackupJob(job, request.body?.trigger || "manual");
-  const status = run?.status === "succeeded" ? 201 : 500;
-  return reply.code(status).send({ run: backupRunToPublicDto(getBackupRunById(db, run.id)), ...publicBackupPayload() });
+  const runDto = backupRunToPublicDto(getBackupRunById(db, run.id));
+  const payload = { run: runDto, ...publicBackupPayload() };
+  if (run?.status !== "succeeded") {
+    return reply.code(500).send({ error: runDto.message || `Backup ${run?.status || "failed"}.`, ...payload });
+  }
+  return reply.code(201).send(payload);
 });
 
 app.get("/deployments", async (request) => {
@@ -2088,8 +2287,9 @@ app.post("/apps/:id/deployments", async (request, reply) => {
   const record = findAppOrReply(request, reply);
   if (!record) return;
 
-  if (!record.enabled) {
-    return reply.code(400).send({ error: `${record.name} is disabled.` });
+  const validationError = validateDeployableApp(record);
+  if (validationError) {
+    return sendLifecycleFailure(reply, validationError);
   }
 
   const queued = queueDeploymentForApp(record);
@@ -2246,6 +2446,28 @@ app.post("/github/webhook", async (request, reply) => {
   }
 
   const target = matches[0];
+  const validationError = validateDeployableApp(target);
+  if (validationError) {
+    const updated = updateGithubWebhookDelivery(db, delivery, {
+      status: "deploy_rejected",
+      action: "push",
+      appId: target.id,
+      repo: push.repo,
+      branch: push.branch,
+      commitSha: push.commitSha,
+      message: validationError.error,
+      processedAt: new Date().toISOString()
+    });
+    return reply.code(202).send({
+      ok: false,
+      queued: false,
+      code: validationError.code,
+      error: validationError.error,
+      app: appToPublicDto(target),
+      delivery: publicGithubDeliveryDto(updated)
+    });
+  }
+
   const queued = queueDeploymentForApp(target, { type: "github", repo: push.repo, branch: push.branch, commitSha: push.commitSha });
   const deployment = getDeploymentById(db, queued.deployment.id);
   const updated = updateGithubWebhookDelivery(db, delivery, {

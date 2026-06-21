@@ -10,6 +10,25 @@ export type RoutelyNotificationEvent = "deploy_succeeded" | "deploy_failed" | "b
 export const NOTIFICATION_CHANNEL_TYPES: RoutelyNotificationChannelType[];
 export const NOTIFICATION_EVENTS: RoutelyNotificationEvent[];
 
+export interface DependencyNode {
+  name: string;
+  depends_on?: string[] | string | null;
+  dependsOn?: string[] | string | null;
+}
+
+export interface BulkStartNode extends DependencyNode {
+  driver?: string | null;
+  enabled?: boolean | null;
+}
+
+export class DependencyCycleError extends Error {
+  readonly cycle: string[];
+  constructor(cycle: string[]);
+}
+
+export function sortByDependencies<T extends DependencyNode>(items: T[]): T[];
+export function selectBulkStartApps<T extends BulkStartNode>(items: T[]): T[];
+
 export interface RoutelyDashboardConfig {
   port?: number;
 }
@@ -34,7 +53,7 @@ export interface RoutelyAppInput {
   port?: number | string | null;
   ports?: Array<number | string> | number | string | null;
   depends_on?: string[] | string | null;
-  healthcheck?: { path?: string | null; expected_status?: number | string | null } | null;
+  healthcheck?: { path?: string | null; expected_status?: number | string | null; expectedStatus?: number | string | null } | null;
   domains?: string[] | string | null;
   source?: {
     type?: string | null;
@@ -43,6 +62,8 @@ export interface RoutelyAppInput {
     auto_deploy?: { enabled?: boolean; branches?: string[] | string | null } | null;
     autoDeploy?: { enabled?: boolean; branches?: string[] | string | null } | null;
   } | null;
+  auto_deploy?: { enabled?: boolean; branches?: string[] | string | null } | null;
+  autoDeploy?: { enabled?: boolean; branches?: string[] | string | null } | null;
   image?: string | null;
   internal?: boolean;
   volumes?: string[] | string | null;
@@ -208,6 +229,8 @@ export interface RoutelyDeploymentDto {
   hostPort: number | null;
   containerPort: number | null;
   errorMessage: string | null;
+  logsUrl: string;
+  logsStreamUrl: string;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
@@ -324,12 +347,22 @@ export interface RoutelyHealthcheckDto {
   path: string | null;
   expectedStatus: number | null;
   status: string;
+  available: boolean;
   httpStatus: number | null;
   responseTimeMs: number | null;
   message: string | null;
   checkedAt: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface RoutelyHealthSummaryDto {
+  status: string;
+  available: boolean;
+  reason: string | null;
+  message: string | null;
+  checkedAt: string | null;
+  checks: RoutelyHealthcheckDto[];
 }
 
 export interface RoutelyMetricSampleRecord {
@@ -390,6 +423,7 @@ export interface RoutelyDatabaseDto {
   type: string;
   status: string;
   internal: boolean;
+  connectionScope: "internal-only" | "public-requested";
   image: string | null;
   port: number | null;
   composeService: string | null;
@@ -405,6 +439,7 @@ export interface RoutelyBackupJobRecord {
   database_id: number;
   database_name?: string | null;
   database_type?: string | null;
+  database_env?: Record<string, string> | string | null;
   enabled: 0 | 1 | boolean;
   schedule: string | null;
   retention_days: number;
@@ -422,6 +457,7 @@ export interface RoutelyBackupRunRecord {
   database_id: number;
   database_name?: string | null;
   database_type?: string | null;
+  database_env?: Record<string, string> | string | null;
   status: RoutelyBackupRunStatus | string;
   trigger: string;
   file_path: string | null;
@@ -441,7 +477,24 @@ export interface RoutelyBackupJobDto {
   enabled: boolean;
   schedule: string | null;
   retentionDays: number;
+  retentionStatus: string;
+  storageType: "local";
+  storageStatus: "metadata-only";
+  restoreStatus: "deferred";
   localDir: string | null;
+  storage: {
+    type: "local";
+    localDir: string | null;
+    external: false;
+    servesFiles: false;
+  };
+  retention: {
+    days: number;
+    mode: "local-successful-runs";
+    prunesAfterSuccessfulBackup: true;
+    externalStorage: false;
+    restoreSupported: false;
+  };
   lastRunStatus: string | null;
   lastRunAt: string | null;
   lastRunMessage: string | null;
@@ -457,7 +510,20 @@ export interface RoutelyBackupRunDto {
   databaseType: string | null;
   status: string;
   trigger: string;
+  storageType: "local";
+  storageStatus: "metadata-only";
+  restoreStatus: "deferred";
+  downloadUrl: null;
   filePath: string | null;
+  fileName: string | null;
+  file: {
+    available: boolean;
+    path: string | null;
+    name: string | null;
+    sizeBytes: number | null;
+    servesFile: false;
+    downloadUrl: null;
+  };
   sizeBytes: number | null;
   message: string | null;
   startedAt: string | null;
@@ -514,6 +580,7 @@ export function appToPublicDto(app: RoutelyAppRecord): RoutelyAppDto;
 export function deploymentToPublicDto(deployment: RoutelyDeploymentRecord): RoutelyDeploymentDto;
 export function deploymentLogToPublicDto(log: RoutelyDeploymentLogRecord): RoutelyDeploymentLogDto;
 export function healthcheckToPublicDto(row: RoutelyHealthcheckRecord): RoutelyHealthcheckDto;
+export function healthSummaryToPublicDto(checks?: RoutelyHealthcheckRecord[], options?: { reason?: string; message?: string }): RoutelyHealthSummaryDto;
 export function metricSampleToPublicDto(row: RoutelyMetricSampleRecord): RoutelyMetricSampleDto;
 export function evaluateHttpHealthcheck(input?: {
   expectedStatus?: number | null;
@@ -521,7 +588,7 @@ export function evaluateHttpHealthcheck(input?: {
   responseTimeMs?: number | null;
   error?: unknown;
 }): { status: string; httpStatus: number | null; responseTimeMs: number | null; message: string };
-export function evaluateRuntimeHealth(input?: { running?: boolean; message?: string }): { status: string; message: string };
+export function evaluateRuntimeHealth(input?: { running?: boolean; available?: boolean; message?: string }): { status: string; message: string };
 export function formatSseEvent(event: string, data: unknown, options?: { id?: string | number | null }): string;
 export function isSecretEnvKey(key: string): boolean;
 export function normalizeEnvKey(key: string): string;
@@ -553,25 +620,6 @@ export function upsertWorkspaceConfigEntry(
 
 export type RoutelyServerMode = "local" | "production";
 export type RoutelyServerCheckStatus = "ok" | "warn" | "error";
-
-export interface DependencyNode {
-  name: string;
-  depends_on?: string[] | string | null;
-  dependsOn?: string[] | string | null;
-}
-
-export interface BulkStartNode extends DependencyNode {
-  driver?: string | null;
-  enabled?: boolean | null;
-}
-
-export class DependencyCycleError extends Error {
-  readonly cycle: string[];
-  constructor(cycle: string[]);
-}
-
-export function sortByDependencies<T extends DependencyNode>(items: T[]): T[];
-export function selectBulkStartApps<T extends BulkStartNode>(items: T[]): T[];
 export interface RoutelyServerCheck {
   id: string;
   label: string;

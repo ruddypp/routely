@@ -156,6 +156,8 @@ export function upsertDatabase(
     preset?: string;
     status?: string;
     internal?: boolean;
+    allowPublic?: boolean;
+    allow_public?: boolean;
     image?: string | null;
     port?: number | string | null;
     composeService?: string | null;
