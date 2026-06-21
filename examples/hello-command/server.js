@@ -2,11 +2,13 @@ import http from "node:http";
 
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || "127.0.0.1";
+const serviceName = process.env.ROUTELY_EXAMPLE_NAME || "Routely command app";
+const serviceRole = process.env.ROUTELY_EXAMPLE_ROLE || "command";
 
 const server = http.createServer((request, response) => {
   if (request.url === "/health") {
     response.writeHead(200, { "content-type": "application/json" });
-    response.end(JSON.stringify({ ok: true, service: "routely-hello-command" }));
+    response.end(JSON.stringify({ ok: true, service: serviceName, role: serviceRole }));
     return;
   }
 
@@ -28,8 +30,8 @@ const server = http.createServer((request, response) => {
   <body>
     <main>
       <section>
-        <h1>Routely command app is running</h1>
-        <p>This app is started by Routely's minimal command driver from <code>examples/hello-command</code>.</p>
+        <h1>${escapeHtml(serviceName)} is running</h1>
+        <p>This ${escapeHtml(serviceRole)} service is started by Routely's minimal command driver from <code>examples/hello-command</code>.</p>
         <p>Health check: <code>/health</code></p>
       </section>
     </main>
@@ -38,8 +40,17 @@ const server = http.createServer((request, response) => {
 });
 
 server.listen(port, host, () => {
-  console.log(`Routely hello-command app running at http://${host}:${port}`);
+  console.log(`${serviceName} running at http://${host}:${port}`);
 });
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"]/g, (char) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;"
+  })[char]);
+}
 
 function shutdown() {
   server.close(() => process.exit(0));

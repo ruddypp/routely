@@ -1,5 +1,17 @@
 import { createServer } from "node:net";
 
+export type PortCandidate = {
+  name: string;
+  port: number | null;
+  internal?: boolean | null;
+};
+
+export type PortConflict = {
+  name: string;
+  port: number;
+  detail?: string;
+};
+
 export function isPortAvailable(port: number, host = "127.0.0.1"): Promise<boolean> {
   return new Promise((resolve) => {
     const server = createServer();
@@ -13,10 +25,27 @@ export function isPortAvailable(port: number, host = "127.0.0.1"): Promise<boole
   });
 }
 
-export async function findUnavailablePorts(apps: Array<{ name: string; port: number | null }>) {
+export function hostBoundPortCandidates(apps: PortCandidate[]): Array<{ name: string; port: number }> {
+  return apps.filter((app): app is { name: string; port: number } => Number.isInteger(app.port) && app.internal !== true);
+}
+
+export function findDuplicatePorts(apps: PortCandidate[]): PortConflict[] {
+  const namesByPort = new Map<number, string[]>();
+
+  for (const app of hostBoundPortCandidates(apps)) {
+    const names = namesByPort.get(app.port) || [];
+    names.push(app.name);
+    namesByPort.set(app.port, names);
+  }
+
+  return [...namesByPort.entries()]
+    .filter(([, names]) => names.length > 1)
+    .map(([port, names]) => ({ name: names.join(", "), port, detail: "duplicate host port" }));
+}
+
+export async function findUnavailablePorts(apps: PortCandidate[]): Promise<PortConflict[]> {
   const checks = await Promise.all(
-    apps
-      .filter((app): app is { name: string; port: number } => Number.isInteger(app.port))
+    hostBoundPortCandidates(apps)
       .map(async (app) => ({ ...app, available: await isPortAvailable(app.port) }))
   );
 

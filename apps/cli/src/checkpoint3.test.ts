@@ -57,7 +57,9 @@ describe("checkpoint 3 config and preset helpers", () => {
 
     expect(postgres.driver).toBe("compose");
     expect(postgres.image).toBe("postgres:16");
+    expect(config.services.postgres.ports).toBeUndefined();
     expect(yaml).toContain("postgres:16");
     expect(yaml).toContain("postgres_data");
+    expect(yaml).not.toContain("5432:5432");
   });
 });

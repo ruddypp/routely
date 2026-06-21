@@ -54,7 +54,7 @@ import { createDatabaseService, detectPreset, getAppPreset } from "@routely/pres
 import { validateHostname } from "@routely/proxy";
 import { DependencyCycleError, sortByDependencies } from "./dependencies.js";
 import { resolveInstallRoot, resolveWorkspaceRoot } from "./paths.js";
-import { findExistingRoutelyDashboard, findUnavailablePorts, isPortAvailable, probeRoutelyDaemon, probeRoutelyDashboard } from "./ports.js";
+import { findDuplicatePorts, findExistingRoutelyDashboard, findUnavailablePorts, isPortAvailable, probeRoutelyDaemon, probeRoutelyDashboard } from "./ports.js";
 
 type ChildProcess = ReturnType<typeof spawn>;
 type RunningApp = { app: RoutelyAppRecord; child: ChildProcess };
@@ -937,15 +937,19 @@ async function preflightPorts(apps: RoutelyAppRecord[], includeSystemPorts = tru
         { name: "daemon", port: daemonPort }
       ]
     : [];
-  const unavailable = await findUnavailablePorts([...systemPorts, ...apps.map((app) => ({ name: app.name, port: app.port }))]);
+  const candidates = [...systemPorts, ...apps.map((app) => ({ name: app.name, port: app.port, internal: Boolean(app.internal) }))];
+  const duplicates = findDuplicatePorts(candidates);
+  const duplicatePorts = new Set(duplicates.map((item) => item.port));
+  const unavailable = await findUnavailablePorts(candidates.filter((candidate) => !duplicatePorts.has(Number(candidate.port))));
+  const conflicts = [...duplicates, ...unavailable];
 
-  if (unavailable.length === 0) {
+  if (conflicts.length === 0) {
     return true;
   }
 
   console.error("Port conflict detected. Stop the existing process or change the configured port:");
-  for (const item of unavailable) {
-    console.error(`  ${item.name}: ${item.port}`);
+  for (const item of conflicts) {
+    console.error(`  ${item.name}: ${item.port}${item.detail ? ` (${item.detail})` : ""}`);
   }
   return false;
 }
@@ -1639,20 +1643,16 @@ async function doctorCommand(): Promise<void> {
   }
 
   const appPorts = apps.filter((app): app is RoutelyAppRecord & { port: number } => Number.isInteger(app.port));
-  const namesByPort = new Map<number, string[]>();
-  for (const app of appPorts) {
-    const names = namesByPort.get(app.port) || [];
-    names.push(app.name);
-    namesByPort.set(app.port, names);
-  }
-  for (const [port, names] of namesByPort) {
-    if (names.length > 1) {
-      portConflicts.push({ name: names.join(", "), port, detail: "duplicate Routely app port" });
-    }
-  }
-  const unknownAppConflicts = await findUnavailablePorts(appPorts.filter((app) => app.status !== "running" && (namesByPort.get(app.port)?.length || 0) === 1));
+  const duplicateAppPorts = findDuplicatePorts(appPorts.map((app) => ({ name: app.name, port: app.port, internal: Boolean(app.internal) })));
+  portConflicts.push(...duplicateAppPorts);
+  const duplicatePorts = new Set(duplicateAppPorts.map((item) => item.port));
+  const unknownAppConflicts = await findUnavailablePorts(
+    appPorts
+      .filter((app) => app.status !== "running" && !duplicatePorts.has(app.port))
+      .map((app) => ({ name: app.name, port: app.port, internal: Boolean(app.internal) }))
+  );
   portConflicts.push(...unknownAppConflicts);
-  for (const app of appPorts.filter((item) => item.status === "running")) {
+  for (const app of appPorts.filter((item) => item.status === "running" && !item.internal)) {
     portNotes.push(`${app.name}: ${app.port} (managed app running)`);
   }
 

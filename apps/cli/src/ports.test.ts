@@ -1,7 +1,7 @@
 import { createServer as createNetServer, type Server as NetServer } from "node:net";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { findExistingRoutelyDashboard, findUnavailablePorts, isPortAvailable, probeRoutelyDashboard } from "./ports.js";
+import { findDuplicatePorts, findExistingRoutelyDashboard, findUnavailablePorts, hostBoundPortCandidates, isPortAvailable, probeRoutelyDashboard } from "./ports.js";
 
 const servers: Array<NetServer | HttpServer> = [];
 
@@ -67,9 +67,30 @@ describe("port checks", () => {
     await expect(
       findUnavailablePorts([
         { name: "api", port },
-        { name: "worker", port: null }
+        { name: "worker", port: null },
+        { name: "postgres", port, internal: true }
       ])
     ).resolves.toEqual([{ name: "api", port }]);
+  });
+
+  it("checks only host-bound local ports", () => {
+    expect(
+      hostBoundPortCandidates([
+        { name: "web", port: 3000 },
+        { name: "postgres", port: 5432, internal: true },
+        { name: "worker", port: null }
+      ])
+    ).toEqual([{ name: "web", port: 3000 }]);
+  });
+
+  it("detects duplicate host-bound ports without flagging internal services", () => {
+    expect(
+      findDuplicatePorts([
+        { name: "web", port: 3000 },
+        { name: "api", port: 3000 },
+        { name: "postgres", port: 3000, internal: true }
+      ])
+    ).toEqual([{ name: "web, api", port: 3000, detail: "duplicate host port" }]);
   });
 
   it("detects an existing Routely dashboard health endpoint", async () => {
