@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { GET as GET_DELIVERIES } from "../../app/api/github/deliveries/route";
 import { GET as GET_STATUS } from "../../app/api/github/status/route";
 import { POST as CONNECT_APP } from "../../app/api/apps/[id]/github/route";
 import { POST as WEBHOOK } from "../../app/api/github/webhook/route";
@@ -60,6 +61,40 @@ describe("GitHub route handlers", () => {
 
     expect(response.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9977/apps/7/github", expect.objectContaining({ method: "POST" }));
+  });
+
+  it("proxies GitHub deliveries with diagnosis fields intact", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({
+        deliveries: [{
+          deliveryId: "delivery-2",
+          event: "push",
+          action: "push",
+          status: "deploy_rejected",
+          signatureValid: true,
+          appId: 7,
+          appName: "web",
+          deploymentId: null,
+          repo: "acme/web",
+          branch: "main",
+          commitSha: "abcdef1234567890",
+          message: "Dockerfile app path is not deployable.",
+          receivedAt: "2026-06-22T00:00:00.000Z",
+          processedAt: "2026-06-22T00:00:01.000Z",
+          updatedAt: "2026-06-22T00:00:01.000Z"
+        }]
+      }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const response = await GET_DELIVERIES(new Request("http://localhost/api/github/deliveries"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.deliveries[0]).toMatchObject({ status: "deploy_rejected", repo: "acme/web", branch: "main", commitSha: "abcdef1234567890" });
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9977/github/deliveries", expect.objectContaining({ cache: "no-store" }));
   });
 
   it("forwards raw GitHub webhook deliveries with signature headers", async () => {
