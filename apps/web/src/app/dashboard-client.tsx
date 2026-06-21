@@ -14,6 +14,7 @@ import { ModuleHeader } from "@/components/dashboard/module-header";
 import type { DashboardModuleKey } from "@/components/dashboard/types";
 import { appActionBlockReason, appSupportsBulkStart, bulkStartSkipReason, bulkStartStateLabel, isAppRuntimeRunning, startAllBlockReason, startAllPlan, type BulkStartPlan } from "@/lib/app-lifecycle";
 import { APP_DRIVERS, APP_PRESETS, APP_TYPES, appDriverPatch, appFormFromDaemonApp, appFormPayload, appFormValidationError, blankAppForm, type AppFormState } from "@/lib/app-registry-form";
+import { backupRestoreLabel, backupRunFileState, backupStorageLabel, databaseExposureLabel, deploymentLogsLabel, deploymentStateLabel, domainDnsLabel, domainProxyLabel, domainTargetLabel, domainTlsLabel, envVisibilityLabel, isDeploymentInProgress, latestSuccessfulDeployment, logAvailabilityLabel, productionAuthState, safeEnvDisplay } from "@/lib/dashboard-operations";
 
 type DaemonApp = {
   id: number;
@@ -124,6 +125,8 @@ type DaemonDeployment = {
   hostPort: number | null;
   containerPort: number | null;
   errorMessage: string | null;
+  logsUrl?: string | null;
+  logsStreamUrl?: string | null;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
@@ -153,6 +156,7 @@ type DaemonHealthcheck = {
   path: string | null;
   expectedStatus: number | null;
   status: string;
+  available?: boolean;
   httpStatus: number | null;
   responseTimeMs: number | null;
   message: string | null;
@@ -185,6 +189,7 @@ type DaemonDatabase = {
   type: string;
   status: string;
   internal: boolean;
+  connectionScope?: string;
   image: string | null;
   port: number | null;
   composeService: string | null;
@@ -203,6 +208,10 @@ type DaemonBackupJob = {
   enabled: boolean;
   schedule: string | null;
   retentionDays: number;
+  retentionStatus?: string;
+  storageType?: string;
+  storageStatus?: string;
+  restoreStatus?: string;
   localDir: string | null;
   lastRunStatus: string | null;
   lastRunAt: string | null;
@@ -219,7 +228,20 @@ type DaemonBackupRun = {
   databaseType: string | null;
   status: string;
   trigger: string;
+  storageType?: string;
+  storageStatus?: string;
+  restoreStatus?: string;
+  downloadUrl?: string | null;
   filePath: string | null;
+  fileName?: string | null;
+  file?: {
+    available: boolean;
+    path: string | null;
+    name: string | null;
+    sizeBytes: number | null;
+    servesFile: boolean;
+    downloadUrl: string | null;
+  };
   sizeBytes: number | null;
   message: string | null;
   startedAt: string | null;
@@ -231,7 +253,7 @@ type DaemonBackupRun = {
 type AppHealthResponse = {
   app: DaemonApp;
   latestDeployment: DaemonDeployment | null;
-  health: { status: string; checks: DaemonHealthcheck[] };
+  health: { status: string; available?: boolean; reason?: string | null; message?: string | null; checkedAt?: string | null; checks: DaemonHealthcheck[] };
   healthcheck?: DaemonHealthcheck;
   error?: string | null;
 };
@@ -279,7 +301,10 @@ type DaemonDomain = {
   status: string;
   dnsStatus: string;
   tlsStatus: string;
+  proxyStatus?: string | null;
   targetPort: number | null;
+  targetDeploymentId?: number | null;
+  targetUrl?: string | null;
   verificationMessage: string | null;
   lastVerifiedAt: string | null;
   appType?: string | null;
@@ -298,6 +323,10 @@ type DaemonProxyRoute = {
   routerName: string;
   serviceName: string;
   targetUrl: string;
+  status?: string | null;
+  domainStatus?: string | null;
+  dnsStatus?: string | null;
+  tlsStatus?: string | null;
   enabled: boolean;
   createdAt: string;
   updatedAt: string;
@@ -506,11 +535,11 @@ function pendingStateLabel(app: DaemonApp): string {
   if (restart) return "restart needed";
   if (redeploy) return "redeploy needed";
   if (localOnly) return "local restart applies";
-  return "clean";
+  return "no pending changes";
 }
 
 function envRedeployLabel(app: DaemonApp, needsRedeploy?: boolean): { label: string; status: "ok" | "warn" } {
-  if (!needsRedeploy) return { label: "clean", status: "ok" };
+  if (!needsRedeploy) return { label: "no pending", status: "ok" };
   return appCanRedeploy(app)
     ? { label: "needed", status: "warn" }
     : { label: "not deployable", status: "ok" };
@@ -530,7 +559,7 @@ function compactSource(app: DaemonApp): string {
 
 function domainSummary(domains: DaemonDomain[]): string {
   if (domains.length === 0) return "no domain";
-  const ready = domains.filter((domain) => domain.status === "ready" || domain.dnsStatus === "verified").length;
+  const ready = domains.filter((domain) => (domain.status === "ready" || domain.status === "generated") && domain.dnsStatus === "verified" && ["active", "verified"].includes(domain.tlsStatus)).length;
   return ready === domains.length ? `${domains.length} ready` : `${ready}/${domains.length} ready`;
 }
 
@@ -551,13 +580,13 @@ function domainStepTone(domain: DaemonDomain, route: DaemonProxyRoute | undefine
   if (step === "root") return hasRoot ? "ok" : "warn";
   if (step === "hostname") return domain.hostname ? "ok" : "warn";
   if (step === "dns") return readinessFromStatus(domain.dnsStatus, ["verified"]);
-  if (step === "proxy") return route?.enabled ? "ok" : domain.status === "error" ? "error" : "warn";
-  if (step === "tls") return domain.tlsStatus === "active" ? "ok" : domain.tlsStatus === "failed" || domain.tlsStatus === "error" ? "error" : "warn";
-  return domain.targetPort ? "ok" : "warn";
+  if (step === "proxy") return route?.enabled || domain.proxyStatus === "generated" ? "ok" : domain.proxyStatus === "failed" || domain.status === "error" ? "error" : "warn";
+  if (step === "tls") return domain.tlsStatus === "active" || domain.tlsStatus === "verified" ? "ok" : domain.tlsStatus === "failed" || domain.tlsStatus === "error" ? "error" : "warn";
+  return domain.targetUrl || domain.targetPort ? "ok" : "warn";
 }
 
 function tlsTone(status: string | null | undefined): "ok" | "warn" | "error" {
-  if (status === "active") return "ok";
+  if (status === "active" || status === "verified") return "ok";
   if (status === "failed" || status === "error") return "error";
   return "warn";
 }
@@ -565,9 +594,9 @@ function tlsTone(status: string | null | undefined): "ok" | "warn" | "error" {
 function httpsSummary(domains: DaemonDomain[]): string {
   if (domains.length === 0) return "no domains";
   if (domains.some((domain) => domain.tlsStatus === "failed" || domain.tlsStatus === "error")) return "TLS failed";
-  if (domains.every((domain) => domain.tlsStatus === "active")) return "active";
+  if (domains.every((domain) => domain.tlsStatus === "active" || domain.tlsStatus === "verified")) return "verified TLS";
   if (domains.some((domain) => domain.tlsStatus === "issuing")) return "certificate issuing";
-  return "certificate pending";
+  return "pending TLS";
 }
 
 function deploymentSource(deployment: DaemonDeployment): string {
@@ -803,6 +832,23 @@ export default function DashboardClient() {
         latest.set(deployment.appId, deployment);
       }
     }
+    return latest;
+  }, [deployments]);
+
+  const latestSuccessfulDeploymentByAppId = useMemo(() => {
+    const grouped = new Map<number, DaemonDeployment[]>();
+    for (const deployment of deployments) {
+      const items = grouped.get(deployment.appId) || [];
+      items.push(deployment);
+      grouped.set(deployment.appId, items);
+    }
+
+    const latest = new Map<number, DaemonDeployment>();
+    for (const [appId, appDeployments] of grouped) {
+      const successful = latestSuccessfulDeployment(appDeployments);
+      if (successful) latest.set(appId, successful);
+    }
+
     return latest;
   }, [deployments]);
 
@@ -1380,7 +1426,7 @@ export default function DashboardClient() {
               />
             ) : null}
 
-            {activeModule === "deployments" ? <DeploymentsModule apps={dockerfileApps} connected={connected} deployments={deployments} deployingByAppId={deployingByAppId} error={deployError || deploymentsError} latestByAppId={latestDeploymentByAppId} server={serverStatus} onDeploy={(app) => void deployApp(app)} onLogs={(deployment) => void loadDeploymentLogs(deployment)} /> : null}
+            {activeModule === "deployments" ? <DeploymentsModule apps={dockerfileApps} connected={connected} deployments={deployments} deployingByAppId={deployingByAppId} error={deployError || deploymentsError} latestByAppId={latestDeploymentByAppId} latestSuccessfulByAppId={latestSuccessfulDeploymentByAppId} server={serverStatus} onDeploy={(app) => void deployApp(app)} onLogs={(deployment) => void loadDeploymentLogs(deployment)} /> : null}
 
             {activeModule === "domains" ? <DomainsModule apps={dockerfileApps} connected={connected} domains={domains} domainsError={domainsError || proxyError} domainsMeta={domainsMeta} domainActionByHostname={domainActionByHostname} domainForm={domainForm} domainSaving={domainSaving} proxyRoutes={proxyRoutes} rootDomainInput={rootDomainInput} onAddDomain={() => void addDomain()} onDomainFormChange={setDomainForm} onRemoveDomain={(domain) => void removeDomain(domain)} onRootDomainChange={setRootDomainInput} onSaveRootDomain={() => void saveRootDomain()} onVerifyDomain={(domain) => void verifyDomain(domain)} /> : null}
 
@@ -1560,15 +1606,16 @@ function MetricSampleRow({ sample }: { sample: DaemonMetricSample }) {
   );
 }
 
-function DeploymentsModule({ apps, connected, deployments, deployingByAppId, error, latestByAppId, onDeploy, onLogs, server }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; deployingByAppId: Record<number, boolean>; error: string | null; latestByAppId: Map<number, DaemonDeployment>; onDeploy: (app: DaemonApp) => void; onLogs: (deployment: DaemonDeployment) => void; server: DaemonServerStatus | null }) {
+function DeploymentsModule({ apps, connected, deployments, deployingByAppId, error, latestByAppId, latestSuccessfulByAppId, onDeploy, onLogs, server }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; deployingByAppId: Record<number, boolean>; error: string | null; latestByAppId: Map<number, DaemonDeployment>; latestSuccessfulByAppId: Map<number, DaemonDeployment>; onDeploy: (app: DaemonApp) => void; onLogs: (deployment: DaemonDeployment) => void; server: DaemonServerStatus | null }) {
   const dockerReady = serverCheck(server, "docker")?.status === "ok";
   const dataReady = Boolean(server?.dataDir);
-  const authReady = Boolean(!server?.auth.required || server.auth.configured);
+  const auth = productionAuthState(server, [error]);
   const serverReady = Boolean(server?.readiness?.ok);
   const failed = deployments.filter((item) => item.status === "failed");
+  const inProgress = deployments.filter(isDeploymentInProgress);
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="deployments" stats={<><ReadinessCard label="Docker" value={dockerReady ? "ready" : "check"} status={dockerReady ? "ok" : "warn"} /><ReadinessCard label="Server" value={serverReady ? "ready" : "doctor"} status={serverReady ? "ok" : "warn"} /><ReadinessCard label="Data dir" value={dataReady ? "ready" : "pending"} status={dataReady ? "ok" : "warn"} /><ReadinessCard label="Auth" value={authReady ? "ready" : "missing"} status={authReady ? "ok" : "error"} /><ReadinessCard label="Failed" value={String(failed.length)} status={failed.length ? "error" : "ok"} /></>} />
+      <ModuleHeader module="deployments" stats={<><ReadinessCard label="Docker" value={dockerReady ? "ready" : "check"} status={dockerReady ? "ok" : "warn"} /><ReadinessCard label="Server" value={serverReady ? "ready" : "doctor"} status={serverReady ? "ok" : "warn"} /><ReadinessCard label="Data dir" value={dataReady ? "ready" : "pending"} status={dataReady ? "ok" : "warn"} /><ReadinessCard label="Auth" value={auth.label} status={auth.tone} /><ReadinessCard label="Active" value={String(inProgress.length)} status={inProgress.length ? "warn" : "ok"} /><ReadinessCard label="Failed" value={String(failed.length)} status={failed.length ? "error" : "ok"} /></>} />
       {error ? <Alert title="Deployment action failed" message={error} /> : null}
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
         <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
@@ -1576,6 +1623,7 @@ function DeploymentsModule({ apps, connected, deployments, deployingByAppId, err
           {apps.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No app uses the verified Dockerfile bridge yet. Compose production parity is deferred until the backend path exists.</div> : null}
           {apps.map((app) => {
             const latest = latestByAppId.get(app.id);
+            const latestSuccessful = latestSuccessfulByAppId.get(app.id);
             const deploying = Boolean(deployingByAppId[app.id]);
             const disabledReason = deployBlockReason(app, connected, server);
             return (
@@ -1590,7 +1638,9 @@ function DeploymentsModule({ apps, connected, deployments, deployingByAppId, err
                     <div className="mt-2 grid gap-2 text-[11px] text-muted sm:grid-cols-2">
                       <Meta label="Source" value={latest ? deploymentSource(latest) : compactSource(app)} mono />
                       <Meta label="Image / container / ports" value={appDeployMetadata(app, latest)} mono />
-                      <Meta label="Phase" value={latest?.phase || "waiting for first deploy"} />
+                      <Meta label="Current state" value={deploymentStateLabel(latest)} />
+                      <Meta label="Latest successful" value={latestSuccessful ? `#${latestSuccessful.id} · ${latestSuccessful.hostPort ? `:${latestSuccessful.hostPort}` : "no host port"}` : "none yet"} />
+                      <Meta label="Logs" value={deploymentLogsLabel(latest)} />
                       <Meta label="Updated" value={latest ? timeAgo(latest.updatedAt) : timeAgo(app.updatedAt)} />
                     </div>
                     {latest?.errorMessage ? <p className="mt-2 rounded-md bg-negative/10 px-3 py-2 text-xs text-negative">{latest.errorMessage}</p> : null}
@@ -1612,19 +1662,69 @@ function DeploymentsModule({ apps, connected, deployments, deployingByAppId, err
 }
 
 function DomainsModule({ apps, connected, domains, domainsError, domainsMeta, domainActionByHostname, domainForm, domainSaving, onAddDomain, onDomainFormChange, onRemoveDomain, onRootDomainChange, onSaveRootDomain, onVerifyDomain, proxyRoutes, rootDomainInput }: { apps: DaemonApp[]; connected: boolean; domains: DaemonDomain[]; domainsError: string | null; domainsMeta: { rootDomain: string | null; serverPublicIp: string | null }; domainActionByHostname: Record<string, string | null>; domainForm: { appId: string; hostname: string }; domainSaving: boolean; onAddDomain: () => void; onDomainFormChange: (form: { appId: string; hostname: string }) => void; onRemoveDomain: (domain: DaemonDomain) => void; onRootDomainChange: (value: string) => void; onSaveRootDomain: () => void; onVerifyDomain: (domain: DaemonDomain) => void; proxyRoutes: DaemonProxyRoute[]; rootDomainInput: string }) {
-  const enabledRoutes = proxyRoutes.filter((route) => route.enabled).length;
+  const generatedRoutes = domains.filter((domain) => domain.proxyStatus === "generated" || proxyRoutes.some((route) => route.domainId === domain.id && route.enabled)).length;
+  const verifiedTls = domains.filter((domain) => ["active", "verified"].includes(domain.tlsStatus)).length;
+
   return (
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="domains" stats={<><ReadinessCard label="Root" value={domainsMeta.rootDomain || "unset"} status={domainsMeta.rootDomain ? "ok" : "warn"} /><ReadinessCard label="Hosts" value={String(domains.length)} status={domains.length ? "ok" : "warn"} /><ReadinessCard label="Routes" value={`${enabledRoutes}/${domains.length}`} status={enabledRoutes ? "ok" : "warn"} /></>} />
+      <ModuleHeader module="domains" stats={<><ReadinessCard label="Root" value={domainsMeta.rootDomain || "unset"} status={domainsMeta.rootDomain ? "ok" : "warn"} /><ReadinessCard label="Hosts" value={String(domains.length)} status={domains.length ? "ok" : "warn"} /><ReadinessCard label="Routes" value={`${generatedRoutes}/${domains.length}`} status={generatedRoutes ? "ok" : "warn"} /><ReadinessCard label="TLS" value={`${verifiedTls}/${domains.length}`} status={verifiedTls === domains.length && domains.length ? "ok" : "warn"} /></>} />
       {domainsError ? <Alert title="Domain or proxy action failed" message={domainsError} /> : null}
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.85fr)_minmax(340px,1.15fr)]">
         <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
           <ResourceSection title="Root domain" count={domainsMeta.rootDomain ? 1 : 0} />
-          <div className="border-b border-white/5 px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]"><Field label="Root domain" value={rootDomainInput} onChange={onRootDomainChange} placeholder="example.com" disabled={!connected || domainSaving} /><div className="flex items-end"><PillButton onClick={onSaveRootDomain} disabled={!connected || domainSaving || !rootDomainInput.trim()} strong>Save root</PillButton></div></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Server IP" value={domainsMeta.serverPublicIp || "set ROUTELY_SERVER_PUBLIC_IP"} mono /><Meta label="Wildcard" value={domainsMeta.rootDomain ? `*.${domainsMeta.rootDomain}` : "set root domain"} mono /></div></div>
+          <div className="border-b border-white/5 px-4 py-3">
+            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
+              <Field label="Root domain" value={rootDomainInput} onChange={onRootDomainChange} placeholder="example.com" disabled={!connected || domainSaving} />
+              <div className="flex items-end"><PillButton onClick={onSaveRootDomain} disabled={!connected || domainSaving || !rootDomainInput.trim()} strong>Save root</PillButton></div>
+            </div>
+            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Server IP" value={domainsMeta.serverPublicIp || "set ROUTELY_SERVER_PUBLIC_IP"} mono /><Meta label="Wildcard" value={domainsMeta.rootDomain ? `*.${domainsMeta.rootDomain}` : "set root domain"} mono /></div>
+          </div>
           <ResourceSection title="Add hostname" count={apps.length} />
-          <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]"><UiSelect value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} label="App"><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</UiSelect><Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} /><div className="flex items-end"><PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton></div></div></div>
+          <div className="px-4 py-3">
+            <div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]">
+              <UiSelect value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} label="App"><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</UiSelect>
+              <Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} />
+              <div className="flex items-end"><PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton></div>
+            </div>
+            <p className="mt-3 text-xs text-muted">Generated proxy config is route metadata only; TLS stays pending until the daemon reports verified certificate state.</p>
+          </div>
         </div>
-        <div className="min-w-0"><ResourceSection title="Hostnames" count={domains.length} />{domains.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS verification creates proxy route state; generated routes are not certificate success.</div> : domains.map((domain) => { const action = domainActionByHostname[domain.hostname]; const route = proxyRoutes.find((item) => item.domainId === domain.id); const steps = [{ label: "Root", value: domainsMeta.rootDomain || "unset", tone: domainStepTone(domain, route, "root", Boolean(domainsMeta.rootDomain)) }, { label: "Host", value: domain.hostname, tone: domainStepTone(domain, route, "hostname", Boolean(domainsMeta.rootDomain)) }, { label: "DNS", value: domain.dnsStatus, tone: domainStepTone(domain, route, "dns", Boolean(domainsMeta.rootDomain)) }, { label: "Proxy", value: route?.enabled ? "generated" : "pending", tone: domainStepTone(domain, route, "proxy", Boolean(domainsMeta.rootDomain)) }, { label: "TLS", value: domain.tlsStatus, tone: domainStepTone(domain, route, "tls", Boolean(domainsMeta.rootDomain)) }, { label: "Target", value: route?.targetUrl || (domain.targetPort ? `:${domain.targetPort}` : "pending"), tone: domainStepTone(domain, route, "target", Boolean(domainsMeta.rootDomain)) }]; return <div key={domain.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{domain.hostname}</p><p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {route?.targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p></div><StatusBadge status={domain.status} /></div><div className="mt-3 grid gap-2 sm:grid-cols-3">{steps.map((step) => <ReadinessCard key={step.label} label={step.label} value={step.value} status={step.tone} />)}</div>{domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton><ActionLink href={domain.tlsStatus === "active" ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink><PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton></div></div>; })}</div>
+        <div className="min-w-0">
+          <ResourceSection title="Hostnames" count={domains.length} />
+          {domains.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS verification creates proxy route state; generated routes are not certificate success.</div> : domains.map((domain) => {
+            const action = domainActionByHostname[domain.hostname];
+            const route = proxyRoutes.find((item) => item.domainId === domain.id);
+            const targetUrl = domain.targetUrl || route?.targetUrl || null;
+            const targetDomain = { ...domain, targetUrl };
+            const steps = [
+              { label: "Root", value: domainsMeta.rootDomain || "unset", tone: domainStepTone(domain, route, "root", Boolean(domainsMeta.rootDomain)) },
+              { label: "DNS", value: domainDnsLabel(domain.dnsStatus), tone: domainStepTone(domain, route, "dns", Boolean(domainsMeta.rootDomain)) },
+              { label: "Proxy", value: domainProxyLabel(targetDomain, Boolean(route?.enabled)), tone: domainStepTone(domain, route, "proxy", Boolean(domainsMeta.rootDomain)) },
+              { label: "TLS", value: domainTlsLabel(domain.tlsStatus), tone: domainStepTone(domain, route, "tls", Boolean(domainsMeta.rootDomain)) },
+              { label: "Target", value: domainTargetLabel(targetDomain), tone: domainStepTone(targetDomain, route, "target", Boolean(domainsMeta.rootDomain)) },
+              { label: "Deploy", value: domain.targetDeploymentId ? `#${domain.targetDeploymentId}` : route?.deploymentId ? `#${route.deploymentId}` : "latest success pending", tone: domain.targetDeploymentId || route?.deploymentId ? "ok" as const : "warn" as const }
+            ];
+
+            return (
+              <div key={domain.id} className="border-b border-white/5 px-4 py-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="truncate font-mono text-sm font-bold">{domain.hostname}</p>
+                    <p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p>
+                  </div>
+                  <StatusBadge status={domain.status} />
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-3">{steps.map((step) => <ReadinessCard key={step.label} label={step.label} value={step.value} status={step.tone} />)}</div>
+                {domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton>
+                  <ActionLink href={["active", "verified"].includes(domain.tlsStatus) ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink>
+                  <PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </section>
   );
@@ -1710,6 +1810,7 @@ function BackupsModule({ backupActionById, backupForm, backupJobs, backupRuns, b
 
 function DatabaseLedgerRow({ busy, connected, database, onAction }: { busy: string | null | undefined; connected: boolean; database: DaemonDatabase; onAction: (database: DaemonDatabase, action: "start" | "stop") => void }) {
   const running = database.status === "running";
+  const exposure = databaseExposureLabel(database);
   return (
     <article className="grid gap-3 border-b border-white/5 px-4 py-3 transition hover:bg-white/[0.025] xl:grid-cols-[minmax(180px,0.8fr)_minmax(280px,1.2fr)_minmax(220px,0.9fr)_auto] xl:items-center">
       <div className="min-w-0">
@@ -1722,7 +1823,8 @@ function DatabaseLedgerRow({ busy, connected, database, onAction }: { busy: stri
         </div>
       </div>
       <div className="grid min-w-0 grid-cols-2 gap-2 text-xs sm:grid-cols-4 xl:grid-cols-2">
-        <Meta label="State" value={database.internal ? "internal" : "public"} />
+        <Meta label="State" value={exposure.label === "internal-only" ? "internal database" : "public requested"} />
+        <Meta label="Scope" value={exposure.label} />
         <Meta label="Service" value={database.composeService || "compose pending"} mono />
         <Meta label="Volume" value={database.volumeName || "volume pending"} mono />
         <Meta label="Port" value={database.port ? `:${database.port}` : "none"} mono />
@@ -1741,6 +1843,8 @@ function DatabaseLedgerRow({ busy, connected, database, onAction }: { busy: stri
 }
 
 function BackupJobLedgerRow({ busy, connected, job, latestRun, onRunBackup, onToggleBackup }: { busy: string | null | undefined; connected: boolean; job: DaemonBackupJob; latestRun: DaemonBackupRun | null; onRunBackup: (job: DaemonBackupJob) => void; onToggleBackup: (job: DaemonBackupJob, enabled: boolean) => void }) {
+  const storage = backupStorageLabel(job);
+  const restore = backupRestoreLabel(job);
   return (
     <article className="grid gap-3 border-b border-white/5 px-4 py-3 transition hover:bg-white/[0.025] xl:grid-cols-[minmax(180px,0.85fr)_minmax(260px,1.05fr)_minmax(220px,0.95fr)_auto] xl:items-center">
       <div className="min-w-0">
@@ -1749,17 +1853,19 @@ function BackupJobLedgerRow({ busy, connected, job, latestRun, onRunBackup, onTo
           <p className="truncate text-sm font-bold">{job.databaseName || `database ${job.databaseId}`}</p>
           <span className="rounded-full bg-surface-raised px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{job.databaseType || "db"}</span>
         </div>
-        <p className="mt-1 truncate font-mono text-[11px] text-muted">{job.localDir || "default backup dir"}</p>
+        <p className="mt-1 truncate font-mono text-[11px] text-muted">{job.localDir || "default backup dir"} · {storage.label}</p>
       </div>
       <div className="grid min-w-0 grid-cols-2 gap-2 text-xs sm:grid-cols-3 xl:grid-cols-2">
         <Meta label="Schedule" value={job.schedule || "manual only"} mono />
-        <Meta label="Retention" value={`${job.retentionDays} days`} />
+        <Meta label="Retention" value={job.retentionStatus || `${job.retentionDays} days`} />
+        <Meta label="Storage" value={storage.label} />
+        <Meta label="Restore" value={restore.label} />
         <Meta label="Last run" value={job.lastRunAt ? timeAgo(job.lastRunAt) : "never"} />
         <Meta label="Last state" value={job.lastRunStatus || "none"} />
       </div>
       <div className="min-w-0 text-xs text-muted">
-        <p className="line-clamp-2 break-words">{job.lastRunMessage || latestRun?.message || latestRun?.filePath || "No run message recorded."}</p>
-        {latestRun ? <p className="mt-1 truncate font-mono text-[11px]">run #{latestRun.id} · {latestRun.status} · {formatBytes(latestRun.sizeBytes)}</p> : null}
+        <p className="line-clamp-2 break-words">{job.lastRunMessage || latestRun?.message || (latestRun ? backupRunFileState(latestRun).label : null) || "No run message recorded."}</p>
+        {latestRun ? <p className="mt-1 truncate font-mono text-[11px]">run #{latestRun.id} · {latestRun.status} · {latestRun.storageStatus || "metadata-only"} · {formatBytes(latestRun.sizeBytes)}</p> : null}
       </div>
       <div className="flex flex-wrap gap-1.5 xl:justify-end xl:flex-nowrap">
         <PillButton onClick={() => onRunBackup(job)} disabled={!connected || Boolean(busy)}>{busy === "run" ? "Running" : "Run"}</PillButton>
@@ -1770,6 +1876,7 @@ function BackupJobLedgerRow({ busy, connected, job, latestRun, onRunBackup, onTo
 }
 
 function BackupRunLedgerRow({ run }: { run: DaemonBackupRun }) {
+  const fileState = backupRunFileState(run);
   return (
     <article className="grid gap-3 border-b border-white/5 px-4 py-3 transition hover:bg-white/[0.025] xl:grid-cols-[minmax(180px,0.8fr)_minmax(220px,0.85fr)_minmax(260px,1.15fr)] xl:items-start">
       <div className="min-w-0">
@@ -1781,10 +1888,13 @@ function BackupRunLedgerRow({ run }: { run: DaemonBackupRun }) {
         <Meta label="Finished" value={timeAgo(run.finishedAt)} />
         <Meta label="Size" value={formatBytes(run.sizeBytes)} />
         <Meta label="Job" value={`#${run.backupJobId}`} mono />
+        <Meta label="Storage" value={run.storageStatus || "metadata-only"} />
+        <Meta label="Restore" value={run.restoreStatus || "deferred"} />
       </div>
       <div className="min-w-0">
         <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">File / message</p>
-        <p className="mt-1 break-all font-mono text-[11px] text-muted">{run.filePath || run.message || "no backup file"}</p>
+        <p className={`mt-1 break-all font-mono text-[11px] ${fileState.tone === "error" ? "text-negative" : "text-muted"}`}>{fileState.label}{run.message ? ` · ${run.message}` : ""}</p>
+        <p className={`mt-1 text-[11px] ${fileState.label === "download exposed" ? "text-negative" : "text-muted"}`}>{fileState.label === "download exposed" ? "download URL exposed unexpectedly; review daemon response" : "local file metadata only; no dashboard download"}</p>
       </div>
     </article>
   );
@@ -1856,20 +1966,20 @@ function OverviewPanel({ apps, backupJobs, backupRuns, connected, deployments, d
       <div className="grid gap-3 px-4 py-4 xl:grid-cols-[1.05fr_0.95fr]">
         <div className="grid gap-3 sm:grid-cols-2">
           <OverviewStatusCard title="Resources" action="Apps" onAction={() => onSelect("apps")} items={[`running ${running}`, `stopped ${stopped}`, `crashed ${crashed}`, `disabled ${disabled}`]} tone={crashed ? "error" : pendingApps.length ? "warn" : "ok"} />
-          <OverviewStatusCard title="Latest deploy" action="Deploy" onAction={() => onSelect("deployments")} items={latestDeploy ? [latestDeploy.appName || `app ${latestDeploy.appId}`, `${latestDeploy.status} · ${latestDeploy.phase}`, timeAgo(latestDeploy.updatedAt)] : ["no deployments", "Dockerfile apps can deploy"]} tone={latestDeploy ? statusTone(latestDeploy.status) : "warn"} />
-          <OverviewStatusCard title="Domains & proxy" action="Domains" onAction={() => onSelect("domains")} items={[domainsMeta.rootDomain || "root unset", `${verifiedDomains}/${domains.length} DNS ready`, `${enabledRoutes} proxy routes`]} tone={domains.length && verifiedDomains === domains.length ? "ok" : domains.length ? "warn" : "warn"} />
+          <OverviewStatusCard title="Latest deploy" action="Deploy" onAction={() => onSelect("deployments")} items={latestDeploy ? [latestDeploy.appName || `app ${latestDeploy.appId}`, deploymentStateLabel(latestDeploy), timeAgo(latestDeploy.updatedAt)] : ["no deployments", "Dockerfile bridge only"]} tone={latestDeploy ? statusTone(latestDeploy.status) : "warn"} />
+          <OverviewStatusCard title="Domains & proxy" action="Domains" onAction={() => onSelect("domains")} items={[domainsMeta.rootDomain || "root unset", `${verifiedDomains}/${domains.length} DNS ready`, `${enabledRoutes} generated routes`]} tone={domains.length && verifiedDomains === domains.length ? "ok" : domains.length ? "warn" : "warn"} />
           <OverviewStatusCard title="GitHub & backups" action="Release" onAction={() => onSelect(githubConnected ? "backups" : "github")} items={[github?.configured ? "GitHub app configured" : "GitHub app missing", githubConnected ? "repo connected" : "no repo connected", latestBackup ? `${latestBackup.status} backup · ${timeAgo(latestBackup.updatedAt)}` : `${backupJobs.length} backup jobs`]} tone={backupFailures.length ? "error" : githubConnected || backupJobs.length ? "ok" : "warn"} />
         </div>
-        <OverviewList title="Urgent next actions" empty="No urgent action. Operations are clean." action="Review" onAction={() => onSelect(urgent[0]?.module || "apps")}>
+        <OverviewList title="Urgent next actions" empty="No loaded blockers from current data." action="Review" onAction={() => onSelect(urgent[0]?.module || "apps")}>
           {urgent.map((item) => <TimelineRow key={item.key} title={item.title} detail={item.detail} tone={item.tone} />)}
         </OverviewList>
       </div>
       <div className="grid gap-3 border-t border-white/5 bg-black/10 px-4 py-4 lg:grid-cols-3">
         <OverviewList title="Recent deployments" empty="No deployments yet." action="Deployments" onAction={() => onSelect("deployments")}>
-          {recentDeploys.slice(0, 3).map((deployment) => <TimelineRow key={deployment.id} title={`#${deployment.id} ${deployment.appName || "app"}`} detail={`${deployment.status} · ${timeAgo(deployment.updatedAt)}`} tone={deployment.status === "failed" ? "error" : deployment.status === "succeeded" ? "ok" : "warn"} />)}
+          {recentDeploys.slice(0, 3).map((deployment) => <TimelineRow key={deployment.id} title={`#${deployment.id} ${deployment.appName || "app"}`} detail={`${deploymentStateLabel(deployment)} · ${timeAgo(deployment.updatedAt)}`} tone={deployment.status === "failed" ? "error" : deployment.status === "succeeded" ? "ok" : "warn"} />)}
         </OverviewList>
         <OverviewList title="Domain readiness" empty="No domains configured." action="Domains" onAction={() => onSelect("domains")}>
-          {domains.slice(0, 4).map((domain) => <TimelineRow key={domain.id} title={domain.hostname} detail={`${domain.dnsStatus} DNS · ${httpsSummary([domain])}`} tone={domain.dnsStatus !== "verified" ? "warn" : tlsTone(domain.tlsStatus)} />)}
+          {domains.slice(0, 4).map((domain) => <TimelineRow key={domain.id} title={domain.hostname} detail={`${domainDnsLabel(domain.dnsStatus)} · ${domainTlsLabel(domain.tlsStatus)}`} tone={domain.dnsStatus !== "verified" ? "warn" : tlsTone(domain.tlsStatus)} />)}
         </OverviewList>
         <OverviewList title="Backup state" empty="No backup jobs yet." action="Backups" onAction={() => onSelect("backups")}>
           {backupJobs.slice(0, 4).map((job) => <TimelineRow key={job.id} title={job.databaseName || `database ${job.databaseId}`} detail={`${job.enabled ? "enabled" : "disabled"} · ${job.lastRunStatus || "never run"}`} tone={job.lastRunStatus === "failed" ? "error" : job.enabled ? "ok" : "warn"} />)}
@@ -2066,10 +2176,10 @@ function ServerFoundationPanel({ connected, error, server }: { connected: boolea
 
       <div className="border-t border-white/5 bg-black/20 px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Readiness blockers</span>
+          <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Disabled / deferred actions</span>
           {(server?.disabledProductionActions || ["deployments", "domains", "https", "github", "backups"]).map((item) => (
             <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/60">
-              {item} pending readiness
+              {item} disabled until ready
             </span>
           ))}
         </div>
@@ -2221,7 +2331,7 @@ function DeploymentSummaryRow({ deployment, onLogs }: { deployment: DaemonDeploy
         <div className="min-w-0">
           <p className="truncate text-sm font-bold">#{deployment.id} {deployment.appName || `app ${deployment.appId}`}</p>
           <p className="mt-1 truncate font-mono text-[11px] text-muted">{deploymentSource(deployment)}</p>
-          <p className="mt-1 truncate text-[11px] text-muted">{deployment.phase} · {deployment.containerName || "container pending"} · {deployment.hostPort ? `:${deployment.hostPort}->${deployment.containerPort || "?"}` : "port pending"} · {deployment.startedAt ? timeAgo(deployment.startedAt) : timeAgo(deployment.createdAt)}</p>
+          <p className="mt-1 truncate text-[11px] text-muted">{deploymentStateLabel(deployment)} · {deployment.containerName || "container pending"} · {deployment.hostPort ? `:${deployment.hostPort}->${deployment.containerPort || "?"}` : "port pending"} · {deploymentLogsLabel(deployment)} · {deployment.startedAt ? timeAgo(deployment.startedAt) : timeAgo(deployment.createdAt)}</p>
           {deployment.errorMessage ? <p className="mt-2 text-xs text-negative">{deployment.errorMessage}</p> : null}
         </div>
         <StatusBadge status={deployment.status} />
@@ -2392,9 +2502,13 @@ function DetailPanel({
 
   const localUrl = appUrl(app);
   const latestDeployment = deployments[0] || null;
+  const latestSuccessful = latestSuccessfulDeployment(deployments);
   const deployReason = deployBlockReason(app, connected, server);
   const healthStatus = appHealth?.status || "unknown";
+  const healthState = appHealth?.available === false ? appHealth.reason || appHealth.message || healthStatus : healthStatus;
   const latestMetric = appMetrics[0] || null;
+  const currentLogs = logs?.app.id === app.id ? logs : null;
+  const currentDeploymentLogs = deploymentLogs?.deployment.appId === app.id ? deploymentLogs : null;
   const redeployPending = envRedeployLabel(app, appEnv?.pending.needsRedeploy);
   const busy = Boolean(currentAction);
   const startReason = !onAction ? "lifecycle action unavailable" : appActionBlockReason(app, "start", connected, busy);
@@ -2442,10 +2556,11 @@ function DetailPanel({
           <Meta label="Preset" value={app.preset} />
           <Meta label="Port" value={app.port ? String(app.port) : "-"} mono />
           <Meta label="Updated" value={timeAgo(app.updatedAt)} />
-          <Meta label="Latest deploy" value={latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : "never"} />
-          <Meta label="Deploy ready" value={deployReason || "ready"} />
+          <Meta label="Latest activity" value={latestDeployment ? deploymentStateLabel(latestDeployment) : "never deployed"} />
+          <Meta label="Latest successful" value={latestSuccessful ? `#${latestSuccessful.id} · ${latestSuccessful.hostPort ? `:${latestSuccessful.hostPort}` : "no host port"}` : "none yet"} />
+          <Meta label="Deploy gate" value={deployReason || "not blocked by current checks"} />
           <Meta label="Settings state" value={pendingStateLabel(app)} />
-          <Meta label="Temporary URL" value={latestDeployment?.hostPort ? `http://127.0.0.1:${latestDeployment.hostPort}` : "-"} mono wide />
+          <Meta label="Temporary URL" value={latestSuccessful?.hostPort ? `http://127.0.0.1:${latestSuccessful.hostPort}` : latestDeployment?.hostPort ? `http://127.0.0.1:${latestDeployment.hostPort}` : "-"} mono wide />
           <Meta label="Production domains" value={domains.map((domain) => `${domain.hostname} (${domain.status})`).join(", ") || "none"} mono wide />
           <Meta label="Path" value={app.path || "-"} mono wide />
           <Meta label="Healthcheck" value={app.healthcheck?.path ? `${app.healthcheck.path} -> ${app.healthcheck.expected_status || 200}` : "container state"} wide />
@@ -2480,7 +2595,7 @@ function DetailPanel({
         <div>
           <div className="border-b border-white/5 px-4 py-3">
             <div className="grid grid-cols-3 gap-2 sm:grid-cols-5">
-              <ReadinessCard label="State" value={healthStatus} status={healthStatus === "healthy" ? "ok" : healthStatus === "unknown" ? "warn" : "error"} />
+              <ReadinessCard label="State" value={healthState} status={healthStatus === "healthy" ? "ok" : healthStatus === "unknown" || appHealth?.available === false ? "warn" : "error"} />
               <ReadinessCard label="Response" value={appHealth?.checks[0]?.responseTimeMs == null ? "-" : `${appHealth.checks[0].responseTimeMs}ms`} status="ok" />
               <ReadinessCard label="Checks" value={String(appHealth?.checks.length || 0)} status={appHealth?.checks.length ? "ok" : "warn"} />
               <ReadinessCard label="CPU" value={latestMetric?.cpuPercent == null ? "-" : `${latestMetric.cpuPercent.toFixed(1)}%`} status="ok" />
@@ -2490,6 +2605,7 @@ function DetailPanel({
               <PillButton onClick={() => void loadHealthAndMetrics(app)} disabled={!connected || healthLoading || metricsLoading}>{healthLoading || metricsLoading ? "Refreshing" : "Refresh health"}</PillButton>
               {healthError ? <span className="text-xs text-negative">{healthError}</span> : null}
             </div>
+            {appHealth?.message ? <p className="mt-2 text-xs text-muted">{appHealth.message}</p> : null}
           </div>
 
           {appHealth?.checks.length === 0 && !healthLoading ? <div className="px-4 py-5 text-sm text-muted">No health sample recorded yet. Refresh health to evaluate the configured endpoint or runtime state.</div> : null}
@@ -2536,14 +2652,15 @@ function DetailPanel({
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-mono text-sm font-bold">{domain.hostname}</p>
-                  <p className="mt-1 text-[11px] text-muted">target {domain.targetPort ? `:${domain.targetPort}` : "pending"} · {domain.verificationMessage || "verification pending"}</p>
+                  <p className="mt-1 text-[11px] text-muted">{domainTargetLabel(domain)} · {domain.verificationMessage || "verification pending"}</p>
                 </div>
                 <StatusBadge status={domain.status} />
               </div>
-              <div className="mt-3 grid grid-cols-3 gap-2">
-                <ReadinessCard label="DNS" value={domain.dnsStatus} status={domain.dnsStatus === "verified" ? "ok" : "warn"} />
-                <ReadinessCard label="TLS" value={domain.tlsStatus} status={tlsTone(domain.tlsStatus)} />
-                <ReadinessCard label="Target" value={domain.targetPort ? `:${domain.targetPort}` : "pending"} status={domain.targetPort ? "ok" : "warn"} />
+              <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <ReadinessCard label="DNS" value={domainDnsLabel(domain.dnsStatus)} status={domain.dnsStatus === "verified" ? "ok" : ["failed", "error", "mismatch"].includes(domain.dnsStatus) ? "error" : "warn"} />
+                <ReadinessCard label="Proxy" value={domainProxyLabel(domain, domain.proxyStatus === "generated")} status={domain.proxyStatus === "generated" ? "ok" : domain.proxyStatus === "failed" ? "error" : "warn"} />
+                <ReadinessCard label="TLS" value={domainTlsLabel(domain.tlsStatus)} status={tlsTone(domain.tlsStatus)} />
+                <ReadinessCard label="Target" value={domainTargetLabel(domain)} status={domain.targetUrl || domain.targetPort ? "ok" : "warn"} />
               </div>
             </div>
           ))}
@@ -2594,11 +2711,11 @@ function DetailPanel({
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="truncate font-mono text-sm font-bold">{row.key}</p>
-                  <p className="mt-1 break-all font-mono text-[11px] text-muted">{row.displayValue}</p>
+                  <p className="mt-1 break-all font-mono text-[11px] text-muted">{safeEnvDisplay(row)}</p>
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1">
                   <span className="rounded-full bg-surface-raised px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{row.scope}</span>
-                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] ${row.isSecret ? "bg-warning/15 text-warning" : "bg-white/10 text-muted"}`}>{row.isSecret ? "secret" : "plain"}</span>
+                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] ${row.isSecret ? "bg-warning/15 text-warning" : "bg-white/10 text-muted"}`}>{envVisibilityLabel(row)}</span>
                 </div>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-2">
@@ -2616,19 +2733,19 @@ function DetailPanel({
         <div className="flex items-center justify-between gap-3 px-4 py-3">
           <div>
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Recent logs</p>
-            <p className="text-xs text-muted">{logs?.path ? shortPath(logs.path) : logs?.truncated ? "tail 64 KB" : "latest local output"}</p>
+            <p className="text-xs text-muted">{currentLogs?.path ? `${logAvailabilityLabel(currentLogs)} · ${shortPath(currentLogs.path)}` : logAvailabilityLabel(currentLogs)}</p>
           </div>
           <PillButton onClick={onReload} disabled={!onReload || loading || !connected}>{loading ? "Loading" : "Reload"}</PillButton>
         </div>
         {error ? <div className="border-y border-negative/20 bg-negative/10 px-4 py-2 text-xs text-negative">{error}</div> : null}
         <TerminalSurface minHeight="min-h-[260px]" maxHeight="max-h-[420px]">
-          {loading && !logs ? "Loading logs..." : logs?.app.id === app.id ? logs.logs || "No logs captured yet." : "Logs pending."}
+          {loading && !currentLogs ? "Loading logs..." : currentLogs ? currentLogs.logs || "Logs available but empty." : "Logs not loaded for this app."}
         </TerminalSurface>
         <div className="border-t border-white/5 px-4 py-3">
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Deployment logs</p>
           {deploymentLogsError ? <p className="mt-2 text-xs text-negative">{deploymentLogsError}</p> : null}
           <TerminalSurface className="mt-2" minHeight="min-h-[180px]" maxHeight="max-h-[280px]">
-            {deploymentLogsLoading && !deploymentLogs ? "Loading deployment logs..." : deploymentLogs?.logs.map((log) => log.message).join("") || "Select a deployment log from the deploy panel or Deployments tab."}
+            {deploymentLogsLoading && !currentDeploymentLogs ? "Loading deployment logs..." : currentDeploymentLogs?.logs.map((log) => log.message).join("") || "Select a deployment log from this app's deploy panel or Deployments tab."}
           </TerminalSurface>
         </div>
       </div> : null}
@@ -2644,7 +2761,7 @@ function DeploymentTimeline({ deployment, onLogs }: { deployment: DaemonDeployme
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-bold">Deployment #{deployment.id}</p>
-          <p className="truncate text-[11px] text-muted">{deployment.containerName || "container pending"}</p>
+          <p className="truncate text-[11px] text-muted">{deploymentStateLabel(deployment)} · {deployment.containerName || "container pending"}</p>
         </div>
         <StatusBadge status={deployment.status} />
       </div>

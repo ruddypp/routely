@@ -120,6 +120,8 @@ export type DaemonDeployment = {
   hostPort: number | null;
   containerPort: number | null;
   errorMessage: string | null;
+  logsUrl: string;
+  logsStreamUrl: string;
   startedAt: string | null;
   finishedAt: string | null;
   createdAt: string;
@@ -149,6 +151,7 @@ export type DaemonHealthcheck = {
   path: string | null;
   expectedStatus: number | null;
   status: string;
+  available: boolean;
   httpStatus: number | null;
   responseTimeMs: number | null;
   message: string | null;
@@ -181,6 +184,7 @@ export type DaemonDatabase = {
   type: string;
   status: string;
   internal: boolean;
+  connectionScope?: "internal-only" | "public-requested" | string;
   image: string | null;
   port: number | null;
   composeService: string | null;
@@ -199,6 +203,23 @@ export type DaemonBackupJob = {
   enabled: boolean;
   schedule: string | null;
   retentionDays: number;
+  retentionStatus?: string;
+  storageType?: "local" | string;
+  storageStatus?: "metadata-only" | string;
+  restoreStatus?: "deferred" | string;
+  storage?: {
+    type: "local" | string;
+    localDir: string | null;
+    external: boolean;
+    servesFiles: boolean;
+  };
+  retention?: {
+    days: number;
+    mode: string;
+    prunesAfterSuccessfulBackup: boolean;
+    externalStorage: boolean;
+    restoreSupported: boolean;
+  };
   localDir: string | null;
   lastRunStatus: string | null;
   lastRunAt: string | null;
@@ -215,7 +236,20 @@ export type DaemonBackupRun = {
   databaseType: string | null;
   status: string;
   trigger: string;
+  storageType?: "local" | string;
+  storageStatus?: "metadata-only" | string;
+  restoreStatus?: "deferred" | string;
+  downloadUrl?: string | null;
   filePath: string | null;
+  fileName?: string | null;
+  file?: {
+    available: boolean;
+    path: string | null;
+    name: string | null;
+    sizeBytes: number | null;
+    servesFile: boolean;
+    downloadUrl: string | null;
+  };
   sizeBytes: number | null;
   message: string | null;
   startedAt: string | null;
@@ -271,7 +305,10 @@ export type DaemonDomain = {
   status: string;
   dnsStatus: string;
   tlsStatus: string;
+  proxyStatus?: string;
   targetPort: number | null;
+  targetDeploymentId?: number | null;
+  targetUrl?: string | null;
   verificationMessage: string | null;
   lastVerifiedAt: string | null;
   appType?: string | null;
