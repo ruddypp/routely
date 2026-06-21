@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,7 +24,49 @@ async function createDemoWorkspace(): Promise<string> {
   return root;
 }
 
+async function runCli(workspaceRoot: string, args: string[]) {
+  const child = spawn(process.execPath, ["--import", "tsx", resolve(repoRoot, "apps/cli/src/index.ts"), ...args], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      ROUTELY_REPO_ROOT: repoRoot,
+      ROUTELY_WORKSPACE_ROOT: workspaceRoot
+    },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk.toString("utf8"); });
+  child.stderr.on("data", (chunk) => { stderr += chunk.toString("utf8"); });
+  const code = await new Promise<number | null>((resolveExit) => child.once("exit", resolveExit));
+  return { code, stdout, stderr };
+}
+
+async function expectCli(workspaceRoot: string, args: string[]) {
+  const result = await runCli(workspaceRoot, args);
+  expect(result.code, result.stderr).toBe(0);
+  return result;
+}
+
 describe("local demo example", () => {
+  it("supports the public local quick start registration commands", { timeout: 20000 }, async () => {
+    const workspace = await mkdtemp(resolve(tmpdir(), "routely-local-quickstart-"));
+    tempDirs.push(workspace);
+    const examplePath = resolve(repoRoot, "examples/hello-command");
+
+    await expectCli(workspace, ["init"]);
+    await expectCli(workspace, ["add", examplePath, "--name", "web", "--command", "PORT=3101 ROUTELY_EXAMPLE_NAME=web ROUTELY_EXAMPLE_ROLE=frontend npm run dev", "--port", "3101", "--health-path", "/health"]);
+    await expectCli(workspace, ["add", examplePath, "--name", "api", "--command", "PORT=3102 ROUTELY_EXAMPLE_NAME=api ROUTELY_EXAMPLE_ROLE=api npm run dev", "--port", "3102", "--health-path", "/health"]);
+    await expectCli(workspace, ["add", examplePath, "--name", "worker", "--command", "PORT=3103 ROUTELY_EXAMPLE_NAME=worker ROUTELY_EXAMPLE_ROLE=worker npm run dev", "--port", "3103", "--health-path", "/health"]);
+    await expectCli(workspace, ["db", "add", "postgres", "--name", "postgres", "--port", "5432"]);
+    const ps = await expectCli(workspace, ["ps"]);
+
+    expect(ps.stdout).toContain("web\tstopped\tcommand\t:3101");
+    expect(ps.stdout).toContain("api\tstopped\tcommand\t:3102");
+    expect(ps.stdout).toContain("worker\tstopped\tcommand\t:3103");
+    expect(ps.stdout).toContain("postgres\tstopped\tcompose\t:5432");
+  });
+
   it("registers three command apps and one compose-backed postgres service", async () => {
     const workspace = await createDemoWorkspace();
     const loaded = loadWorkspaceConfig(workspace);

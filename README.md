@@ -66,7 +66,9 @@ export ROUTELY_REPO=/path/to/routely
 mkdir routely-demo
 cd routely-demo
 routely init
-routely add "$ROUTELY_REPO/examples/hello-command" --name hello --command "npm run dev" --port 4173 --health-path /health
+routely add "$ROUTELY_REPO/examples/hello-command" --name web --command "PORT=3101 ROUTELY_EXAMPLE_NAME=web ROUTELY_EXAMPLE_ROLE=frontend npm run dev" --port 3101 --health-path /health
+routely add "$ROUTELY_REPO/examples/hello-command" --name api --command "PORT=3102 ROUTELY_EXAMPLE_NAME=api ROUTELY_EXAMPLE_ROLE=api npm run dev" --port 3102 --health-path /health
+routely add "$ROUTELY_REPO/examples/hello-command" --name worker --command "PORT=3103 ROUTELY_EXAMPLE_NAME=worker ROUTELY_EXAMPLE_ROLE=worker npm run dev" --port 3103 --health-path /health
 routely db add postgres --name postgres --port 5432
 routely doctor
 routely
@@ -75,15 +77,17 @@ routely
 Open:
 
 - Dashboard: `http://localhost:3030`
-- Example app: `http://127.0.0.1:4173`
+- Web app: `http://127.0.0.1:3101`
+- API app: `http://127.0.0.1:3102`
+- Worker app: `http://127.0.0.1:3103`
 
 Useful local commands:
 
 ```bash
 routely ps
-routely logs hello
-routely logs hello --follow
-routely restart hello
+routely logs web
+routely logs web --follow
+routely restart web
 routely down
 ```
 
