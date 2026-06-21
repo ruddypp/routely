@@ -22,6 +22,17 @@ The remaining demo risk is honesty at the edges. The UI must never imply that un
 4. For the GitHub demo, route users from GitHub to Deployments/Logs. Recent deliveries must show repo, branch, commit, accepted/ignored/failed status, linked deployment, and an obvious log path for broken pushes.
 5. Settings, backups, notifications, metrics, and databases should support diagnosis only. Any unsupported production capability should be disabled, hidden, or explicitly marked deferred.
 
+## Lead Decision
+
+For public alpha, hide non-demo drivers and broad presets from primary create/edit paths. Existing resources or compatibility-only values that use unsupported drivers may remain visible in read-only context, but must be disabled and labeled `deferred for public alpha` with a short reason. Do not present `buildpack`, `static`, broad presets, or non-demo service drivers as selectable alpha-ready paths unless Backend and Frontend have verified them against the three public-alpha demos.
+
+## Local Review Notes
+
+- Current dashboard data flow is real-data oriented: `apps/web/src/app/dashboard-client.tsx` polls same-origin `/api/health`, `/api/apps`, `/api/server/status`, `/api/deployments`, `/api/domains`, `/api/proxy/routes`, `/api/github/status`, `/api/metrics`, `/api/databases`, `/api/backups`, and `/api/notifications`.
+- Local workflow shape is present: Apps separates app resources from services/databases, exposes lifecycle controls, links to logs, and shows pending restart/redeploy state.
+- VPS/GitHub workflow shape is present: Deployments, Domains, and GitHub are split into dedicated modules with readiness cards, history rows, and log/status affordances.
+- Remaining risk is not missing navigation; it is semantic consistency. Some code paths still treat `issuing` TLS as OK, show `locked` labels for modules that are active demo surfaces, and offer broad create/edit choices that exceed the public-alpha demos.
+
 ## Component And State Spec
 
 - Overview: show urgent next actions before secondary history. Treat missing daemon, failed app, failed deployment, DNS mismatch, TLS failed/pending, missing GitHub webhook secret, and failed backup/notification as attention items.
@@ -59,6 +70,7 @@ The remaining demo risk is honesty at the edges. The UI must never imply that un
 - Reconcile the server foundation footer copy. The fallback `deployments/domains/https/github/backups locked` language conflicts with active demo modules unless those actions are truly disabled by server state.
 - Align TLS semantics across Domains and the app inspector. In the inspector, `issuing` should be warning/pending, not OK, and HTTPS should not read as complete until TLS is active.
 - Gate or label unverified create/edit options such as `buildpack`, `static`, and broad presets so alpha users do not think non-demo deploy paths are supported.
+- Add visible disabled reasons for Apps-level deploy controls that match the Deployments module readiness blockers: daemon offline, Docker not ready, server init missing, auth missing, app disabled, missing path, or unsupported driver.
 - Remove or isolate unused legacy combined panels in `apps/web/src/app/dashboard-client.tsx` after ownership confirmation. They contain stale copy and suppressed lint, which increases drift risk.
 - Keep deploy button disablement consistent between Apps and Deployments. If Docker/server/data-dir/auth readiness blocks deploy in Deployments, Apps should show the same block reason.
 
@@ -69,10 +81,10 @@ The remaining demo risk is honesty at the edges. The UI must never imply that un
 - VPS demo: Deployments shows Docker/server readiness, deployment phase, failure message when applicable, and deployment logs. Domains shows DNS/proxy/TLS/target separately and does not claim HTTPS success before TLS is active.
 - GitHub demo: GitHub shows configured/missing server-side setup, connected repo/branch, delivery status, ignored branch behavior, deployment linkage, and a path to logs for failed deploys.
 - Real-data honesty: no demo-critical module should show mock data, placeholder success, or enabled controls for unsupported alpha features.
+- Unsupported breadth: create/edit only offers public-alpha verified options, or clearly disables/de-emphasizes compatibility-only options with `deferred for public alpha` copy.
 - Responsive: desktop, tablet, and mobile screenshots show no text overlap, no clipped primary controls, no horizontal page overflow, and readable terminal/log areas.
 
 ## Blockers To Route Back To Routely Lead
 
-- Product decision: whether non-demo drivers/presets should be hidden for public alpha or visible as disabled/deferred options.
 - Environment/access: VPS, DNS, GitHub App, webhook secret, or repo access needed for visual verification.
 - Ownership: Frontend should confirm before UI/UX edits `apps/web`; this handoff intentionally avoids code changes.
