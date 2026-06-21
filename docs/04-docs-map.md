@@ -14,7 +14,7 @@ The 2026-06-22 Compose-first replan updates the source of truth around a dashboa
 
 New agents and contributors should read these files first:
 
-1. `docs/00-product-brief.md` - product vision, target user, positioning, MVP promise, non-goals.
+1. `docs/00-product-brief.md` - product vision, target user, Compose-first positioning, MVP promise, non-goals.
 2. `docs/01-alpha-plan.md` - public alpha objective, three demos, vertical slices, execution order, risks, deferred scope.
 3. `docs/02-team-execution-plan.md` - role definitions, handoff flow, edit permissions, escalation, verification.
 4. `docs/03-demo-acceptance-plan.md` - exact demo acceptance criteria, smoke steps, automated checks, QA/Security checklists, release gate.
@@ -29,7 +29,7 @@ Implementation references:
 - `docs/07-security-and-risks.md` for trust boundaries and risk register.
 - `docs/08-development-setup.md` for contributor setup.
 - `docs/09-current-status.md` for current implementation status.
-- `docs/10-implementation-backlog.md` for team execution slices.
+- `docs/10-implementation-backlog.md` for implementation slices.
 - `docs/11-feature-scope.md` for feature-area alpha scope and deferred scope.
 - `docs/12-prd.md` for canonical product requirements.
 - `docs/adr/*` for accepted architecture decisions.
@@ -39,7 +39,7 @@ Implementation references:
 
 | File | Purpose |
 | --- | --- |
-| `docs/00-product-brief.md` | Canonical product brief for Routely's new team. |
+| `docs/00-product-brief.md` | Canonical product brief for Routely's Compose-first direction. |
 | `docs/01-alpha-plan.md` | Canonical public alpha plan centered on the three demos. |
 | `docs/02-team-execution-plan.md` | Canonical team execution plan for PM, Backend, Frontend, UI/UX, QA E2E, Security, and Routely Lead. |
 | `docs/03-demo-acceptance-plan.md` | Canonical demo acceptance and release-readiness gate. |
@@ -50,7 +50,7 @@ Implementation references:
 | `docs/07-security-and-risks.md` | Replacement security and risk reference. |
 | `docs/08-development-setup.md` | Replacement contributor setup guide. |
 | `docs/09-current-status.md` | Replacement current implementation status. |
-| `docs/10-implementation-backlog.md` | Replacement implementation backlog keyed to the alpha plan. |
+| `docs/10-implementation-backlog.md` | Replacement implementation backlog keyed to the Compose-first alpha plan. |
 | `docs/11-feature-scope.md` | Replacement consolidated feature scope. |
 | `docs/12-prd.md` | Canonical product requirements document. |
 
@@ -109,7 +109,7 @@ No archive path is needed because the user explicitly chose deletion over archiv
 
 ## Remaining Docs Work
 
-1. Rewrite root `README.md` around the verified local, VPS, and GitHub demos after QA confirms exact commands.
+1. Rewrite root `README.md` around the verified local, one-VPS, and GitHub demos after QA confirms exact commands.
 2. Add `docs/security/` findings after Security completes the public alpha review.
 3. Add fresh `docs/qa/` reports after QA validates local, VPS, GitHub, and responsive dashboard demos.
 4. Keep `docs/agents/*` only for active workflow contracts referenced by `AGENTS.md`.
@@ -117,11 +117,11 @@ No archive path is needed because the user explicitly chose deletion over archiv
 ## Team Assignments After Docs Reset
 
 - Routely Lead: coordinate any destructive docs cleanup pass and resolve setup/env/VPS/GitHub/DNS blockers.
-- PM: maintain the five canonical docs, rewrite README/docs index, and keep acceptance criteria current.
+- PM: maintain the canonical docs, rewrite README/docs index, and keep acceptance criteria current.
 - Backend: verify CLI, daemon, package, database, deploy, GitHub, domain, env, logs, backups, notification facts before docs claim public behavior.
 - Frontend: verify dashboard route names, same-origin API behavior, and real-data-backed demo-critical views before README screenshots or user docs ship.
-- UI/UX: define operational copy and state language for local, VPS, GitHub, failure, and deferred states.
-- QA E2E: create dated smoke reports for the local, VPS, GitHub, and responsive dashboard demos under `docs/qa/`.
+- UI/UX: define operational copy and state language for Start All, per-app stop/disable, one-VPS operations, GitHub, failure, and deferred states.
+- QA E2E: create dated smoke reports for the local, one-VPS, GitHub, and responsive dashboard demos under `docs/qa/`.
 - Security: create public alpha trust-boundary review under `docs/security/` and update security docs with verified findings.
 
 ## Future Agents: Read Order
