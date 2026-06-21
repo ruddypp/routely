@@ -132,6 +132,45 @@ describe("POST /api/apps", () => {
       })
     );
   });
+
+  it("preserves Compose registry fields when creating apps", async () => {
+    const createPayload = {
+      name: "api",
+      type: "app",
+      preset: "express",
+      driver: "compose",
+      path: "./apps/api",
+      command: null,
+      port: 4000,
+      enabled: false,
+      depends_on: ["postgres"],
+      healthcheck: { path: "/health", expected_status: 200 },
+      domains: ["api.example.test"],
+      env: { PUBLIC_API_URL: "https://api.example.test" },
+      compose_file: "compose.yml",
+      compose_service: "api"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ app: { ...app, ...createPayload, dependsOn: ["postgres"], composeFile: "compose.yml", composeService: "api" } }), {
+        status: 201,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const response = await POST(new Request("http://localhost/api/apps", {
+      method: "POST",
+      body: JSON.stringify(createPayload)
+    }));
+
+    expect(response.status).toBe(201);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:9977/apps",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(createPayload)
+      })
+    );
+  });
 });
 
 describe("PATCH /api/apps/:id", () => {
@@ -157,6 +196,39 @@ describe("PATCH /api/apps/:id", () => {
       expect.objectContaining({
         method: "PATCH",
         body: JSON.stringify({ command: "npm run start" })
+      })
+    );
+  });
+
+  it("preserves enablement and Compose metadata when editing apps", async () => {
+    const patchPayload = {
+      enabled: false,
+      driver: "compose",
+      depends_on: ["postgres", "redis"],
+      compose_file: "compose.yml",
+      compose_service: "api",
+      healthcheck: { path: "/ready", expected_status: 204 },
+      domains: ["api.example.test"]
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ app: { ...app, enabled: false, driver: "compose", dependsOn: ["postgres", "redis"], composeFile: "compose.yml", composeService: "api" } }), {
+        status: 200,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const request = new Request("http://localhost/api/apps/12", {
+      method: "PATCH",
+      body: JSON.stringify(patchPayload)
+    });
+    const response = await PATCH(request, { params: Promise.resolve({ id: "12" }) });
+
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:9977/apps/12",
+      expect.objectContaining({
+        method: "PATCH",
+        body: JSON.stringify(patchPayload)
       })
     );
   });

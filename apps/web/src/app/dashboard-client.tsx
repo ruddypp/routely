@@ -12,6 +12,7 @@ import { SkeletonRows } from "@/components/ui/skeleton";
 import { DashboardShell } from "@/components/dashboard/shell";
 import { ModuleHeader } from "@/components/dashboard/module-header";
 import type { DashboardModuleKey } from "@/components/dashboard/types";
+import { APP_DRIVERS, APP_PRESETS, APP_TYPES, appDriverPatch, appFormFromDaemonApp, appFormPayload, appFormValidationError, blankAppForm, type AppFormState } from "@/lib/app-registry-form";
 
 type DaemonApp = {
   id: number;
@@ -27,6 +28,7 @@ type DaemonApp = {
   build: string | null;
   start: string | null;
   env: Record<string, string>;
+  envKeys?: string[];
   port: number | null;
   dependsOn?: string[];
   healthcheck?: { path: string | null; expected_status: number | null } | null;
@@ -444,96 +446,10 @@ type FormMode = "create" | "edit";
 type ModuleKey = DashboardModuleKey;
 type InspectorTab = "overview" | "runtime" | "env" | "logs" | "health" | "deployments" | "domains";
 
-type AppFormState = {
-  name: string;
-  type: string;
-  preset: string;
-  driver: string;
-  path: string;
-  command: string;
-  install: string;
-  dev: string;
-  build: string;
-  start: string;
-  env: string;
-  port: string;
-  enabled: boolean;
-  dependsOn: string;
-  healthcheckPath: string;
-  healthcheckStatus: string;
-  domains: string;
-  sourceRepo: string;
-  sourceBranch: string;
-  image: string;
-  internal: boolean;
-  volumes: string;
-  composeFile: string;
-  composeService: string;
-};
-
 const POLL_INTERVAL_MS = 4000;
-const APP_TYPES = ["app", "database", "worker"];
-const APP_DRIVERS = ["command", "compose", "dockerfile"];
-const APP_PRESETS = ["custom", "nextjs", "vite", "express", "postgres", "mysql", "mariadb", "redis", "mongodb"];
 const PANEL_SHADOW = "shadow-[var(--panel-shadow)]";
 const INSET_RING = "shadow-[var(--inset-border)]";
 const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
-
-const blankForm: AppFormState = {
-  name: "",
-  type: "app",
-  preset: "custom",
-  driver: "command",
-  path: "",
-  command: "",
-  install: "",
-  dev: "",
-  build: "",
-  start: "",
-  env: "",
-  port: "",
-  enabled: true,
-  dependsOn: "",
-  healthcheckPath: "",
-  healthcheckStatus: "",
-  domains: "",
-  sourceRepo: "",
-  sourceBranch: "",
-  image: "",
-  internal: false,
-  volumes: "",
-  composeFile: "",
-  composeService: ""
-};
-
-function formFromApp(app: DaemonApp): AppFormState {
-  return {
-    name: app.name,
-    type: app.type,
-    preset: app.preset,
-    driver: app.driver,
-    path: app.path || "",
-    command: app.command || "",
-    install: app.install || "",
-    dev: app.dev || "",
-    build: app.build || "",
-    start: app.start || "",
-    env: Object.entries(app.env || {}).map(([key, value]) => `${key}=${value}`).join("\n"),
-    port: app.port == null ? "" : String(app.port),
-    enabled: app.enabled,
-    dependsOn: (app.dependsOn || []).join(", "),
-    healthcheckPath: app.healthcheck?.path || "",
-    healthcheckStatus: app.healthcheck?.expected_status == null ? "" : String(app.healthcheck.expected_status),
-    domains: (app.domains || []).join(", "),
-    sourceRepo: app.source?.repo || "",
-    sourceBranch: app.source?.branch || "",
-    image: app.image || "",
-    internal: Boolean(app.internal),
-    volumes: (app.volumes || []).join("\n"),
-    composeFile: app.composeFile || "",
-    composeService: app.composeService || ""
-  };
-}
 
 function StatusBadge({ status }: { status: string }) {
   return <Badge status={status} variant="status">{status}</Badge>;
@@ -659,6 +575,11 @@ function appDeployMetadata(app: DaemonApp, latest: DaemonDeployment | undefined)
   return `${image} · ${container} · ${ports}`;
 }
 
+function envMetadata(app: DaemonApp): string {
+  const keys = app.envKeys || Object.keys(app.env || {});
+  return keys.length > 0 ? keys.join(", ") : "-";
+}
+
 function formatBytes(value: number | null): string {
   if (value == null || Number.isNaN(value)) return "-";
   const units = ["B", "KB", "MB", "GB", "TB"];
@@ -690,59 +611,6 @@ function redactedTarget(target: string | null, type: string): string {
 async function readError(response: Response): Promise<string> {
   const body = (await response.json().catch(() => ({}))) as { error?: string };
   return body.error || `Request failed with HTTP ${response.status}`;
-}
-
-function formPayload(form: AppFormState) {
-  const env = Object.fromEntries(
-    form.env
-      .split("\n")
-      .map((line) => line.trim())
-      .filter(Boolean)
-      .map((line) => {
-        const separator = line.indexOf("=");
-        return separator >= 0 ? [line.slice(0, separator).trim(), line.slice(separator + 1)] : [line, ""];
-      })
-      .filter(([key]) => key)
-  );
-
-  return {
-    name: form.name.trim(),
-    type: form.type,
-    preset: form.preset.trim() || "custom",
-    driver: form.driver,
-    path: form.path.trim() || null,
-    command: form.command.trim() || null,
-    install: form.install.trim() || null,
-    dev: form.dev.trim() || form.command.trim() || null,
-    build: form.build.trim() || null,
-    start: form.start.trim() || null,
-    env,
-    port: form.port.trim() === "" ? null : Number(form.port),
-    enabled: form.enabled,
-    depends_on: form.dependsOn
-      .split(",")
-      .map((item) => item.trim())
-      .filter(Boolean),
-    healthcheck: form.healthcheckPath.trim() || form.healthcheckStatus.trim()
-      ? {
-          path: form.healthcheckPath.trim() || null,
-          expected_status: form.healthcheckStatus.trim() ? Number(form.healthcheckStatus) : null
-        }
-      : null,
-    domains: splitList(form.domains),
-    source: form.sourceRepo.trim() || form.sourceBranch.trim()
-      ? { type: "github", repo: form.sourceRepo.trim() || null, branch: form.sourceBranch.trim() || null }
-      : null,
-    image: form.image.trim() || null,
-    internal: form.internal,
-    volumes: form.volumes.split("\n").map((item) => item.trim()).filter(Boolean),
-    compose_file: form.composeFile.trim() || null,
-    compose_service: form.composeService.trim() || null
-  };
-}
-
-function splitList(value: string): string[] {
-  return value.split(",").map((item) => item.trim()).filter(Boolean);
 }
 
 function resourceLabel(app: DaemonApp): string {
@@ -818,7 +686,7 @@ export default function DashboardClient() {
   const [logsError, setLogsError] = useState<string | null>(null);
   const [formMode, setFormMode] = useState<FormMode | null>(null);
   const [editingAppId, setEditingAppId] = useState<number | null>(null);
-  const [form, setForm] = useState<AppFormState>(blankForm);
+  const [form, setForm] = useState<AppFormState>(blankAppForm);
   const [formError, setFormError] = useState<string | null>(null);
   const [formSaving, setFormSaving] = useState(false);
   const mounted = useRef(true);
@@ -1334,14 +1202,14 @@ export default function DashboardClient() {
   function openCreateForm() {
     setFormMode("create");
     setEditingAppId(null);
-    setForm(blankForm);
+    setForm(blankAppForm);
     setFormError(null);
   }
 
   function openEditForm(app: DaemonApp) {
     setFormMode("edit");
     setEditingAppId(app.id);
-    setForm(formFromApp(app));
+    setForm(appFormFromDaemonApp(app));
     setFormError(null);
   }
 
@@ -1349,13 +1217,9 @@ export default function DashboardClient() {
     event.preventDefault();
     setFormError(null);
 
-    if (!form.name.trim()) {
-      setFormError("App name is required.");
-      return;
-    }
-
-    if (form.port.trim() && (!Number.isInteger(Number(form.port)) || Number(form.port) <= 0)) {
-      setFormError("Port must be a positive integer.");
+    const validationError = appFormValidationError(form);
+    if (validationError) {
+      setFormError(validationError);
       return;
     }
 
@@ -1367,7 +1231,7 @@ export default function DashboardClient() {
         method: isEdit ? "PATCH" : "POST",
         cache: "no-store",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify(formPayload(form))
+        body: JSON.stringify(appFormPayload(form))
       });
 
       if (!response.ok) {
@@ -2504,7 +2368,7 @@ function DetailPanel({
           <Meta label="Auto deploy" value={app.source?.auto_deploy?.enabled === false ? "disabled" : app.source?.type === "github" ? "enabled" : "not connected"} />
           <Meta label="Recent delivery" value={github?.deliveries.find((delivery) => delivery.appId === app.id || delivery.repo === app.source?.repo)?.status || "none"} wide />
           <Meta label="Volumes" value={(app.volumes || []).join(", ") || "-"} mono wide />
-          <Meta label="Config env" value={Object.keys(app.env || {}).length > 0 ? Object.keys(app.env || {}).join(", ") : "-"} mono wide />
+          <Meta label="Config env" value={envMetadata(app)} mono wide />
         </dl>
       ) : null}
 
@@ -2716,7 +2580,11 @@ function AppForm({
 }) {
   const update = (patch: Partial<AppFormState>) => onChange({ ...form, ...patch });
   const portInvalid = form.port.trim() !== "" && (!Number.isInteger(Number(form.port)) || Number(form.port) <= 0);
+  const healthStatusInvalid = form.healthcheckStatus.trim() !== "" && (!Number.isInteger(Number(form.healthcheckStatus)) || Number(form.healthcheckStatus) <= 0);
   const nameMissing = form.name.trim() === "";
+  const envHelper = form.envLocked
+    ? "Stored env keys are preserved by this form; edit values in Env/Secrets."
+    : "Portable non-secret KEY=value metadata. Store secrets in Env/Secrets.";
 
   return (
     <form onSubmit={onSubmit} className="border-b border-white/5 bg-black/25 px-4 py-4">
@@ -2750,11 +2618,11 @@ function AppForm({
         <Field label="Compose service" value={form.composeService} onChange={(value) => update({ composeService: value })} mono disabled={saving} placeholder="postgres" />
         <Field label="Compose file" value={form.composeFile} onChange={(value) => update({ composeFile: value })} mono wide disabled={saving} placeholder="generated if empty" />
         <Field label="Health path" value={form.healthcheckPath} onChange={(value) => update({ healthcheckPath: value })} disabled={saving} placeholder="/" />
-        <Field label="Health status" value={form.healthcheckStatus} onChange={(value) => update({ healthcheckStatus: value })} type="number" disabled={saving} placeholder="200" />
+        <Field label="Health status" value={form.healthcheckStatus} onChange={(value) => update({ healthcheckStatus: value })} type="number" error={healthStatusInvalid ? "Positive integer" : undefined} disabled={saving} placeholder="200" />
         <Field label="Domains" value={form.domains} onChange={(value) => update({ domains: value })} disabled={saving} placeholder="local.test" />
         <Field label="Source repo" value={form.sourceRepo} onChange={(value) => update({ sourceRepo: value })} disabled={saving} placeholder="owner/repo" />
         <Field label="Source branch" value={form.sourceBranch} onChange={(value) => update({ sourceBranch: value })} disabled={saving} placeholder="main" />
-        <TextAreaField label="Env" value={form.env} onChange={(value) => update({ env: value })} mono disabled={saving} placeholder={"NODE_ENV=development"} />
+        <TextAreaField label="Env metadata" value={form.env} onChange={(value) => update({ env: value })} mono disabled={saving || form.envLocked} helper={envHelper} placeholder={"NODE_ENV=development"} />
         <TextAreaField label="Volumes" value={form.volumes} onChange={(value) => update({ volumes: value })} mono disabled={saving} placeholder={"postgres_data:/var/lib/postgresql/data"} />
         <label className={`flex items-center justify-between rounded-md bg-surface-raised px-3 py-2 ${INSET_RING} ${saving ? "opacity-60" : ""}`}>
           <span>
@@ -2775,10 +2643,11 @@ function AppForm({
   );
 }
 
-function TextAreaField({ disabled, label, mono, onChange, placeholder, value }: { disabled?: boolean; label: string; mono?: boolean; onChange: (value: string) => void; placeholder?: string; value: string }) {
+function TextAreaField({ disabled, helper, label, mono, onChange, placeholder, value }: { disabled?: boolean; helper?: string; label: string; mono?: boolean; onChange: (value: string) => void; placeholder?: string; value: string }) {
   return (
     <UiTextAreaField
       disabled={disabled}
+      helper={helper}
       label={label}
       mono={mono}
       onChange={(event) => onChange(event.target.value)}

@@ -23,6 +23,7 @@ export type DaemonApp = {
   build: string | null;
   start: string | null;
   env: Record<string, string>;
+  envKeys?: string[];
   port: number | null;
   dependsOn?: string[];
   healthcheck?: { path: string | null; expected_status: number | null } | null;
