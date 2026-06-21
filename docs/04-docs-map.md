@@ -2,15 +2,17 @@
 
 Status: Canonical docs reset map
 Owner: PM
-Last updated: 2026-06-21
+Last updated: 2026-06-22
 
 ## Reset Outcome
 
 The legacy docs have been collapsed into a smaller source-of-truth set. Draft PRD/spec/roadmap/checkpoint docs and scattered feature specs were deleted after their durable facts were moved into canonical PM docs and replacement reference docs.
 
+The 2026-06-22 Compose-first replan updates the source of truth around a dashboard-first solo-operator control plane: local plus one-VPS operation, Start All for enabled apps, per-app stop/disable, Compose-backed runtime direction, and Dokploy-inspired operational surfaces with 9Router-like simplicity.
+
 ## Canonical Docs Structure
 
-New team members should read these files first:
+New agents and contributors should read these files first:
 
 1. `docs/00-product-brief.md` - product vision, target user, positioning, MVP promise, non-goals.
 2. `docs/01-alpha-plan.md` - public alpha objective, three demos, vertical slices, execution order, risks, deferred scope.
@@ -146,5 +148,7 @@ For web work, also read the relevant Next.js docs under `node_modules/next/dist/
 ## Resolved Decisions
 
 1. Legacy prompt/handoff docs should be deleted after true facts are merged. Do not archive them.
-2. `docs/01-alpha-plan.md` is the new public alpha execution source.
-3. No archive path is needed.
+2. `docs/01-alpha-plan.md` is the public alpha execution source.
+3. Public alpha targets solo developers only; shared administration workflows remain out of scope.
+4. Local and one-VPS flows should converge on a Compose-backed model, but public docs must name only verified behavior.
+5. No archive path is needed.

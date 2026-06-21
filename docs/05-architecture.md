@@ -2,21 +2,21 @@
 
 Status: Canonical technical reference
 Owner: PM, Backend
-Last updated: 2026-06-21
+Last updated: 2026-06-22
 
 ## Purpose
 
-This document defines the stable architecture shape for Routely. It replaces the old draft PRD, functional spec, user-flow, roadmap, and checkpoint architecture docs.
+This document defines Routely's stable architecture shape for public alpha planning. It describes the intended Compose-first, dashboard-first model while staying honest about current implementation bridges that Backend must verify before public docs claim them.
 
 Routely is registry-centered:
 
 ```text
 routely.yml desired app/service registry
-  -> normalized app spec
+  -> normalized app spec with enablement and runtime metadata
   -> SQLite runtime state/history
   -> runtime driver
-  -> local process, Compose service, or production Docker workload
-  -> CLI and dashboard operations
+  -> local process, Compose service, or production Docker/Compose workload
+  -> dashboard-first and CLI operations
 ```
 
 ## Product Runtime Shape
@@ -24,25 +24,28 @@ routely.yml desired app/service registry
 Local mode:
 
 ```text
-user runs `routely`
+solo operator opens dashboard or runs `routely`
   -> active workspace is resolved
   -> routely.yml is loaded and synced
   -> local daemon starts on localhost
   -> dashboard starts
-  -> services start before dependent apps
-  -> command apps and Compose services run
-  -> logs/status flow to CLI and dashboard
+  -> bulk start selects enabled apps/services
+  -> dependencies start before dependent apps
+  -> command apps and Compose services run where implemented
+  -> logs/status/health flow to CLI and dashboard
 ```
 
-Production mode:
+One-VPS mode:
 
 ```text
-CLI, GitHub webhook, or dashboard action
-  -> same-origin web API or daemon API
-  -> authenticated daemon operation
+dashboard action, CLI action, or GitHub webhook
+  -> same-origin web API or authenticated daemon API
   -> SQLite state/job record
-  -> Dockerfile deploy, proxy/domain update, env, logs, health, backup, or notification operation
+  -> Compose/Docker workload, proxy/domain update, env, logs, health, backup, or notification operation
+  -> dashboard diagnosis through real state, logs, deploy history, and health
 ```
+
+The target production model is Compose-backed app operation on one VPS. Existing Dockerfile deployment foundations are implementation bridges until Backend verifies production Compose parity.
 
 ## Browser Boundary
 
@@ -60,22 +63,23 @@ This boundary matters for auth, token handling, same-origin behavior, and produc
 
 | Area | Ownership |
 | --- | --- |
-| `apps/cli` | Command UX, workspace resolution entrypoints, daemon client calls, human-readable output. |
-| `apps/daemon` | Long-running API, lifecycle orchestration, deploy jobs, log/metric access, state reconciliation. |
-| `apps/web` | Next.js dashboard, same-origin `/api/*` route handlers, operational UI state. |
-| `packages/core` | Config loading/normalization, app specs, DTO helpers, validation, shared pure logic. |
-| `packages/db` | SQLite schema, migrations, repositories, transactions, persistence DTOs. |
-| `packages/drivers` | Command, Compose, Dockerfile, and future runtime/build driver behavior. |
+| `apps/cli` | Bootstrap commands, workspace resolution entrypoints, daemon client calls, human-readable diagnostics, and scriptable fallback paths. |
+| `apps/daemon` | Long-running API, lifecycle orchestration, deploy jobs, log/metric access, state reconciliation, and production trust boundaries. |
+| `apps/web` | Next.js dashboard, same-origin `/api/*` route handlers, app setup/editing, operational UI state, and honest disabled/deferred states. |
+| `packages/core` | Config loading/normalization, app specs, enablement, DTO helpers, validation, and shared pure logic. |
+| `packages/db` | SQLite schema, migrations, repositories, transactions, persistence DTOs, and bounded operational history. |
+| `packages/drivers` | Command, Compose, Dockerfile bridge, and future runtime/build driver behavior. |
 | `packages/proxy` | Traefik-compatible route config, DNS/hostname helpers, TLS/proxy state helpers. |
 | `packages/github` | GitHub App helpers, webhook signature validation, event normalization. |
-| `packages/presets` | Framework detection, editable defaults, database service presets, future curated templates. |
+| `packages/presets` | Framework detection, editable defaults, and database service presets. Public app catalogs are deferred. |
 
 ## State Model
 
 `routely.yml` owns portable desired config:
 
 - app/service names
-- drivers
+- enablement state
+- drivers and Compose metadata
 - local paths and commands
 - ports
 - dependencies
@@ -91,45 +95,50 @@ SQLite owns runtime and generated state:
 - GitHub installation/repo/delivery metadata
 - env secret values and secret metadata where implemented
 - health and metric samples
-- backup jobs/runs
+- database records plus backup jobs/runs
 - notification delivery attempts
 
-Secrets must not be exported to `routely.yml` by default.
+Secrets must not be exported to `routely.yml` by default. Raw stored secrets must not be returned to the dashboard after save.
 
 ## Runtime Drivers
 
 Implemented or alpha-foundation drivers:
 
-- `command`: local app processes.
-- `compose`: local services and databases.
-- `dockerfile`: first production deploy path.
+- `command`: local app processes and current local demo bridge.
+- `compose`: local services/databases and the target common model for local-to-VPS operation.
+- `dockerfile`: current production deploy foundation and bridge while production Compose parity is hardened.
 
 Deferred drivers unless code proves otherwise:
 
 - static deploys
 - buildpack/Nixpacks/Railpack deploys
-- public template marketplace deploys
+- public app catalog deploys
 
 ## Production Operations Model
 
-Production is one-VPS-first. The production boundary is Docker, with Traefik-compatible routing where configured.
+Production is one-VPS-first. The production boundary is Docker/Compose, with Traefik-compatible routing where configured.
 
 Production operations include:
 
 - server init/status/doctor
 - authenticated daemon/API mutation paths
-- Dockerfile deploys with phases and logs
+- deploys with phases, deploy history, and logs
 - env/secrets injection and redaction
 - domain/DNS/proxy/HTTPS state
-- signed GitHub webhook deploy triggers
+- signed GitHub webhook redeploy triggers
 - health, metrics, and logs
 - database records and local-file backups
 - webhook, Discord, and Telegram notifications
 
+The dashboard should expose these as simple operational surfaces inspired by Dokploy but keep the experience light and solo-operator focused.
+
 ## Reliability Rules
 
+- Bulk start starts enabled resources and skips disabled resources without deleting them.
+- Per-app stop changes the current runtime state, not app enablement.
 - Healthchecks gate deploy success where configured.
 - Failed deploys should expose phase and logs.
 - A failed deploy should not silently replace the last successful deployment where practical.
 - Daemon startup should reconcile stored state with processes or containers where possible.
+- Generated proxy config must not be presented as verified DNS, active routing, or certificate success.
 - Future features must remain inert or be clearly marked deferred.

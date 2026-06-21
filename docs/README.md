@@ -2,18 +2,18 @@
 
 Version: 0.2
 Status: Canonical docs reset index
-Last updated: 2026-06-21
+Last updated: 2026-06-22
 
 ## Read First
 
-Routely is an open source, self-hosted app runner and single-VPS deployment platform for solo developers.
+Routely is an open source, self-hosted, dashboard-first control plane for solo developers running Compose-backed apps locally and on one VPS.
 
 Product promise:
 
 ```text
-One command local.
-One VPS always-on.
-One dashboard to deploy and operate every app.
+One dashboard to register and operate apps.
+One Start action for every enabled app.
+One Compose-backed model from laptop to VPS.
 ```
 
 New agents should start here:

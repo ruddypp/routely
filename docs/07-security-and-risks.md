@@ -2,7 +2,7 @@
 
 Status: Canonical security and risk reference
 Owner: PM, Security
-Last updated: 2026-06-21
+Last updated: 2026-06-22
 
 ## Purpose
 
@@ -21,7 +21,7 @@ Untrusted or semi-trusted:
 - webhook payloads until signature validation passes
 - repository code at build/runtime
 - logs, commit messages, branch names, app names, and domain names rendered in the dashboard
-- future templates or marketplace inputs
+- future app-catalog or imported Compose inputs if those features are ever added
 
 ## Required Security Rules
 
@@ -43,12 +43,12 @@ Untrusted or semi-trusted:
 
 | Risk | Why it matters | Mitigation |
 | --- | --- | --- |
-| Scope creep | Routely spans local runner, deploy, domains, GitHub, env, logs, databases, backups, notifications, and future templates. | Keep public alpha tied to the three demos in `docs/01-alpha-plan.md`. |
+| Scope creep | Routely spans local runner, deploy, domains, GitHub, env, logs, databases, backups, notifications, and health. | Keep public alpha tied to the three demos in `docs/01-alpha-plan.md`. |
 | Arbitrary code execution | Routely runs local commands and production builds from repos. | Require explicit app/repo connection, document the trust model, prefer containerized production builds. |
 | Secret leakage | Env vars, GitHub keys, webhook secrets, database passwords, backups, and notification tokens can leak through logs/API/screenshots. | Mask values, redact logs where practical, keep GitHub secrets server-side. |
 | SSRF/outbound abuse | Notification webhooks can target internal infrastructure. | Validate protocols/hosts, reject unsafe targets where implemented, use short timeouts. |
 | DNS/HTTPS false positives | Generated proxy config is not certificate issuance. | Verify DNS against server IP and track TLS state conservatively. |
-| SQLite overreach | SQLite is correct for single-node state but not distributed control-plane state. | Keep MVP single-VPS-first and defer public multi-server UX. |
+| SQLite overreach | SQLite is correct for one-node state but not distributed control-plane state. | Keep MVP single-VPS-first and do not design public distributed-control-plane behavior for alpha. |
 | Dashboard XSS | Logs and GitHub metadata contain untrusted text. | Render as text, avoid unsafe HTML, test dashboard surfaces with untrusted strings. |
 | Dirty worktree | Agent changes can accidentally include unrelated user work. | Commit only owned files after verification; never use destructive git commands. |
 

@@ -2,24 +2,39 @@
 
 Status: Canonical feature-scope reference
 Owner: PM
-Last updated: 2026-06-21
+Last updated: 2026-06-22
 
 ## Purpose
 
-This replaces the old scattered `docs/feature-specs/*` drafts. It describes what each feature area means for public alpha and what is deferred.
+This describes what each feature area means for public alpha and what is deferred. The alpha is Compose-first, dashboard-first, one-VPS, and solo-operator focused.
+
+## App Registry And Enablement
+
+Alpha scope:
+
+- initialize workspace config/state
+- register and edit managed apps/services
+- preserve `enabled` state in config, DB, API DTOs, CLI output, and dashboard state where implemented
+- keep disabled apps registered and editable
+- skip disabled apps during bulk start
+- distinguish stop-now from disable-for-future-starts
+
+Deferred:
+
+- shared approval workflows
+- organization-level administration
 
 ## Local Runner
 
 Alpha scope:
 
-- initialize workspace config/state
 - register command apps
 - register Compose-backed database services
 - start all enabled local workloads with `routely`
 - start dependencies before dependent apps
 - detect port conflicts where practical
-- show status and logs through CLI and dashboard
-- stop managed local workloads with `routely down` or process exit where practical
+- show status, enablement, and logs through CLI and dashboard
+- stop managed local workloads with `routely down`, per-app stop, or process exit where practical
 
 Deferred:
 
@@ -31,8 +46,9 @@ Deferred:
 Alpha scope:
 
 - overview with readiness/status/next action
-- apps/services with lifecycle controls and URLs
-- deployments with phases and logs
+- app/service creation and editing where implemented
+- Start All and per-app stop/disable controls where API support is verified
+- deployments with phases, deploy history, and logs
 - domains with DNS/proxy/HTTPS state
 - GitHub connection/delivery/deploy state
 - env/secrets metadata with redaction
@@ -42,15 +58,18 @@ Rules:
 
 - browser code uses same-origin `/api/*`
 - no mock-only controls should appear implemented
+- generated, pending, failed, disabled, deferred, and active states must be visually and textually distinct
 - future actions must be disabled, hidden, or marked deferred
 
-## Production Deploy
+## Production Deploy And One-VPS Operations
 
 Alpha scope:
 
-- Dockerfile deploy path first
-- deployment phases and logs
-- env injection
+- one verified app deploy/operation path on one VPS
+- Compose-backed production parity as the target model
+- Dockerfile deploy path as a current bridge where verified
+- deployment phases, deploy history, and logs
+- env injection and redaction
 - healthcheck/container-running checks where configured
 - failed deploy phase and logs
 - latest successful deployment remains identifiable where practical
@@ -73,6 +92,7 @@ Alpha scope:
 Rules:
 
 - generated config is not certificate success
+- generated config is not proof that DNS points at the VPS
 - internal services/databases are not publicly exposed by default
 
 ## GitHub Integration
@@ -105,12 +125,13 @@ Alpha scope:
 - mark restart/redeploy-needed state where implemented
 - redact known secret values from logs where practical
 
-## Logs, Health, Metrics
+## Logs, Deploy History, Health, Metrics
 
 Alpha scope:
 
 - local app logs under `.routely/logs`
 - deployment logs
+- deploy phases and latest status
 - app health state and healthcheck records
 - narrow metric samples for demo diagnosis
 
@@ -125,6 +146,7 @@ Alpha scope:
 
 - common database presets for local Compose-backed services
 - production database records/foundations
+- internal-only database posture by default
 - local-file backup jobs and runs where implemented
 - retention for known successful backup files where implemented
 
@@ -151,8 +173,8 @@ Deferred:
 - email notifications
 - complex alert routing/escalation
 
-## Templates
+## App Catalog
 
 Deferred from public alpha.
 
-Future template behavior must generate editable registry config and route through normal deploy, env, domain, health, logs, backups, and notification systems.
+Any future app catalog behavior must generate editable registry config and route through normal deploy, env, domain, health, logs, backups, and notification systems.

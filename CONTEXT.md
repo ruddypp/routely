@@ -4,19 +4,19 @@ This file is the domain glossary for agents working on Routely. Keep it free of 
 
 ## Glossary
 
-**Routely** — The product: a local-first app runner that grows into a single-VPS production control plane for solo developers.
+**Routely** — The product: a dashboard-first control plane for solo developers that runs Compose-backed apps locally and on one VPS.
 
-**Solo operator** — The intended Routely user: one developer who owns the instance, manages their own apps, and does not need team/RBAC workflows.
+**Solo operator** — The intended Routely user: one developer who owns the instance and manages their own apps without shared administration workflows.
 
-**App registry** — The shared list of apps and services Routely manages. It is the mental model that connects local development and production operations.
+**App registry** — The shared list of apps and services Routely manages. It is the mental model that connects local development and one-VPS operation.
 
-**Managed app** — An app or service entry Routely can run, stop, disable, observe, and deploy from the dashboard.
+**Managed app** — An app or service entry Routely can run, stop, disable, observe, and deploy through dashboard-first workflows.
 
 **App enablement** — The user-controlled state that decides whether a managed app participates in bulk start operations while keeping the app registered for later use.
 
-**Bulk start** — The operator action that starts all enabled managed apps together while still allowing individual apps to be stopped or disabled afterward.
+**Bulk start** — The operator action that starts every enabled managed app together while still allowing any app to be stopped or disabled individually afterward.
 
-**Compose-backed app** — A managed app whose runtime is described as a Compose project so Routely can treat different stacks through one operational model.
+**Compose-backed app** — A managed app whose runtime is described as a Compose project so Routely can use one operational model locally and on one VPS.
 
 **Local runner** — The local workflow started by `routely`, responsible for starting registered local apps/services, showing status, streaming logs, and stopping managed processes on exit.
 
@@ -30,9 +30,13 @@ This file is the domain glossary for agents working on Routely. Keep it free of 
 
 **Dashboard-first management** — The product principle that app registration, lifecycle controls, deployment setup, and operational diagnosis should be doable from the dashboard without requiring manual config editing for normal use.
 
+**Dokploy-inspired operation** — The Routely product shape for domain/proxy, env/secrets, databases/backups, logs, deploy history, and health checks, adapted for one solo-operated VPS.
+
+**9router-light experience** — The Routely interaction style: simple, fast, and low-ceremony even when exposing production operations.
+
 **Dashboard API route** — A same-origin Next.js route handler that proxies or adapts daemon behavior for the dashboard.
 
-**Production mode** — Routely mode for a single Linux VPS where private infrastructure actions require admin bearer token auth.
+**One-VPS operation** — Routely mode for one Linux VPS where private infrastructure actions require admin auth and the same registry model should remain recognizable from local use.
 
 **Deployment** — A production attempt to turn an app source into a running service. Deployment state includes phases, logs, health, and success/failure history.
 

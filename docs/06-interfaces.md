@@ -2,13 +2,15 @@
 
 Status: Canonical interface reference
 Owner: PM, Backend, Frontend
-Last updated: 2026-06-21
+Last updated: 2026-06-22
 
 ## Purpose
 
-This document replaces the old separate CLI, API, config, and data-model draft docs. It records the public alpha interface shape that implementation teams should verify against code before changing user-facing docs.
+This document records the public alpha interface shape that implementation teams should verify against code before changing user-facing docs. It is the contract for dashboard-first, Compose-first planning, not a claim that every listed surface is complete.
 
 ## CLI Surface
+
+The CLI remains the bootstrap, scripting, and diagnostics path. The dashboard should become the normal setup and day-two operation surface as implementation catches up.
 
 Local runner commands:
 
@@ -41,7 +43,7 @@ routely backup
 routely notify
 ```
 
-Release docs must use only commands verified by Backend or QA. If a command exists but is not alpha-ready, mark it as alpha foundation or deferred.
+Release docs must use only commands verified by Backend or QA. If a command exists but is not alpha-ready, mark it as an alpha foundation or deferred.
 
 ## Local Demo Command Shape
 
@@ -60,21 +62,23 @@ routely logs web
 routely down
 ```
 
-The exact example app paths must be replaced with verified examples before release.
+The exact example app paths and any app enable/disable workflow must be replaced with verified behavior before release. Current code already represents app enablement in config/DB/API surfaces; Backend and Frontend must verify which CLI or dashboard controls are ready before public docs instruct users to toggle it.
 
 ## Production Demo Command Shape
 
-The public alpha VPS demo must have one verified path equivalent to:
+The public alpha one-VPS demo must have one verified path equivalent to:
 
 ```bash
 routely server init --data-dir /var/lib/routely
 routely server doctor
-routely add /path/to/dockerfile-app --name web --driver dockerfile --port 3000 --health-path /health
+routely add /path/to/app --name web --driver <verified-driver> --port 3000 --health-path /health
 routely deploy web --watch
 routely domain root example.com
 routely domain add web web.example.com
 routely domain verify web.example.com
 ```
+
+The target production driver model is Compose-backed operation. If the verified alpha path still uses `dockerfile`, docs and UI copy must call it a current bridge rather than the final model.
 
 The GitHub demo must have one verified path equivalent to:
 
@@ -108,6 +112,15 @@ Current route families in `apps/web/src/app/api` include:
 
 The daemon route families include the corresponding app, deployment, domain, proxy, GitHub, env, health, metrics, database, backup, notification, server, and auth endpoints.
 
+Dashboard implementation rules:
+
+- app setup/editing should use the same normalized app DTOs as CLI/config sync;
+- bulk start should start enabled resources only and report skipped disabled resources where implemented;
+- per-app stop should not disable the app;
+- disabled/deferred controls must explain why the action cannot run;
+- production mutation routes must preserve admin auth boundaries;
+- browser responses must not expose raw secret values.
+
 ## Config Shape
 
 Preferred config file:
@@ -134,6 +147,7 @@ apps:
     driver: command
     command: npm run dev -- --port 3000
     port: 3000
+    enabled: true
     healthcheck:
       path: /health
     depends_on:
@@ -146,9 +160,22 @@ services:
     image: postgres:16
     port: 5432
     internal: true
+    enabled: true
 ```
 
-Minimal production extension:
+Compose-backed app metadata may include:
+
+```yaml
+apps:
+  - name: api
+    driver: compose
+    compose_file: ./compose.yml
+    compose_service: api
+    port: 8000
+    enabled: true
+```
+
+Minimal production intent shape:
 
 ```yaml
 version: 1
@@ -156,9 +183,10 @@ name: production-server
 
 apps:
   - name: web
-    driver: dockerfile
+    driver: <verified-driver>
     path: /srv/apps/web
     port: 3000
+    enabled: true
     source:
       type: github
       repo: owner/web
@@ -174,14 +202,16 @@ apps:
       expected_status: 200
 ```
 
+Use `driver: dockerfile` in public examples only if Backend/QA verify that this is still the honest alpha path. Use Compose fields in public examples only after production Compose behavior is implemented and verified.
+
 ## Data Model Areas
 
 SQLite state should cover these areas for public alpha:
 
 - servers/settings
-- apps and runtime instances
+- apps, enablement, runtime instances, and app status
 - app env vars and secret metadata
-- deployments and deployment logs
+- deployments, deployment logs, and deploy history
 - domains and proxy routes
 - GitHub installations, repositories, app mappings, and deliveries
 - healthchecks and metric samples

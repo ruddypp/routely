@@ -1,19 +1,19 @@
 # Routely
 
-Routely is an open source, self-hosted app runner and single-VPS deployment platform for solo developers.
+Routely is an open source, self-hosted, dashboard-first control plane for solo developers running apps locally and on one VPS.
 
 The product direction is deliberately simple:
 
 ```text
-Local first: routely starts every registered local app/service with one command.
-VPS second: the same registry can run always-on on one VPS.
-Deploy third: GitHub, domains, HTTPS, env, logs, backups, and notifications automate production.
-Templates later: users can pick curated apps/templates and deploy from the dashboard.
+Dashboard first: normal setup and operation should happen through the dashboard.
+Start All: one action starts every enabled app/service while individual apps can be stopped or disabled.
+Compose first: the same registry should map local and one-VPS operation to a Compose-backed model.
+Operations included: domains/proxy, env/secrets, databases/backups, logs, deploy history, and health.
 ```
 
-In one sentence: **one command locally, one VPS always-on, one dashboard to deploy and operate every app**.
+In one sentence: **one dashboard to register and operate apps, one Start action for enabled apps, and one Compose-backed model from laptop to VPS**.
 
-Routely uses 9Router as the local UX/server-lifecycle reference: a memorable command, local daemon/server, and dashboard control center. It uses Dokploy as the production-operations reference: Docker deploys, domains, HTTPS, GitHub, env, logs, monitoring, databases, backups, and notifications on a single VPS.
+Routely uses 9Router as the local UX/server-lifecycle reference: a memorable command, local daemon/server, lightweight dashboard, and fast status loop. It uses Dokploy as the production-operations reference: Docker/Compose deploys, domains/proxy, HTTPS, GitHub, env/secrets, logs, deploy history, health, databases, backups, and notifications on a single VPS.
 
 Current status: public-alpha preparation. Routely is not published to npm yet, so install from this repository for now.
 
@@ -21,20 +21,21 @@ Current status: public-alpha preparation. Routely is not published to npm yet, s
 
 The MVP is defined by three demos:
 
-1. Local demo: register three local apps and one database, then run them all with `routely`.
-2. VPS demo: deploy one Dockerfile app to a single VPS with a domain and HTTPS.
+1. Local demo: register three apps and one database, start every enabled app, then stop or disable one app individually.
+2. VPS demo: operate one app on a single VPS with domain/proxy, env/secrets, database/backups, logs, deploy history, and health state.
 3. GitHub demo: push to the configured branch, auto-redeploy, and inspect failure logs when a deploy breaks.
 
 ## What Works Today
 
 - Local command apps with `init`, `add`, `sync`, `up`, `ps`, `down`, `restart`, `logs`, and `doctor`.
+- App enablement exists in config/state; the local `routely` path starts enabled `command` and `compose` apps.
 - Local Compose-backed database services through `routely db add <postgres|mysql|mariadb|redis|mongodb>`.
 - A dashboard at `http://localhost:3030` that talks to same-origin `/api/*` routes, not directly to the daemon from browser code.
 - A daemon at `http://127.0.0.1:9977` in local mode.
 - SQLite state under `<workspace>/.routely/routely.db` and logs under `<workspace>/.routely/logs`.
 - Production vertical slices for Dockerfile deploys, domains/proxy state, signed GitHub webhooks, env/secrets, health/metrics, production database records, local-file backups, and webhook/Discord/Telegram notifications.
 
-These production slices are alpha foundations, not a finished Dokploy replacement. Full production service installation/upgrade automation, login UI, rollback, external backup storage, marketplace templates, and broad VPS operations remain deferred.
+These production slices are alpha foundations, not a finished Dokploy replacement or verified production Compose parity. Dashboard-first app setup, Start All/per-app stop/disable controls, full production service installation/upgrade automation, login UI, rollback, external backup storage, public app catalogs, and broad VPS operations remain deferred until verified.
 
 ## Requirements
 
@@ -121,7 +122,7 @@ services:
     internal: true
 ```
 
-The same registry is the bridge to production. Local command apps become production apps when they gain source/deploy metadata, env, healthchecks, and domains.
+The same registry is the bridge to production. The product direction is Compose-backed local-to-VPS parity; current command apps and Dockerfile deploys are alpha foundations where verified.
 
 ## One VPS Always-On Path
 
@@ -147,7 +148,9 @@ export ROUTELY_ADMIN_TOKEN=<token-from-server-init>
 routely server doctor
 ```
 
-4. Register a Dockerfile app and deploy it:
+4. Register and deploy through the verified alpha path.
+
+The product direction is Compose-backed one-VPS operation. Until that path is fully verified, the current alpha bridge is a Dockerfile deploy:
 
 ```bash
 routely add /path/to/dockerfile-app --name web --driver dockerfile --port 3000 --health-path /health
@@ -162,7 +165,7 @@ routely domain add web web.example.com
 routely domain verify web.example.com
 ```
 
-Domain routes are generated for the latest successful Dockerfile deployment. TLS status is conservative: `issuing` means Routely generated the HTTPS route for Traefik/ACME; Routely does not fake certificate success.
+Domain routes are generated for the latest successful deployment. TLS status is conservative: `issuing` means Routely generated the HTTPS route for Traefik/ACME; Routely does not fake certificate success.
 
 ## GitHub Auto Deploy
 
@@ -185,7 +188,7 @@ routely github repo add owner/repo --branch main --installation-id 123456
 routely github connect web owner/repo --branch main
 ```
 
-`POST /github/webhook` validates `X-Hub-Signature-256`, deduplicates delivery IDs, and triggers Dockerfile deploys for connected repo/branch pushes.
+`POST /github/webhook` validates `X-Hub-Signature-256`, deduplicates delivery IDs, and triggers redeploys for connected repo/branch pushes through the verified deploy path.
 
 ## Development
 
@@ -219,11 +222,10 @@ npm install -g .
 - Routely is not published to npm yet.
 - Full production service installation/upgrade automation is not finished.
 - The dashboard login UI is not complete; production daemon APIs require `ROUTELY_ADMIN_TOKEN`.
-- Static deploys, buildpack/Nixpacks/Railpack deploys, cancel/rollback actions, external backup storage, destructive restore automation, public marketplace templates, teams/RBAC, Kubernetes, public multi-server UX, enterprise features, email notifications, and broad VPS operations are deferred.
+- Static deploys, buildpack/Nixpacks/Railpack deploys, cancel/rollback actions, external backup storage, destructive restore automation, public app catalogs, shared administration/RBAC, Kubernetes, distributed-server UX, hosted cloud products, enterprise features, email notifications, and broad VPS operations are deferred.
 - GitHub App OAuth install callback, live GitHub repo/branch fetching, and commit status updates are deferred.
 - Backup files are local to the configured production data directory.
-- SQLite is the single-node state store; this is intentional for the MVP and constrains clustering/multi-server behavior.
-- Web production build currently has a known Next.js/Turbopack reporting caveat documented in `docs/09-current-status.md`.
+- SQLite is the single-node state store; this is intentional for the MVP and constrains clustering or distributed-control-plane behavior.
 
 ## API Shape
 

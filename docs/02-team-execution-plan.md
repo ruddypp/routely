@@ -2,7 +2,7 @@
 
 Status: Canonical team operating plan
 Owner: PM
-Last updated: 2026-06-21
+Last updated: 2026-06-22
 
 ## Role Definitions
 
@@ -38,7 +38,7 @@ Frontend receives design specs from UI/UX through PM/Lead, implements them again
 
 UI/UX acts like a senior product designer. UI/UX owns operational workflows, information architecture, screen/state specs, interaction design, copy, empty/loading/error states, status semantics, responsive behavior, accessibility criteria, and visual QA criteria.
 
-UI/UX should keep Routely as a dense operational tool, not a marketing landing page.
+UI/UX should keep Routely as a useful operational tool with Dokploy-inspired surfaces and 9Router-like lightness, not a marketing landing page or broad enterprise console.
 
 UI/UX designs before implementation when a task affects user experience. UI/UX hands executable design criteria to PM/Lead, who route implementation to Frontend and Backend.
 
@@ -62,7 +62,7 @@ For public alpha work, use this flow:
 
 1. The user works through Routely Lead. Lead clarifies the objective, constraints, blockers, and approval needs.
 2. Lead instructs PM to run the PM planning flow for anything beyond a small direct task.
-3. PM uses `ask-matt` when the correct planning path is unclear, then runs `grill-with-docs` style self-interview from Lead context. PM asks Lead only for missing information that cannot be reasonably assumed.
+3. PM uses `ask-matt` when the correct planning path is unclear, then runs a `grill-with-docs` style self-interview from Lead context. PM asks Lead only for missing information that cannot be reasonably assumed.
 4. PM uses `to-prd` to synthesize the PRD from the grilling context, then uses `to-issues` to produce vertical slices, acceptance criteria, team assignments, dependencies, and verification plan.
 5. PM sends dashboard/product-experience work to UI/UX for design, workflow, state, copy, responsive, and accessibility criteria.
 6. UI/UX returns executable design criteria to Lead/PM. Lead/PM route implementation to Frontend and Backend according to ownership.
