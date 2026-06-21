@@ -28,6 +28,7 @@ import {
   loadWorkspaceConfig,
   runServerDoctorChecks,
   upsertWorkspaceConfigEntry,
+  type RoutelyAppDto,
   type RoutelyAppInput,
   type RoutelyAppRecord,
   type RoutelyDeploymentDto,
@@ -603,18 +604,49 @@ function syncCommand(): void {
   } else {
     console.log(`Synced ${synced} app(s) from routely.yml.`);
     for (const app of listApps(db).map(appToPublicDto)) {
-      const port = app.port ? `:${app.port}` : "-";
-      console.log(`  ${app.name}\t${app.driver}\t${port}\t${app.path || "-"}`);
+      console.log(`  ${app.name}\t${app.driver}\t${formatPorts(app)}\t${app.enabled ? "enabled" : "disabled"}\t${formatAppMetadata(app)}\t${app.path || "-"}`);
     }
   }
 
   db.close();
 }
 
-function psCommand(): void {
+function appPorts(app: { port?: number | null; ports?: number[] | null }): number[] {
+  return Array.isArray(app.ports) && app.ports.length > 0 ? app.ports : app.port ? [app.port] : [];
+}
+
+function appPortCandidates(apps: RoutelyAppRecord[]): Array<{ name: string; port: number; internal: boolean }> {
+  return apps.flatMap((app) => appPorts(app).map((port) => ({ name: app.name, port, internal: Boolean(app.internal) })));
+}
+
+function formatPorts(app: { port?: number | null; ports?: number[] | null }): string {
+  const ports = appPorts(app);
+  return ports.length > 0 ? ports.map((port) => `:${port}`).join(",") : "-";
+}
+
+function formatAppMetadata(app: RoutelyAppDto): string {
+  const parts: string[] = [];
+  if (app.dependsOn.length > 0) parts.push(`deps=${app.dependsOn.join(",")}`);
+  if (app.composeFile || app.composeService) parts.push(`compose=${app.composeFile || "-"}#${app.composeService || app.name}`);
+  if (app.domains.length > 0) parts.push(`domains=${app.domains.join(",")}`);
+  if (app.source?.type || app.source?.repo || app.source?.branch) {
+    parts.push(`source=${[app.source.type, app.source.repo, app.source.branch].filter(Boolean).join(":")}`);
+  }
+  if (app.envKeys.length > 0) parts.push(`env=${app.envKeys.join(",")}`);
+  return parts.length > 0 ? parts.join(";") : "-";
+}
+
+function psCommand(args: string[] = []): void {
+  const { flags } = parseFlags(args);
   const { db, databasePath } = initializeRoutely(workspaceRoot);
   reconcileRuntimeState(db);
   const apps = listApps(db).map(appToPublicDto);
+
+  if (flags.json) {
+    console.log(JSON.stringify({ databasePath, apps }, null, 2));
+    db.close();
+    return;
+  }
 
   console.log(`Database: ${databasePath}`);
 
@@ -625,9 +657,8 @@ function psCommand(): void {
   }
 
   for (const app of apps) {
-    const port = app.port ? `:${app.port}` : "-";
     const enabled = app.enabled ? "enabled" : "disabled";
-    console.log(`${app.name}\t${app.status}\t${app.driver}\t${port}\t${enabled}\t${app.path || "-"}`);
+    console.log(`${app.name}\t${app.status}\t${app.driver}\t${formatPorts(app)}\t${enabled}\t${formatAppMetadata(app)}\t${app.path || "-"}`);
   }
 
   db.close();
@@ -937,7 +968,7 @@ async function preflightPorts(apps: RoutelyAppRecord[], includeSystemPorts = tru
         { name: "daemon", port: daemonPort }
       ]
     : [];
-  const candidates = [...systemPorts, ...apps.map((app) => ({ name: app.name, port: app.port, internal: Boolean(app.internal) }))];
+  const candidates = [...systemPorts, ...appPortCandidates(apps)];
   const duplicates = findDuplicatePorts(candidates);
   const duplicatePorts = new Set(duplicates.map((item) => item.port));
   const unavailable = await findUnavailablePorts(candidates.filter((candidate) => !duplicatePorts.has(Number(candidate.port))));
@@ -1642,18 +1673,22 @@ async function doctorCommand(): Promise<void> {
     portConflicts.push({ name: "daemon", port: daemonPort });
   }
 
-  const appPorts = apps.filter((app): app is RoutelyAppRecord & { port: number } => Number.isInteger(app.port));
-  const duplicateAppPorts = findDuplicatePorts(appPorts.map((app) => ({ name: app.name, port: app.port, internal: Boolean(app.internal) })));
+  const appPortItems = appPortCandidates(apps);
+  const duplicateAppPorts = findDuplicatePorts(appPortItems);
   portConflicts.push(...duplicateAppPorts);
   const duplicatePorts = new Set(duplicateAppPorts.map((item) => item.port));
   const unknownAppConflicts = await findUnavailablePorts(
-    appPorts
-      .filter((app) => app.status !== "running" && !duplicatePorts.has(app.port))
-      .map((app) => ({ name: app.name, port: app.port, internal: Boolean(app.internal) }))
+    appPortItems.filter((appPort) => {
+      const app = apps.find((item) => item.name === appPort.name);
+      return app?.status !== "running" && !duplicatePorts.has(appPort.port);
+    })
   );
   portConflicts.push(...unknownAppConflicts);
-  for (const app of appPorts.filter((item) => item.status === "running" && !item.internal)) {
-    portNotes.push(`${app.name}: ${app.port} (managed app running)`);
+  for (const appPort of appPortItems.filter((item) => {
+    const app = apps.find((candidate) => candidate.name === item.name);
+    return app?.status === "running" && !item.internal;
+  })) {
+    portNotes.push(`${appPort.name}: ${appPort.port} (managed app running)`);
   }
 
   const checks = [
@@ -1789,7 +1824,7 @@ switch (command) {
     await downCommand();
     break;
   case "ps":
-    psCommand();
+    psCommand(argv.slice(1));
     break;
   case "logs":
     logsCommand(argv.slice(1));

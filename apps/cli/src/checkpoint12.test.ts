@@ -150,6 +150,90 @@ describe("QA regression fixes", () => {
     expect(authorized.body.apps).toEqual([]);
   });
 
+  it("round-trips disabled Compose app metadata through config, DB, daemon DTOs, and CLI output", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace);
+
+    const payload = {
+      name: "api",
+      type: "app",
+      preset: "custom",
+      driver: "compose",
+      compose_file: "./compose.yml",
+      compose_service: "api",
+      port: 8080,
+      ports: [8080, 9090],
+      depends_on: ["postgres"],
+      healthcheck: { path: "/health", expected_status: 204 },
+      domains: ["api.example.test"],
+      source: { type: "github", repo: "acme/api", branch: "main", auto_deploy: { enabled: true, branches: ["main"] } },
+      env: { NODE_ENV: "production", PUBLIC_URL: "https://api.example.test" },
+      enabled: false
+    };
+
+    const created = await jsonRequest(baseUrl, "/apps", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+
+    expect(created.response.status).toBe(201);
+    expect(created.body.app).toMatchObject({
+      name: "api",
+      driver: "compose",
+      composeFile: "./compose.yml",
+      composeService: "api",
+      port: 8080,
+      ports: [8080, 9090],
+      dependsOn: ["postgres"],
+      healthcheck: { path: "/health", expected_status: 204 },
+      domains: ["api.example.test"],
+      source: { type: "github", repo: "acme/api", branch: "main", auto_deploy: { enabled: true, branches: ["main"] } },
+      enabled: false
+    });
+    expect(created.body.app.envKeys).toEqual(["NODE_ENV", "PUBLIC_URL"]);
+
+    const { db } = initializeRoutely(workspace);
+    const stored = getAppByName(db, "api");
+    expect(stored).toMatchObject({
+      driver: "compose",
+      compose_file: "./compose.yml",
+      compose_service: "api",
+      port: 8080,
+      ports: [8080, 9090],
+      depends_on: ["postgres"],
+      domains: ["api.example.test"],
+      enabled: false
+    });
+    expect(stored?.source?.repo).toBe("acme/api");
+    db.close();
+
+    const listed = await jsonRequest(baseUrl, "/apps");
+    const listedApp = listed.body.apps.find((item: { name: string }) => item.name === "api");
+    expect(listedApp).toMatchObject({ composeFile: "./compose.yml", composeService: "api", ports: [8080, 9090], enabled: false });
+
+    const rejectedStart = await jsonRequest(baseUrl, `/apps/${created.body.app.id}/start`, { method: "POST" });
+    expect(rejectedStart.response.status).toBe(400);
+    expect(rejectedStart.body.error).toContain("disabled");
+
+    const ps = await runCli(workspace, ["ps", "--json"]);
+    expect(ps.code).toBe(0);
+    const cliApp = JSON.parse(ps.stdout).apps.find((item: { name: string }) => item.name === "api");
+    expect(cliApp).toMatchObject({ composeFile: "./compose.yml", composeService: "api", ports: [8080, 9090], enabled: false });
+    expect(cliApp.envKeys).toEqual(["NODE_ENV", "PUBLIC_URL"]);
+
+    const humanPs = await runCli(workspace, ["ps"]);
+    expect(humanPs.stdout).toContain("api\tstopped\tcompose\t:8080,:9090\tdisabled");
+    expect(humanPs.stdout).toContain("compose=./compose.yml#api");
+    expect(humanPs.stdout).toContain("env=NODE_ENV,PUBLIC_URL");
+
+    const config = await readFile(join(workspace, "routely.yml"), "utf8");
+    expect(config).toContain("enabled: false");
+    expect(config).toContain("compose_file: ./compose.yml");
+    expect(config).toContain("compose_service: api");
+    expect(config).toContain("ports:");
+    expect(config).toContain("- 9090");
+  });
+
   it("keeps an already-running local daemon usable after server init mutates foundation state", async () => {
     const workspace = await createWorkspace();
     const { baseUrl } = await startDaemon(workspace);

@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { loadWorkspaceConfig } from "@routely/core";
+import { appToPublicDto, loadWorkspaceConfig } from "@routely/core";
 import { initializeRoutely, listApps, syncWorkspaceConfig } from "@routely/db";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -99,6 +99,116 @@ describe("local demo example", () => {
       internal: true
     });
     expect(postgres?.env).toMatchObject({ POSTGRES_DB: "routely_demo" });
+    db.close();
+  });
+
+  it("syncs routely.yaml command apps and compose-backed services with enablement intact", async () => {
+    const workspace = await mkdtemp(resolve(tmpdir(), "routely-yaml-sync-"));
+    tempDirs.push(workspace);
+    writeFileSync(
+      resolve(workspace, "routely.yaml"),
+      `version: 1
+name: yaml-sync
+
+apps:
+  - name: web
+    driver: command
+    path: ./web
+    command: npm run dev
+    port: 3000
+    enabled: false
+    env:
+      PUBLIC_API_BASE: http://localhost:8000
+      API_TOKEN: should-not-be-public
+    depends_on:
+      - postgres
+    healthcheck:
+      path: /health
+      expected_status: 200
+    domains:
+      - web.localhost
+    source:
+      type: github
+      repo: owner/web
+      branch: main
+  - name: api
+    driver: compose
+    compose_file: ./compose.yml
+    compose_service: api
+    port: 8000
+    enabled: true
+    depends_on: postgres
+    healthcheck:
+      path: /ready
+      expected_status: 204
+
+services:
+  - name: postgres
+    preset: postgres
+    driver: compose
+    image: postgres:16
+    port: 5432
+    internal: true
+    enabled: false
+    env:
+      POSTGRES_DB: app
+      POSTGRES_PASSWORD: should-not-be-public
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+`,
+      "utf8"
+    );
+
+    const loaded = loadWorkspaceConfig(workspace);
+    expect(loaded?.configPath.endsWith("routely.yaml")).toBe(true);
+
+    const { db } = initializeRoutely(workspace);
+    const synced = syncWorkspaceConfig(db, loaded!);
+    const apps = listApps(db);
+
+    expect(synced).toEqual(["web", "api", "postgres"]);
+    expect(apps.map((app) => app.name).sort()).toEqual(["api", "postgres", "web"]);
+
+    const web = apps.find((app) => app.name === "web")!;
+    expect(web).toMatchObject({
+      driver: "command",
+      enabled: false,
+      port: 3000,
+      depends_on: ["postgres"],
+      domains: ["web.localhost"],
+      envKeys: ["API_TOKEN", "PUBLIC_API_BASE"]
+    });
+    expect(web.path).toBe(resolve(workspace, "web"));
+    expect(web.source).toMatchObject({ type: "github", repo: "owner/web", branch: "main" });
+
+    const webDto = appToPublicDto(web);
+    expect(webDto.enabled).toBe(false);
+    expect(webDto.env).toEqual({ PUBLIC_API_BASE: "http://localhost:8000" });
+    expect(webDto.envKeys).toEqual(["API_TOKEN", "PUBLIC_API_BASE"]);
+
+    const api = apps.find((app) => app.name === "api")!;
+    expect(api).toMatchObject({
+      type: "app",
+      driver: "compose",
+      compose_file: "./compose.yml",
+      compose_service: "api",
+      enabled: true,
+      port: 8000,
+      depends_on: ["postgres"]
+    });
+
+    const postgres = apps.find((app) => app.name === "postgres")!;
+    expect(postgres).toMatchObject({
+      type: "database",
+      preset: "postgres",
+      driver: "compose",
+      image: "postgres:16",
+      port: 5432,
+      internal: true,
+      enabled: false,
+      envKeys: ["POSTGRES_DB", "POSTGRES_PASSWORD"]
+    });
+    expect(appToPublicDto(postgres).env).toEqual({});
     db.close();
   });
 });

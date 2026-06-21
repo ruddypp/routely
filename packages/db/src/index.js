@@ -57,6 +57,7 @@ export function migrate(db) {
       start TEXT,
       env TEXT NOT NULL DEFAULT '{}',
       port INTEGER,
+      ports TEXT NOT NULL DEFAULT '[]',
       depends_on TEXT NOT NULL DEFAULT '[]',
       healthcheck TEXT,
       domains TEXT NOT NULL DEFAULT '[]',
@@ -332,6 +333,7 @@ export function migrate(db) {
   `);
 
   addColumnIfMissing(db, "apps", "server_id", "INTEGER");
+  addColumnIfMissing(db, "apps", "ports", "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(db, "apps", "depends_on", "TEXT NOT NULL DEFAULT '[]'");
   addColumnIfMissing(db, "apps", "install", "TEXT");
   addColumnIfMissing(db, "apps", "dev", "TEXT");
@@ -486,17 +488,22 @@ function defaultIsPidAlive(pid) {
 }
 
 function parseAppRecord(row) {
+  const env = parseJsonObject(row.env);
+  const ports = parseJsonNumberArray(row.ports);
   return {
     ...row,
-    env: parseJsonObject(row.env),
+    env,
+    envKeys: Object.keys(env).sort(),
+    ports: ports.length > 0 ? ports : row.port ? [Number(row.port)] : [],
     depends_on: parseJsonArray(row.depends_on),
-    healthcheck: parseJsonObject(row.healthcheck) || null,
+    healthcheck: row.healthcheck ? parseJsonObject(row.healthcheck) : null,
     domains: parseJsonArray(row.domains),
-    source: parseJsonObject(row.source) || null,
+    source: row.source ? parseJsonObject(row.source) : null,
     internal: Boolean(row.internal),
     volumes: parseJsonArray(row.volumes),
     needs_restart: Boolean(row.needs_restart),
-    needs_redeploy: Boolean(row.needs_redeploy)
+    needs_redeploy: Boolean(row.needs_redeploy),
+    enabled: Boolean(row.enabled)
   };
 }
 
@@ -525,6 +532,23 @@ function parseJsonArray(value) {
   try {
     const parsed = JSON.parse(value);
     return Array.isArray(parsed) ? parsed.map((item) => String(item).trim()).filter(Boolean) : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseJsonNumberArray(value) {
+  if (Array.isArray(value)) {
+    return value.map(Number).filter((item) => Number.isInteger(item) && item > 0);
+  }
+
+  if (!value) {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(Number).filter((item) => Number.isInteger(item) && item > 0) : [];
   } catch {
     return [];
   }
@@ -566,7 +590,7 @@ export function upsertApp(db, input) {
   if (existing) {
     db.prepare(`
       UPDATE apps
-      SET server_id = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, install = ?, dev = ?, build = ?, start = ?, env = ?, port = ?, depends_on = ?, healthcheck = ?, domains = ?, source = ?, image = ?, internal = ?, volumes = ?, compose_file = ?, compose_service = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+      SET server_id = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, install = ?, dev = ?, build = ?, start = ?, env = ?, port = ?, ports = ?, depends_on = ?, healthcheck = ?, domains = ?, source = ?, image = ?, internal = ?, volumes = ?, compose_file = ?, compose_service = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE name = ?
     `).run(
       app.server_id,
@@ -581,6 +605,7 @@ export function upsertApp(db, input) {
       app.start,
       serializeJsonObject(app.env) || "{}",
       app.port,
+      serializeJsonArray(app.ports),
       serializeDependsOn(app.depends_on),
       serializeJsonObject(app.healthcheck),
       serializeJsonArray(app.domains),
@@ -596,8 +621,8 @@ export function upsertApp(db, input) {
     );
   } else {
     db.prepare(`
-      INSERT INTO apps (server_id, name, type, preset, driver, path, command, install, dev, build, start, env, port, depends_on, healthcheck, domains, source, image, internal, volumes, compose_file, compose_service, enabled, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO apps (server_id, name, type, preset, driver, path, command, install, dev, build, start, env, port, ports, depends_on, healthcheck, domains, source, image, internal, volumes, compose_file, compose_service, enabled, status)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       app.server_id,
       app.name,
@@ -612,6 +637,7 @@ export function upsertApp(db, input) {
       app.start,
       serializeJsonObject(app.env) || "{}",
       app.port,
+      serializeJsonArray(app.ports),
       serializeDependsOn(app.depends_on),
       serializeJsonObject(app.healthcheck),
       serializeJsonArray(app.domains),
@@ -647,7 +673,7 @@ export function updateApp(db, appId, input) {
 
   db.prepare(`
     UPDATE apps
-    SET server_id = ?, name = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, install = ?, dev = ?, build = ?, start = ?, env = ?, port = ?, depends_on = ?, healthcheck = ?, domains = ?, source = ?, image = ?, internal = ?, volumes = ?, compose_file = ?, compose_service = ?, needs_restart = ?, needs_redeploy = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
+    SET server_id = ?, name = ?, type = ?, preset = ?, driver = ?, path = ?, command = ?, install = ?, dev = ?, build = ?, start = ?, env = ?, port = ?, ports = ?, depends_on = ?, healthcheck = ?, domains = ?, source = ?, image = ?, internal = ?, volumes = ?, compose_file = ?, compose_service = ?, needs_restart = ?, needs_redeploy = ?, enabled = ?, status = ?, updated_at = CURRENT_TIMESTAMP
     WHERE id = ?
   `).run(
     app.server_id,
@@ -663,6 +689,7 @@ export function updateApp(db, appId, input) {
     app.start,
     serializeJsonObject(app.env) || "{}",
     app.port,
+    serializeJsonArray(app.ports),
     serializeDependsOn(app.depends_on),
     serializeJsonObject(app.healthcheck),
     serializeJsonArray(app.domains),
@@ -695,6 +722,7 @@ function appSettingsChanged(existing, next) {
     "start",
     "env",
     "port",
+    "ports",
     "healthcheck",
     "domains",
     "source",

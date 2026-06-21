@@ -35,7 +35,8 @@ export function buildComposeConfig(app) {
   if (app.image) service.image = app.image;
   if (app.command) service.command = app.command;
   if (app.env && Object.keys(app.env).length > 0) service.environment = app.env;
-  if (app.port && !app.internal) service.ports = [`${app.port}:${app.port}`];
+  const ports = Array.isArray(app.ports) && app.ports.length > 0 ? app.ports : app.port ? [app.port] : [];
+  if (ports.length > 0 && !app.internal) service.ports = ports.map((port) => `${port}:${port}`);
   if (Array.isArray(app.volumes) && app.volumes.length > 0) service.volumes = app.volumes;
   if (Array.isArray(app.depends_on) && app.depends_on.length > 0) service.depends_on = app.depends_on;
 

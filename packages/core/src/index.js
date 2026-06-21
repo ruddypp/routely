@@ -153,8 +153,27 @@ export function normalizeWorkspaceConfig(input = {}) {
       port: Number(input.daemon?.port || DEFAULT_DAEMON_PORT)
     },
     apps: Array.isArray(input.apps) ? input.apps.map(normalizeAppInput) : [],
-    services: Array.isArray(input.services) ? input.services.map(normalizeAppInput) : []
+    services: Array.isArray(input.services) ? input.services.map(normalizeServiceInput) : []
   };
+}
+
+function normalizeServiceInput(input) {
+  if (!input || typeof input !== "object" || Array.isArray(input) || input.type) {
+    return normalizeAppInput(input);
+  }
+
+  return normalizeAppInput({ ...input, type: inferServiceType(input) });
+}
+
+function inferServiceType(input) {
+  const preset = String(input.preset || "").trim().toLowerCase();
+  const name = String(input.name || "").trim().toLowerCase();
+
+  if (DATABASE_TYPES.includes(preset) || DATABASE_TYPES.includes(name)) {
+    return "database";
+  }
+
+  return "compose";
 }
 
 export function normalizeAppInput(input) {
@@ -163,6 +182,9 @@ export function normalizeAppInput(input) {
   if (!name) {
     throw new Error("App name is required.");
   }
+
+  const ports = normalizePorts(input.port, input.ports);
+  const port = input.port == null || input.port === "" ? ports[0] ?? null : normalizePort(input.port);
 
   return {
     name,
@@ -177,7 +199,8 @@ export function normalizeAppInput(input) {
     build: stringOrNull(input.build),
     start: stringOrNull(input.start),
     env: normalizeStringMap(input.env),
-    port: input.port == null || input.port === "" ? null : Number(input.port),
+    port,
+    ports,
     depends_on: normalizeDependsOn(input.depends_on),
     healthcheck: normalizeHealthcheck(input.healthcheck),
     domains: normalizeStringArray(input.domains),
@@ -198,6 +221,46 @@ function stringOrNull(value) {
   }
 
   return String(value);
+}
+
+function normalizePort(value) {
+  if (value == null || value === "") {
+    return null;
+  }
+
+  const port = Number(value);
+  if (!Number.isInteger(port) || port <= 0) {
+    throw new Error(`Invalid port: ${value}. Use a positive integer port number.`);
+  }
+  return port;
+}
+
+function normalizePorts(port, ports) {
+  const values = [];
+
+  if (port != null && port !== "") {
+    values.push(port);
+  }
+
+  if (ports != null && ports !== "") {
+    if (Array.isArray(ports)) {
+      values.push(...ports);
+    } else if (typeof ports === "string") {
+      values.push(...ports.split(","));
+    } else {
+      values.push(ports);
+    }
+  }
+
+  const normalized = [];
+  for (const value of values) {
+    const normalizedPort = normalizePort(value);
+    if (normalizedPort != null && !normalized.includes(normalizedPort)) {
+      normalized.push(normalizedPort);
+    }
+  }
+
+  return normalized;
 }
 
 function normalizeStringMap(value) {
@@ -278,6 +341,8 @@ function normalizeDependsOn(value) {
 export function appToPublicDto(app) {
   const env = app.env || {};
   const shouldRedactEnv = app.type === "database" || app.internal === true || app.internal === 1;
+  const publicEnv = shouldRedactEnv ? {} : filterExportableEnv(env);
+  const ports = Array.isArray(app.ports) && app.ports.length > 0 ? app.ports : app.port ? [app.port] : [];
   return {
     id: app.id,
     serverId: app.server_id,
@@ -291,9 +356,10 @@ export function appToPublicDto(app) {
     dev: app.dev,
     build: app.build,
     start: app.start,
-    env: shouldRedactEnv ? {} : env,
+    env: publicEnv,
     envKeys: Object.keys(env).sort(),
     port: app.port,
+    ports,
     dependsOn: Array.isArray(app.depends_on) ? app.depends_on : [],
     healthcheck: app.healthcheck || null,
     domains: app.domains || [],
@@ -654,6 +720,7 @@ export function appToConfigEntry(input) {
   setIfPresent(entry, "start", app.start);
   setIfPresent(entry, "command", app.command && app.command !== app.dev ? app.command : null);
   setIfPresent(entry, "port", app.port);
+  if (app.ports.length > 1) entry.ports = app.ports;
   if (Object.keys(app.env).length > 0) {
     entry.env = filterExportableEnv(app.env);
   }
@@ -666,7 +733,7 @@ export function appToConfigEntry(input) {
   if (app.volumes.length > 0) entry.volumes = app.volumes;
   setIfPresent(entry, "compose_file", app.compose_file);
   setIfPresent(entry, "compose_service", app.compose_service);
-  if (!app.enabled) entry.enabled = false;
+  entry.enabled = app.enabled;
 
   return entry;
 }

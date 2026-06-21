@@ -32,6 +32,7 @@ export interface RoutelyAppInput {
   start?: string | null;
   env?: Record<string, string | number | boolean | null> | null;
   port?: number | string | null;
+  ports?: Array<number | string> | number | string | null;
   depends_on?: string[] | string | null;
   healthcheck?: { path?: string | null; expected_status?: number | string | null } | null;
   domains?: string[] | string | null;
@@ -46,7 +47,9 @@ export interface RoutelyAppInput {
   internal?: boolean;
   volumes?: string[] | string | null;
   compose_file?: string | null;
+  composeFile?: string | null;
   compose_service?: string | null;
+  composeService?: string | null;
   enabled?: boolean;
   status?: RoutelyAppStatus;
 }
@@ -83,6 +86,7 @@ export interface NormalizedRoutelyAppInput {
   start: string | null;
   env: Record<string, string>;
   port: number | null;
+  ports: number[];
   depends_on: string[];
   healthcheck: { path: string | null; expected_status: number | null } | null;
   domains: string[];
@@ -112,18 +116,19 @@ export interface RoutelyAppRecord {
   env: Record<string, string>;
   envKeys: string[];
   port: number | null;
+  ports: number[];
   depends_on: string[];
   healthcheck: { path: string | null; expected_status: number | null } | null;
   domains: string[];
   source: { type: string | null; repo: string | null; branch: string | null; auto_deploy?: { enabled: boolean; branches: string[] } } | null;
   image: string | null;
-  internal: 0 | 1 | boolean;
+  internal: boolean;
   volumes: string[];
   compose_file: string | null;
   compose_service: string | null;
-  needs_restart?: 0 | 1 | boolean;
-  needs_redeploy?: 0 | 1 | boolean;
-  enabled: 0 | 1 | boolean;
+  needs_restart?: boolean;
+  needs_redeploy?: boolean;
+  enabled: boolean;
   status: RoutelyAppStatus;
   created_at: string;
   updated_at: string;
@@ -143,7 +148,9 @@ export interface RoutelyAppDto {
   build: string | null;
   start: string | null;
   env: Record<string, string>;
+  envKeys: string[];
   port: number | null;
+  ports: number[];
   dependsOn: string[];
   healthcheck: { path: string | null; expected_status: number | null } | null;
   domains: string[];

@@ -449,6 +449,10 @@ function isPortAvailable(portNumber) {
   });
 }
 
+function appPorts(appRecord) {
+  return Array.isArray(appRecord.ports) && appRecord.ports.length > 0 ? appRecord.ports : appRecord.port ? [appRecord.port] : [];
+}
+
 async function startLocalApp(appRecord) {
   const validationError = validateStartableApp(appRecord);
   if (validationError) {
@@ -463,8 +467,10 @@ async function startLocalApp(appRecord) {
     return { ok: false, status: 409, error: `${appRecord.name} is already running.` };
   }
 
-  if (appRecord.port && !(await isPortAvailable(appRecord.port))) {
-    return { ok: false, status: 409, error: `Port ${appRecord.port} is already in use.` };
+  for (const port of appPorts(appRecord)) {
+    if (!(await isPortAvailable(port))) {
+      return { ok: false, status: 409, error: `Port ${port} is already in use.` };
+    }
   }
 
   updateAppStatus(db, appRecord.id, "starting");
