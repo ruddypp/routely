@@ -1,60 +1,45 @@
 # Routely Documentation Index
 
-Version: 0.1  
-Status: Draft  
-Language: English with Indonesian notes in each document
+Version: 0.2
+Status: Canonical docs reset index
+Last updated: 2026-06-21
 
-## English
+## Read First
 
-Routely is an open source, self-hosted app orchestrator inspired by 9Router's single-command daemon model and Dokploy's VPS deployment platform. The product targets solo developers who maintain many applications and want one command for local development plus one VPS control plane for production deployments.
+Routely is an open source, self-hosted app runner and single-VPS deployment platform for solo developers.
 
-Core promise:
-
-```text
-Run `routely` locally or on a VPS.
-All registered apps, services, proxy routes, logs, metrics, and deployments become manageable from one place.
-```
-
-## Bahasa Indonesia
-
-Routely adalah app orchestrator open source dan self-hosted yang menggabungkan mental model 9Router dan Dokploy. Target awalnya solo developer yang punya banyak aplikasi dan ingin satu command untuk local development serta satu control plane untuk production di VPS.
-
-Janji utama:
+Product promise:
 
 ```text
-Ketik `routely` di local atau VPS.
-Semua app, service, proxy, log, metric, dan deployment bisa dikelola dari satu tempat.
+One command local.
+One VPS always-on.
+One dashboard to deploy and operate every app.
 ```
 
-## Documents
+New agents should start here:
 
-- [Agent Handoff](./HANDOFF.md)
-- [Product Requirements Document](./01-prd.md)
-- [Technical Architecture](./02-technical-architecture.md)
-- [Functional Specification](./03-functional-specification.md)
-- [User Flows](./04-user-flows.md)
-- [CLI Specification](./05-cli-spec.md)
-- [API Specification](./06-api-spec.md)
-- [Configuration Specification](./07-config-spec.md)
-- [Data Model](./08-data-model.md)
-- [Security Model](./09-security-model.md)
-- [MVP Roadmap](./10-mvp-roadmap.md)
-- [Risks and Tradeoffs](./11-risks-and-tradeoffs.md)
-- [Development Setup](./12-development-setup.md)
-- [Current Setup Status](./13-current-setup-status.md)
-- [End-to-End Implementation Plan](./14-implementation-plan.md)
+1. [Product Brief](./00-product-brief.md)
+2. [Public Alpha Plan](./01-alpha-plan.md)
+3. [Team Execution Plan](./02-team-execution-plan.md)
+4. [Demo Acceptance Plan](./03-demo-acceptance-plan.md)
+5. [Docs Map](./04-docs-map.md)
 
-## Feature Specs
+## Implementation References
 
-- [Local Runner](./feature-specs/local-runner.md)
-- [GitHub Integration](./feature-specs/github-integration.md)
-- [Production Deploy](./feature-specs/production-deploy.md)
-- [Domain and HTTPS](./feature-specs/domain-and-https.md)
-- [Runtime and Build System](./feature-specs/runtime-and-build-system.md)
-- [Database Services](./feature-specs/database-services.md)
-- [Dashboard](./feature-specs/dashboard.md)
-- [Logs and Monitoring](./feature-specs/logs-and-monitoring.md)
-- [Backup System](./feature-specs/backup-system.md)
+- [Architecture Reference](./05-architecture.md)
+- [Interfaces Reference](./06-interfaces.md)
+- [Security And Risk Reference](./07-security-and-risks.md)
+- [Development Setup](./08-development-setup.md)
+- [Current Status](./09-current-status.md)
+- [Implementation Backlog](./10-implementation-backlog.md)
+- [Feature Scope](./11-feature-scope.md)
+- [Product Requirements Document](./12-prd.md)
+
+## Evidence And Operations
+
+- [QA Reports](./qa/README.md) stores fresh public alpha QA reports.
+- [Security Reports](./security/README.md) stores fresh public alpha security findings.
+- `docs/agents/` stores agent workflow support docs that are referenced by `AGENTS.md`.
 
 ## Architecture Decision Records
 

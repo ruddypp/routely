@@ -1,39 +1,187 @@
 # Routely
 
-Routely is an open source, self-hosted app orchestrator for solo developers. It combines a 9Router-style single command with a Dokploy-style path toward VPS app management.
+Routely is an open source, self-hosted app runner and single-VPS deployment platform for solo developers.
 
-Current skeleton behavior:
-
-- `routely` syncs `routely.yml`, then starts the daemon, dashboard, and command apps.
-- Dashboard runs at `http://localhost:3030` (dark theme, live daemon status polling).
-- Daemon runs at `http://127.0.0.1:9977`.
-- SQLite state is created at `.routely/routely.db` inside the active workspace.
-- `routely init`, `routely sync`, `routely add`, and `routely ps` manage the local app registry.
-- `routely.yml` apps/services are loaded into the registry on `init`, `sync`, `up`, and daemon boot.
-- Command-driver apps can be registered and started locally.
-- Command-driver apps start in `depends_on` order from `routely.yml`; dependency cycles are rejected before startup.
-- Command app logs are persisted under `.routely/logs/<app>.log`.
-- `routely down`, `routely logs`, `routely restart`, and `routely doctor` provide local lifecycle controls.
-- The dashboard can start, stop, restart, open, and show recent logs for local command apps.
-- CLI commands and daemon boot reconcile stale runtime PIDs so old state does not leave apps marked running.
-- The global CLI uses the current working directory as the workspace by default. `ROUTELY_WORKSPACE_ROOT` can override it for tests or scripted runs.
-
-## Architecture
+The product direction is deliberately simple:
 
 ```text
-routely.yml ──► CLI / daemon ──► SQLite (.routely/routely.db)
-                                   ▲
-Dashboard (Next.js, :3030) ──► /api/* route handlers ──► daemon HTTP (:9977)
+Local first: routely starts every registered local app/service with one command.
+VPS second: the same registry can run always-on on one VPS.
+Deploy third: GitHub, domains, HTTPS, env, logs, backups, and notifications automate production.
+Templates later: users can pick curated apps/templates and deploy from the dashboard.
 ```
 
-The browser only ever calls the dashboard's own same-origin `/api/*` routes, which
-proxy to the daemon. The daemon stays bound to `127.0.0.1`.
+In one sentence: **one command locally, one VPS always-on, one dashboard to deploy and operate every app**.
 
-The CLI keeps the Routely installation root separate from the user workspace root:
+Routely uses 9Router as the local UX/server-lifecycle reference: a memorable command, local daemon/server, and dashboard control center. It uses Dokploy as the production-operations reference: Docker deploys, domains, HTTPS, GitHub, env, logs, monitoring, databases, backups, and notifications on a single VPS.
 
-- `ROUTELY_REPO_ROOT` points to the Routely monorepo/install root during local development.
-- `ROUTELY_WORKSPACE_ROOT` points to the app workspace whose `routely.yml` and `.routely` state should be used.
-- Without `ROUTELY_WORKSPACE_ROOT`, the workspace root is the directory where `routely` is invoked.
+Current status: public-alpha preparation. Routely is not published to npm yet, so install from this repository for now.
+
+## MVP Demos
+
+The MVP is defined by three demos:
+
+1. Local demo: register three local apps and one database, then run them all with `routely`.
+2. VPS demo: deploy one Dockerfile app to a single VPS with a domain and HTTPS.
+3. GitHub demo: push to the configured branch, auto-redeploy, and inspect failure logs when a deploy breaks.
+
+## What Works Today
+
+- Local command apps with `init`, `add`, `sync`, `up`, `ps`, `down`, `restart`, `logs`, and `doctor`.
+- Local Compose-backed database services through `routely db add <postgres|mysql|mariadb|redis|mongodb>`.
+- A dashboard at `http://localhost:3030` that talks to same-origin `/api/*` routes, not directly to the daemon from browser code.
+- A daemon at `http://127.0.0.1:9977` in local mode.
+- SQLite state under `<workspace>/.routely/routely.db` and logs under `<workspace>/.routely/logs`.
+- Production vertical slices for Dockerfile deploys, domains/proxy state, signed GitHub webhooks, env/secrets, health/metrics, production database records, local-file backups, and webhook/Discord/Telegram notifications.
+
+These production slices are alpha foundations, not a finished Dokploy replacement. Full production service installation/upgrade automation, login UI, rollback, external backup storage, marketplace templates, and broad VPS operations remain deferred.
+
+## Requirements
+
+- Node.js 20 or newer. Current development has been verified with Node.js 24.
+- npm 10 or newer.
+- Docker and Docker Compose for Compose services and production deploys.
+- A Linux VPS for always-on production mode.
+
+## Install From Source
+
+```bash
+git clone <your-routely-repo-url> routely
+cd routely
+npm install
+npm run build --workspace apps/cli
+cd apps/cli
+npm install -g .
+routely --help
+```
+
+During Routely development, the CLI records the repository path in `apps/cli/dist/dev-root.json`. User workspace files are still created where you run `routely`, unless `ROUTELY_WORKSPACE_ROOT` is set.
+
+## Local Quick Start
+
+From a clean app workspace:
+
+```bash
+export ROUTELY_REPO=/path/to/routely
+mkdir routely-demo
+cd routely-demo
+routely init
+routely add "$ROUTELY_REPO/examples/hello-command" --name hello --command "npm run dev" --port 4173 --health-path /health
+routely db add postgres --name postgres --port 5432
+routely doctor
+routely
+```
+
+Open:
+
+- Dashboard: `http://localhost:3030`
+- Example app: `http://127.0.0.1:4173`
+
+Useful local commands:
+
+```bash
+routely ps
+routely logs hello
+routely logs hello --follow
+routely restart hello
+routely down
+```
+
+Do not use port `20128`; that port is reserved for 9Router in the local development environment.
+
+## Example Config
+
+`routely init` creates a starter `routely.yml`. A minimal local workspace can look like this:
+
+```yaml
+version: 1
+name: routely-demo
+
+apps:
+  - name: web
+    path: ./apps/web
+    driver: command
+    command: npm run dev -- --port 3000
+    port: 3000
+    healthcheck:
+      path: /health
+    depends_on:
+      - postgres
+
+services:
+  - name: postgres
+    preset: postgres
+    driver: compose
+    image: postgres:16
+    port: 5432
+    internal: true
+```
+
+The same registry is the bridge to production. Local command apps become production apps when they gain source/deploy metadata, env, healthchecks, and domains.
+
+## One VPS Always-On Path
+
+This is the alpha direction for a single Linux VPS. Keep the dashboard behind private ingress or your own secure access layer while the login UI remains incomplete.
+
+1. Install Routely from source on the server.
+2. Copy `.env.example` to `.env` and set production values:
+
+```bash
+ROUTELY_ENV=production
+ROUTELY_DATA_DIR=/var/lib/routely
+ROUTELY_DAEMON_HOST=127.0.0.1
+ROUTELY_DAEMON_PORT=9977
+ROUTELY_DASHBOARD_PORT=3030
+ROUTELY_SERVER_PUBLIC_IP=<server-ip>
+```
+
+3. Initialize production state and save the printed admin token somewhere private:
+
+```bash
+routely server init --data-dir /var/lib/routely
+export ROUTELY_ADMIN_TOKEN=<token-from-server-init>
+routely server doctor
+```
+
+4. Register a Dockerfile app and deploy it:
+
+```bash
+routely add /path/to/dockerfile-app --name web --driver dockerfile --port 3000 --health-path /health
+routely deploy web --watch
+```
+
+5. Add a domain after DNS points to the VPS:
+
+```bash
+routely domain root example.com
+routely domain add web web.example.com
+routely domain verify web.example.com
+```
+
+Domain routes are generated for the latest successful Dockerfile deployment. TLS status is conservative: `issuing` means Routely generated the HTTPS route for Traefik/ACME; Routely does not fake certificate success.
+
+## GitHub Auto Deploy
+
+Set GitHub App configuration on the server side only:
+
+```bash
+ROUTELY_GITHUB_APP_ID=
+ROUTELY_GITHUB_PRIVATE_KEY=
+ROUTELY_GITHUB_WEBHOOK_SECRET=
+ROUTELY_GITHUB_CLIENT_ID=
+ROUTELY_GITHUB_CLIENT_SECRET=
+```
+
+Then register metadata and connect an app:
+
+```bash
+routely github status
+routely github installation add 123456 --account your-github-login
+routely github repo add owner/repo --branch main --installation-id 123456
+routely github connect web owner/repo --branch main
+```
+
+`POST /github/webhook` validates `X-Hub-Signature-256`, deduplicates delivery IDs, and triggers Dockerfile deploys for connected repo/branch pushes.
 
 ## Development
 
@@ -47,48 +195,32 @@ npm run dev
 Useful checks:
 
 ```bash
-npm run build --workspace apps/cli
-npm run test --workspace apps/cli
 npm run lint
+npm run test --workspace apps/cli
+npm run test --workspace apps/web
+npx tsc --noEmit --project apps/web/tsconfig.json
+node --check apps/daemon/src/server.js
 ```
 
 After changing the CLI, rebuild and reinstall the local global command:
 
 ```bash
+npm run build --workspace apps/cli
 cd apps/cli
-npm run build
-npm i -g .
+npm install -g .
 ```
 
-## CLI
+## Current Limitations
 
-```bash
-routely init
-routely add /path/to/app --name web --command "npm run dev" --port 3000
-routely add /path/to/docker-app --name web-prod --driver dockerfile --port 3000 --health-path /health
-routely sync   # load routely.yml into the registry
-routely ps
-routely logs web --follow
-routely restart web
-routely down
-routely doctor
-routely
-```
+- Routely is not published to npm yet.
+- Full production service installation/upgrade automation is not finished.
+- The dashboard login UI is not complete; production daemon APIs require `ROUTELY_ADMIN_TOKEN`.
+- Static deploys, buildpack/Nixpacks/Railpack deploys, cancel/rollback actions, external backup storage, destructive restore automation, public marketplace templates, teams/RBAC, Kubernetes, public multi-server UX, enterprise features, email notifications, and broad VPS operations are deferred.
+- GitHub App OAuth install callback, live GitHub repo/branch fetching, and commit status updates are deferred.
+- Backup files are local to the configured production data directory.
+- SQLite is the single-node state store; this is intentional for the MVP and constrains clustering/multi-server behavior.
+- Web production build currently has a known Next.js/Turbopack reporting caveat documented in `docs/09-current-status.md`.
 
-### Daemon HTTP endpoints
+## API Shape
 
-```text
-GET    /health        daemon status + app list
-GET    /apps          list registered apps
-POST   /apps          upsert an app
-GET    /apps/:id      fetch one app
-DELETE /apps/:id      remove an app
-POST   /apps/:id/start
-POST   /apps/:id/stop
-POST   /apps/:id/restart
-GET    /apps/:id/logs
-```
-
-The dashboard mirrors these under same-origin `/api/*` routes.
-
-Do not use port `20128`; that port is reserved for 9Router in the local development environment.
+The dashboard proxies daemon operations through same-origin `/api/*` routes. The daemon exposes endpoints for apps, deployments, domains, GitHub, env, health, metrics, databases, backups, notifications, and server status. See `docs/06-interfaces.md` and `docs/10-implementation-backlog.md` for the current map.
