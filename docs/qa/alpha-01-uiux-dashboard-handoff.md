@@ -33,6 +33,33 @@ For public alpha, hide non-demo drivers and broad presets from primary create/ed
 - VPS/GitHub workflow shape is present: Deployments, Domains, and GitHub are split into dedicated modules with readiness cards, history rows, and log/status affordances.
 - Remaining risk is not missing navigation; it is semantic consistency. Some code paths still treat `issuing` TLS as OK, show `locked` labels for modules that are active demo surfaces, and offer broad create/edit choices that exceed the public-alpha demos.
 
+## 2026-06-21 UI/UX Review Addendum
+
+Scope reviewed: local dashboard demo-critical workflows, copy, unsupported/deferred controls, responsive/accessibility expectations, and real-data honesty. This pass did not edit `apps/web` because dashboard code ownership is Frontend unless explicitly coordinated.
+
+Accepted UI/UX direction now visible in the local dashboard code:
+
+- Primary create/edit choices are narrowed to alpha-relevant app types, drivers, and presets: `app`, `database`, `worker`; `command`, `compose`, `dockerfile`; and common local/database presets.
+- Deployments now show Docker, server doctor, data-dir, auth, and failed-count readiness cards, and deploy buttons expose concrete blocker labels such as `daemon offline`, `Docker not ready`, `data dir pending`, `auth missing`, and `server doctor check`.
+- Domains now present root, hostname, DNS, proxy, TLS, and target as separate readiness cards in the main Domains module. This is the right public-alpha information architecture for HTTPS honesty.
+- GitHub configuration separates App ID, Client ID, webhook secret, private key, repo connection, branch, auto-deploy, and deliveries. This supports the GitHub demo diagnosis flow.
+- Databases, backups, and notifications include explicit deferred/safety copy for restore automation, external storage, email, raw targets, and loopback/private notification rejection.
+
+Remaining UI/UX blockers for Frontend:
+
+- App inspector deploy control still only checks `driver === "dockerfile"`, path, enabled, and daemon connectivity. It should use the same deploy blocker semantics as Apps and Deployments so server doctor, Docker, data-dir, and auth failures are visible everywhere a deploy button appears.
+- App inspector domain/TLS copy still treats `issuing` as success-colored and summarizes HTTPS as `route generated` when TLS is `issuing` or `active`. `issuing` must remain warning/pending, and HTTPS should not read as complete until TLS is `active`.
+- Server foundation still says production infrastructure actions are `locked` and falls back to `deployments/domains/https/github/backups locked`. For public alpha this conflicts with active demo modules. Use `pending server readiness`, `requires server doctor`, or `deferred for public alpha` according to the actual state.
+- The unused legacy combined data/deploy panels remain in `dashboard-client.tsx` with stale TLS and `locked` copy. Remove them after Frontend ownership confirmation so future edits do not revive inconsistent semantics.
+- Inspector tabs use a fixed 3-column mobile grid and 7-column wider grid. At 390px, verify labels do not crowd or overlap; if they do, make the tab row horizontally scrollable with stable button widths.
+- Overview urgent next actions do not yet include DNS mismatch, TLS failed/pending, missing GitHub webhook secret, or notification delivery failure. Add those as attention items before release QA if Backend exposes the state consistently.
+
+Real-data honesty criteria for QA/Frontend:
+
+- No module may render mock success, placeholder readiness, or enabled production controls when `/api/*` returns missing, stale, or failed state.
+- `generated`, `pending`, `issuing`, `active`, `failed`, `ignored`, `disabled`, `deferred`, and `locked` must mean different things. Do not use success color for generated proxy config or pending certificate state.
+- Demo screenshots should include at least one non-happy path: daemon offline, failed app/logs, failed deployment phase, DNS/TLS pending or failed, or ignored GitHub delivery.
+
 ## Component And State Spec
 
 - Overview: show urgent next actions before secondary history. Treat missing daemon, failed app, failed deployment, DNS mismatch, TLS failed/pending, missing GitHub webhook secret, and failed backup/notification as attention items.
