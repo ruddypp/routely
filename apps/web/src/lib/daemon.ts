@@ -28,12 +28,14 @@ export type DaemonApp = {
   dependsOn?: string[];
   healthcheck?: { path: string | null; expected_status: number | null } | null;
   domains?: string[];
-  source?: { type: string | null; repo: string | null; branch: string | null } | null;
+  source?: { type: string | null; repo: string | null; branch: string | null; auto_deploy?: { enabled: boolean; branches: string[] } } | null;
   image?: string | null;
   internal?: boolean;
   volumes?: string[];
   composeFile?: string | null;
   composeService?: string | null;
+  needsRestart?: boolean;
+  needsRedeploy?: boolean;
   enabled: boolean;
   status: string;
   createdAt: string;

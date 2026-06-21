@@ -1,120 +1,116 @@
 import { describe, expect, it } from "vitest";
-import { appFormFromDaemonApp, appFormPayload, blankAppForm, type AppFormSource } from "../../lib/app-registry-form";
+import { appFormFromDaemonApp, appFormPayload, appFormValidationError, blankAppForm, type AppFormSource } from "../../lib/app-registry-form";
 
-describe("dashboard app registry form payload", () => {
-  it("serializes Compose-first app registry fields", () => {
+const baseApp: AppFormSource = {
+  name: "api",
+  type: "app",
+  preset: "custom",
+  driver: "command",
+  path: "/srv/api",
+  command: "npm run dev",
+  install: null,
+  dev: "npm run dev",
+  build: null,
+  start: null,
+  env: { NODE_ENV: "development" },
+  port: 3000,
+  dependsOn: ["postgres"],
+  healthcheck: { path: "/health", expected_status: 200 },
+  domains: ["api.example.test"],
+  source: null,
+  image: null,
+  internal: false,
+  volumes: [],
+  composeFile: null,
+  composeService: null,
+  enabled: true
+};
+
+describe("app registry form payload", () => {
+  it("normalizes Compose registry fields without retaining command-driver scripts", () => {
     const payload = appFormPayload({
       ...blankAppForm,
-      name: "api",
-      type: "app",
-      preset: "express",
+      name: "postgres",
+      type: "database",
+      preset: "postgres",
       driver: "compose",
-      path: "./apps/api",
-      port: "4000",
+      command: "npm run dev",
+      install: "npm install",
+      dev: "npm run dev",
+      build: "npm run build",
+      start: "npm run start",
+      env: "POSTGRES_DB=app",
+      port: "5432",
       enabled: false,
-      dependsOn: "postgres, redis",
-      healthcheckPath: "/health",
+      dependsOn: "redis, worker",
+      healthcheckPath: "/ready",
       healthcheckStatus: "204",
-      domains: "api.example.test, api.localhost",
+      domains: "db.internal.test",
       sourceRepo: "owner/api",
       sourceBranch: "main",
-      image: "ghcr.io/example/api:latest",
-      env: "PUBLIC_API_URL=https://api.example.test\nFEATURE_FLAG=true",
-      volumes: "api-cache:/cache",
-      composeFile: "compose.yml",
-      composeService: "api"
-    });
-
-    expect(payload).toMatchObject({
-      name: "api",
-      type: "app",
-      preset: "express",
-      driver: "compose",
-      path: "./apps/api",
-      port: 4000,
-      enabled: false,
-      depends_on: ["postgres", "redis"],
-      healthcheck: { path: "/health", expected_status: 204 },
-      domains: ["api.example.test", "api.localhost"],
-      source: { type: "github", repo: "owner/api", branch: "main" },
-      image: "ghcr.io/example/api:latest",
-      env: { PUBLIC_API_URL: "https://api.example.test", FEATURE_FLAG: "true" },
-      volumes: ["api-cache:/cache"],
-      compose_file: "compose.yml",
-      compose_service: "api"
-    });
-  });
-
-  it("omits redacted stored env values so edit saves preserve daemon state", () => {
-    const form = appFormFromDaemonApp(appSource({
-      type: "database",
-      driver: "compose",
-      env: {},
-      envKeys: ["POSTGRES_DB", "POSTGRES_PASSWORD"],
+      sourceAutoDeployConfigured: true,
+      sourceAutoDeployEnabled: false,
+      sourceAutoDeployBranches: "main, release",
+      image: "postgres:16",
       internal: true,
-      composeFile: "compose.yml",
-      composeService: "postgres",
-      enabled: false
-    }));
+      volumes: "postgres_data:/var/lib/postgresql/data",
+      composeFile: "./compose.yml",
+      composeService: "postgres"
+    });
 
-    const payload = appFormPayload({ ...form, port: "5432" });
-
-    expect(form.envLocked).toBe(true);
-    expect(form.env).toContain("POSTGRES_PASSWORD=[stored]");
-    expect(payload).not.toHaveProperty("env");
     expect(payload).toMatchObject({
-      enabled: false,
+      name: "postgres",
+      type: "database",
+      preset: "postgres",
+      driver: "compose",
+      command: null,
+      install: null,
+      dev: null,
+      build: null,
+      start: null,
+      env: { POSTGRES_DB: "app" },
       port: 5432,
-      compose_file: "compose.yml",
+      enabled: false,
+      depends_on: ["redis", "worker"],
+      healthcheck: { path: "/ready", expected_status: 204 },
+      domains: ["db.internal.test"],
+      source: {
+        type: "github",
+        repo: "owner/api",
+        branch: "main",
+        auto_deploy: { enabled: false, branches: ["main", "release"] }
+      },
+      image: "postgres:16",
+      internal: true,
+      volumes: ["postgres_data:/var/lib/postgresql/data"],
+      compose_file: "./compose.yml",
       compose_service: "postgres"
     });
   });
 
-  it("preserves GitHub auto-deploy metadata when editing a source app", () => {
-    const form = appFormFromDaemonApp(appSource({
-      source: {
-        type: "github",
-        repo: "owner/api",
-        branch: "main",
-        auto_deploy: { enabled: false, branches: ["main", "release"] }
-      }
-    }));
+  it("omits env on locked edit forms so stored metadata is preserved", () => {
+    const form = appFormFromDaemonApp({
+      ...baseApp,
+      env: {},
+      envKeys: ["DATABASE_URL", "NODE_ENV"],
+      source: { type: "github", repo: "owner/api", branch: "main", auto_deploy: { enabled: true, branches: ["main"] } }
+    });
+    const payload = appFormPayload(form);
 
-    expect(appFormPayload(form)).toMatchObject({
-      source: {
-        type: "github",
-        repo: "owner/api",
-        branch: "main",
-        auto_deploy: { enabled: false, branches: ["main", "release"] }
-      }
+    expect(form.envLocked).toBe(true);
+    expect(form.env).toContain("DATABASE_URL=[stored]");
+    expect(payload).not.toHaveProperty("env");
+    expect(payload.source).toEqual({
+      type: "github",
+      repo: "owner/api",
+      branch: "main",
+      auto_deploy: { enabled: true, branches: ["main"] }
     });
   });
-});
 
-function appSource(overrides: Partial<AppFormSource> = {}): AppFormSource {
-  return {
-    name: "api",
-    type: "app",
-    preset: "custom",
-    driver: "command",
-    path: "/workspace/api",
-    command: "npm run dev",
-    install: null,
-    dev: "npm run dev",
-    build: null,
-    start: null,
-    env: { NODE_ENV: "development" },
-    port: 4000,
-    dependsOn: [],
-    healthcheck: null,
-    domains: [],
-    source: null,
-    image: null,
-    internal: false,
-    volumes: [],
-    composeFile: null,
-    composeService: null,
-    enabled: true,
-    ...overrides
-  };
-}
+  it("returns actionable validation errors for unsupported incomplete driver metadata", () => {
+    expect(appFormValidationError({ ...blankAppForm, name: "api", driver: "command" })).toBe("Command driver needs a command, dev, or start command.");
+    expect(appFormValidationError({ ...blankAppForm, name: "api", driver: "compose" })).toBe("Compose driver needs a Compose service name.");
+    expect(appFormValidationError({ ...blankAppForm, name: "api", command: "npm run dev", sourceBranch: "main" })).toBe("Source repo is required when source branch or auto-deploy metadata is set.");
+  });
+});

@@ -480,7 +480,7 @@ function serverCheck(server: DaemonServerStatus | null, id: string): DaemonServe
 function deployBlockReason(app: DaemonApp, connected: boolean, server: DaemonServerStatus | null): string | null {
   if (!connected) return "daemon offline";
   if (!app.enabled) return "resource disabled";
-  if (!appCanRedeploy(app)) return "Dockerfile deploy only";
+  if (!appCanRedeploy(app)) return "deploy deferred for this driver";
   if (!app.path) return "Dockerfile path missing";
   if (!server) return "server status unavailable";
   if (serverCheck(server, "docker")?.status !== "ok") return "Docker not ready";
@@ -1346,6 +1346,14 @@ export default function DashboardClient() {
               />
             ) : null}
 
+            {activeModule === "server" ? (
+              <ServerFoundationPanel
+                connected={connected}
+                error={serverError}
+                server={serverStatus}
+              />
+            ) : null}
+
             {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} deployingByAppId={deployingByAppId} deploymentsByAppId={latestDeploymentByAppId} disabledCount={disabledCount} domainsByAppId={domainsByAppId} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} server={serverStatus} serviceResources={serviceResources} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onDeploy={(app) => void deployApp(app)} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onSelect={setSelectedAppId} /> : null}
 
             {activeModule === "apps" || activeModule === "env" || activeModule === "logs" || activeModule === "health" ? <AppOperationsModule activeTab={activeModule === "apps" ? undefined : appModuleTabs[activeModule]} apps={apps} appResources={appResources} app={selectedApp} selectedAppId={selectedAppId} connected={connected} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} logs={logs} logsLoading={logsLoading} logsError={logsError} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} module={activeModule} server={serverStatus} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onLogs={(app) => void loadLogs(app)} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} /> : null}
@@ -1481,8 +1489,8 @@ function DeploymentsModule({ apps, connected, deployments, deployingByAppId, err
       {error ? <Alert title="Deployment action failed" message={error} /> : null}
       <div className="grid gap-0 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
         <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
-          <ResourceSection title="Deployable Dockerfile apps" count={apps.length} />
-          {apps.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No app uses the Dockerfile driver yet. Edit an app in Apps when its Dockerfile path is stable.</div> : null}
+          <ResourceSection title="Dockerfile deploy bridge" count={apps.length} />
+          {apps.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No app uses the verified Dockerfile bridge yet. Compose production parity is deferred until the backend path exists.</div> : null}
           {apps.map((app) => {
             const latest = latestByAppId.get(app.id);
             const deploying = Boolean(deployingByAppId[app.id]);
@@ -1512,6 +1520,7 @@ function DeploymentsModule({ apps, connected, deployments, deployingByAppId, err
               </div>
             );
           })}
+          <DeferredCapabilityList items={["Compose production deploy parity deferred", "Preview deployments deferred", "Rollback/cancel controls deferred"]} />
         </div>
         <div className="min-w-0"><ResourceSection title="Deployment history" count={deployments.length} />{deployments.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Deployment history appears after the first Dockerfile deploy.</div> : deployments.map((deployment) => <DeploymentSummaryRow key={deployment.id} deployment={deployment} onLogs={() => onLogs(deployment)} />)}</div>
       </div>
@@ -1532,7 +1541,7 @@ function DomainsModule({ apps, connected, domains, domainsError, domainsMeta, do
           <ResourceSection title="Add hostname" count={apps.length} />
           <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]"><UiSelect value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} label="App"><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</UiSelect><Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} /><div className="flex items-end"><PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton></div></div></div>
         </div>
-        <div className="min-w-0"><ResourceSection title="Hostnames" count={domains.length} />{domains.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS verification creates proxy route state.</div> : domains.map((domain) => { const action = domainActionByHostname[domain.hostname]; const route = proxyRoutes.find((item) => item.domainId === domain.id); const steps = [{ label: "Root", value: domainsMeta.rootDomain || "unset", tone: domainStepTone(domain, route, "root", Boolean(domainsMeta.rootDomain)) }, { label: "Host", value: domain.hostname, tone: domainStepTone(domain, route, "hostname", Boolean(domainsMeta.rootDomain)) }, { label: "DNS", value: domain.dnsStatus, tone: domainStepTone(domain, route, "dns", Boolean(domainsMeta.rootDomain)) }, { label: "Proxy", value: route?.enabled ? "ready" : "pending", tone: domainStepTone(domain, route, "proxy", Boolean(domainsMeta.rootDomain)) }, { label: "TLS", value: domain.tlsStatus, tone: domainStepTone(domain, route, "tls", Boolean(domainsMeta.rootDomain)) }, { label: "Target", value: route?.targetUrl || (domain.targetPort ? `:${domain.targetPort}` : "pending"), tone: domainStepTone(domain, route, "target", Boolean(domainsMeta.rootDomain)) }]; return <div key={domain.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{domain.hostname}</p><p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {route?.targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p></div><StatusBadge status={domain.status} /></div><div className="mt-3 grid gap-2 sm:grid-cols-3">{steps.map((step) => <ReadinessCard key={step.label} label={step.label} value={step.value} status={step.tone} />)}</div>{domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton><ActionLink href={domain.tlsStatus === "active" ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink><PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton></div></div>; })}</div>
+        <div className="min-w-0"><ResourceSection title="Hostnames" count={domains.length} />{domains.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS verification creates proxy route state; generated routes are not certificate success.</div> : domains.map((domain) => { const action = domainActionByHostname[domain.hostname]; const route = proxyRoutes.find((item) => item.domainId === domain.id); const steps = [{ label: "Root", value: domainsMeta.rootDomain || "unset", tone: domainStepTone(domain, route, "root", Boolean(domainsMeta.rootDomain)) }, { label: "Host", value: domain.hostname, tone: domainStepTone(domain, route, "hostname", Boolean(domainsMeta.rootDomain)) }, { label: "DNS", value: domain.dnsStatus, tone: domainStepTone(domain, route, "dns", Boolean(domainsMeta.rootDomain)) }, { label: "Proxy", value: route?.enabled ? "generated" : "pending", tone: domainStepTone(domain, route, "proxy", Boolean(domainsMeta.rootDomain)) }, { label: "TLS", value: domain.tlsStatus, tone: domainStepTone(domain, route, "tls", Boolean(domainsMeta.rootDomain)) }, { label: "Target", value: route?.targetUrl || (domain.targetPort ? `:${domain.targetPort}` : "pending"), tone: domainStepTone(domain, route, "target", Boolean(domainsMeta.rootDomain)) }]; return <div key={domain.id} className="border-b border-white/5 px-4 py-3"><div className="flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate font-mono text-sm font-bold">{domain.hostname}</p><p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {route?.targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p></div><StatusBadge status={domain.status} /></div><div className="mt-3 grid gap-2 sm:grid-cols-3">{steps.map((step) => <ReadinessCard key={step.label} label={step.label} value={step.value} status={step.tone} />)}</div>{domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}<div className="mt-3 flex flex-wrap gap-2"><PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton><ActionLink href={domain.tlsStatus === "active" ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink><PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton></div></div>; })}</div>
       </div>
     </section>
   );
@@ -1569,6 +1578,7 @@ function GithubModule({ apps, connected, github, githubError, githubForm, github
               <input type="checkbox" checked={githubForm.autoDeploy} onChange={(event) => onGithubFormChange({ ...githubForm, autoDeploy: event.target.checked })} disabled={githubSaving} className="h-4 w-4 accent-[var(--accent)]" />
             </label>
           </div>
+          <DeferredCapabilityList items={["OAuth install callback deferred", "Live repo browsing deferred", "Commit status updates deferred", "Preview deployments deferred"]} />
         </div>
         <div className="min-w-0">
           <ResourceSection title="Repositories" count={github?.repositories.length || 0} />
@@ -1700,6 +1710,7 @@ function BackupRunLedgerRow({ run }: { run: DaemonBackupRun }) {
 function DeferredCapabilityList({ items }: { items: string[] }) {
   return (
     <div className="border-t border-white/5 bg-black/20 px-4 py-3">
+      <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Deferred capabilities</p>
       <div className="flex flex-wrap gap-2">
         {items.map((item) => <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/65">{item}</span>)}
       </div>
@@ -2579,12 +2590,18 @@ function AppForm({
   saving: boolean;
 }) {
   const update = (patch: Partial<AppFormState>) => onChange({ ...form, ...patch });
+  const commandFieldsEnabled = form.driver === "command";
+  const composeFieldsEnabled = form.driver === "compose";
+  const sourceIntentConfigured = form.sourceRepo.trim() || form.sourceBranch.trim() || form.sourceAutoDeployConfigured;
   const portInvalid = form.port.trim() !== "" && (!Number.isInteger(Number(form.port)) || Number(form.port) <= 0);
   const healthStatusInvalid = form.healthcheckStatus.trim() !== "" && (!Number.isInteger(Number(form.healthcheckStatus)) || Number(form.healthcheckStatus) <= 0);
   const nameMissing = form.name.trim() === "";
+  const sourceMissing = Boolean((form.sourceBranch.trim() || form.sourceAutoDeployConfigured) && !form.sourceRepo.trim());
   const envHelper = form.envLocked
     ? "Stored env keys are preserved by this form; edit values in Env/Secrets."
     : "Portable non-secret KEY=value metadata. Store secrets in Env/Secrets.";
+  const commandHelper = commandFieldsEnabled ? "Saved for local command-driver resources." : "Deferred for this driver; not saved.";
+  const composeHelper = composeFieldsEnabled ? "Saved for Compose-backed apps and services." : "Only saved for compose-driver resources.";
 
   return (
     <form onSubmit={onSubmit} className="border-b border-white/5 bg-black/25 px-4 py-4">
@@ -2600,30 +2617,48 @@ function AppForm({
       </div>
 
       {error ? <div className="mt-3 rounded-md bg-negative/10 px-3 py-2 text-sm text-negative shadow-[0_0_0_1px_rgba(243,114,127,0.22)_inset]">{error}</div> : null}
+      <div className="mt-3 rounded-md border border-info/20 bg-info-soft px-3 py-2 text-xs text-foreground-secondary">
+        Driver-scoped fields are saved only when their driver supports them. Domains and GitHub source are registry intent; live DNS/proxy and repository connection stay in their dedicated modules.
+      </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Field label="Name" value={form.name} onChange={(value) => update({ name: value })} required error={nameMissing && error ? "Required" : undefined} disabled={saving} />
         <SelectField label="Type" value={form.type} values={APP_TYPES} onChange={(value) => update({ type: value })} disabled={saving} />
         <SelectField label="Preset" value={form.preset} values={APP_PRESETS} onChange={(value) => update({ preset: value })} disabled={saving} />
-        <SelectField label="Driver" value={form.driver} values={APP_DRIVERS} onChange={(value) => update({ driver: value })} disabled={saving} />
+        <SelectField label="Driver" value={form.driver} values={APP_DRIVERS} onChange={(value) => update(appDriverPatch(value))} disabled={saving} />
         <Field label="Path" value={form.path} onChange={(value) => update({ path: value })} mono wide disabled={saving} placeholder="/path/to/app" />
-        <Field label="Command" value={form.command} onChange={(value) => update({ command: value, dev: value || form.dev })} mono wide disabled={saving} placeholder="npm run dev" />
-        <Field label="Install" value={form.install} onChange={(value) => update({ install: value })} mono disabled={saving} placeholder="npm install" />
-        <Field label="Dev" value={form.dev} onChange={(value) => update({ dev: value, command: form.command || value })} mono disabled={saving} placeholder="npm run dev" />
-        <Field label="Build" value={form.build} onChange={(value) => update({ build: value })} mono disabled={saving} placeholder="npm run build" />
-        <Field label="Start" value={form.start} onChange={(value) => update({ start: value })} mono disabled={saving} placeholder="npm run start" />
+        <Field label="Command" value={form.command} onChange={(value) => update({ command: value, dev: value || form.dev })} mono wide disabled={saving || !commandFieldsEnabled} helper={commandHelper} placeholder="npm run dev" />
+        <Field label="Install" value={form.install} onChange={(value) => update({ install: value })} mono disabled={saving || !commandFieldsEnabled} helper={commandHelper} placeholder="npm install" />
+        <Field label="Dev" value={form.dev} onChange={(value) => update({ dev: value, command: form.command || value })} mono disabled={saving || !commandFieldsEnabled} helper={commandHelper} placeholder="npm run dev" />
+        <Field label="Build" value={form.build} onChange={(value) => update({ build: value })} mono disabled={saving || !commandFieldsEnabled} helper={commandHelper} placeholder="npm run build" />
+        <Field label="Start" value={form.start} onChange={(value) => update({ start: value })} mono disabled={saving || !commandFieldsEnabled} helper={commandHelper} placeholder="npm run start" />
         <Field label="Port" value={form.port} onChange={(value) => update({ port: value })} type="number" error={portInvalid ? "Positive integer" : undefined} disabled={saving} placeholder="3000" />
         <Field label="Depends on" value={form.dependsOn} onChange={(value) => update({ dependsOn: value })} disabled={saving} placeholder="api, postgres" />
-        <Field label="Image" value={form.image} onChange={(value) => update({ image: value })} mono disabled={saving} placeholder="postgres:16" />
-        <Field label="Compose service" value={form.composeService} onChange={(value) => update({ composeService: value })} mono disabled={saving} placeholder="postgres" />
-        <Field label="Compose file" value={form.composeFile} onChange={(value) => update({ composeFile: value })} mono wide disabled={saving} placeholder="generated if empty" />
+        <Field label="Image" value={form.image} onChange={(value) => update({ image: value })} mono disabled={saving || !composeFieldsEnabled} helper={composeHelper} placeholder="postgres:16" />
+        <Field label="Compose service" value={form.composeService} onChange={(value) => update({ composeService: value })} mono disabled={saving || !composeFieldsEnabled} helper={composeHelper} placeholder="postgres" />
+        <Field label="Compose file" value={form.composeFile} onChange={(value) => update({ composeFile: value })} mono wide disabled={saving || !composeFieldsEnabled} helper={composeHelper} placeholder="generated if empty" />
         <Field label="Health path" value={form.healthcheckPath} onChange={(value) => update({ healthcheckPath: value })} disabled={saving} placeholder="/" />
         <Field label="Health status" value={form.healthcheckStatus} onChange={(value) => update({ healthcheckStatus: value })} type="number" error={healthStatusInvalid ? "Positive integer" : undefined} disabled={saving} placeholder="200" />
-        <Field label="Domains" value={form.domains} onChange={(value) => update({ domains: value })} disabled={saving} placeholder="local.test" />
-        <Field label="Source repo" value={form.sourceRepo} onChange={(value) => update({ sourceRepo: value })} disabled={saving} placeholder="owner/repo" />
+        <Field label="Domains" value={form.domains} onChange={(value) => update({ domains: value })} disabled={saving} helper="Registry intent only; Domains module verifies DNS/proxy." placeholder="local.test" />
+        <Field label="Source repo" value={form.sourceRepo} onChange={(value) => update({ sourceRepo: value })} error={sourceMissing ? "Required" : undefined} disabled={saving} helper="GitHub metadata; connect webhooks in GitHub module." placeholder="owner/repo" />
         <Field label="Source branch" value={form.sourceBranch} onChange={(value) => update({ sourceBranch: value })} disabled={saving} placeholder="main" />
+        <label className={`flex items-center justify-between rounded-md bg-surface-raised px-3 py-2 ${INSET_RING} ${saving ? "opacity-60" : ""}`}>
+          <span>
+            <span className="block text-xs font-bold">Auto-deploy metadata</span>
+            <span className="text-[11px] text-muted">Preserve source intent; webhook setup is separate</span>
+          </span>
+          <input checked={form.sourceAutoDeployConfigured} onChange={(event) => update({ sourceAutoDeployConfigured: event.target.checked })} disabled={saving || !sourceIntentConfigured} type="checkbox" className="h-4 w-4 accent-[var(--accent)]" />
+        </label>
+        <label className={`flex items-center justify-between rounded-md bg-surface-raised px-3 py-2 ${INSET_RING} ${saving ? "opacity-60" : ""}`}>
+          <span>
+            <span className="block text-xs font-bold">Auto-deploy enabled</span>
+            <span className="text-[11px] text-muted">Saved only with auto-deploy metadata</span>
+          </span>
+          <input checked={form.sourceAutoDeployEnabled} onChange={(event) => update({ sourceAutoDeployEnabled: event.target.checked })} disabled={saving || !form.sourceAutoDeployConfigured} type="checkbox" className="h-4 w-4 accent-[var(--accent)]" />
+        </label>
+        <Field label="Auto-deploy branches" value={form.sourceAutoDeployBranches} onChange={(value) => update({ sourceAutoDeployBranches: value })} disabled={saving || !form.sourceAutoDeployConfigured} helper="Comma-separated branch intent." placeholder="main" />
         <TextAreaField label="Env metadata" value={form.env} onChange={(value) => update({ env: value })} mono disabled={saving || form.envLocked} helper={envHelper} placeholder={"NODE_ENV=development"} />
-        <TextAreaField label="Volumes" value={form.volumes} onChange={(value) => update({ volumes: value })} mono disabled={saving} placeholder={"postgres_data:/var/lib/postgresql/data"} />
+        <TextAreaField label="Volumes" value={form.volumes} onChange={(value) => update({ volumes: value })} mono disabled={saving || !composeFieldsEnabled} helper={composeHelper} placeholder={"postgres_data:/var/lib/postgresql/data"} />
         <label className={`flex items-center justify-between rounded-md bg-surface-raised px-3 py-2 ${INSET_RING} ${saving ? "opacity-60" : ""}`}>
           <span>
             <span className="block text-xs font-bold">Enabled</span>
@@ -2636,7 +2671,7 @@ function AppForm({
             <span className="block text-xs font-bold">Internal service</span>
             <span className="text-[11px] text-muted">Do not expose host port in generated Compose</span>
           </span>
-          <input checked={form.internal} onChange={(event) => update({ internal: event.target.checked })} disabled={saving} type="checkbox" className="h-4 w-4 accent-[var(--accent)]" />
+          <input checked={form.internal} onChange={(event) => update({ internal: event.target.checked })} disabled={saving || !composeFieldsEnabled} type="checkbox" className="h-4 w-4 accent-[var(--accent)]" />
         </label>
       </div>
     </form>
@@ -2661,6 +2696,7 @@ function TextAreaField({ disabled, helper, label, mono, onChange, placeholder, v
 function Field({
   disabled,
   error,
+  helper,
   label,
   mono,
   onChange,
@@ -2672,6 +2708,7 @@ function Field({
 }: {
   disabled?: boolean;
   error?: string;
+  helper?: string;
   label: string;
   mono?: boolean;
   onChange: (value: string) => void;
@@ -2685,6 +2722,7 @@ function Field({
     <UiField
       disabled={disabled}
       error={error}
+      helper={helper}
       label={label}
       mono={mono}
       onChange={(event) => onChange(event.target.value)}

@@ -171,6 +171,54 @@ describe("POST /api/apps", () => {
       })
     );
   });
+
+  it("passes Compose-first registry DTO fields through to the daemon", async () => {
+    const payload = {
+      name: "postgres",
+      type: "database",
+      preset: "postgres",
+      driver: "compose",
+      path: null,
+      command: null,
+      install: null,
+      dev: null,
+      build: null,
+      start: null,
+      env: { POSTGRES_DB: "app" },
+      port: 5432,
+      enabled: false,
+      depends_on: ["redis"],
+      healthcheck: { path: "/ready", expected_status: 200 },
+      domains: ["db.example.test"],
+      source: { type: "github", repo: "owner/db", branch: "main", auto_deploy: { enabled: true, branches: ["main"] } },
+      image: "postgres:16",
+      internal: true,
+      volumes: ["postgres_data:/var/lib/postgresql/data"],
+      compose_file: "./compose.yml",
+      compose_service: "postgres"
+    };
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ app: { ...app, ...payload, id: 99, composeFile: "./compose.yml", composeService: "postgres" } }), {
+        status: 201,
+        headers: { "content-type": "application/json" }
+      })
+    );
+
+    const request = new Request("http://localhost/api/apps", {
+      method: "POST",
+      body: JSON.stringify(payload)
+    });
+    const response = await POST(request);
+
+    expect(response.status).toBe(201);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://127.0.0.1:9977/apps",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify(payload)
+      })
+    );
+  });
 });
 
 describe("PATCH /api/apps/:id", () => {
