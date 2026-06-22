@@ -18,6 +18,8 @@ This file is the domain glossary for agents working on Routely. Keep it free of 
 
 **Compose-backed app** — A managed app whose runtime is described as a Compose project so Routely can use one operational model locally and on one VPS.
 
+**Stack preset** — A bounded supported path for bringing a common app stack into Routely without pretending every possible framework is automatic. A stack preset can guide command, Compose, Dockerfile, static, Node, or database-backed apps while unsupported stacks stay explicit and honest.
+
 **Local runner** — The local workflow started by `routely`, responsible for starting registered local apps/services, showing status, streaming logs, and stopping managed processes on exit.
 
 **Workspace root** — The user's active app workspace where `routely.yml` and local `.routely/` state apply.
