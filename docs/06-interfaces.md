@@ -117,7 +117,7 @@ Canonical backend production/auth contract:
 - `ROUTELY_SERVER_MODE=production` is the explicit daemon production-mode env contract for one-VPS processes.
 - Persisted `routely server init` foundation state also makes a restarted daemon report production mode.
 - `/auth/status` exposes the frontend-safe auth signal as top-level `production`, `mode`, `requiresAuth`, and `auth.required`/`configured` without returning the admin token, token hash, or token salt.
-- `/server/status` mirrors the same production/auth state under `server.production`, `server.mode`, and `server.auth.required`/`configured` for diagnostic server status views.
+- Authenticated `/server/status` mirrors the same production/auth state under `server.production`, `server.mode`, and `server.auth.required`/`configured` for diagnostic server status views.
 - Frontend route handlers should treat `requiresAuth === true`, `production === true`, or `server.auth.required === true` as a production-protected backend state and preserve caller admin-token auth before proxying private daemon operations.
 
 Dashboard implementation rules:

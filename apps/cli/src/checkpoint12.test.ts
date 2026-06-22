@@ -162,6 +162,12 @@ describe("QA regression fixes", () => {
     const diagnostic = await jsonRequest(baseUrl, "/server/status");
     expect(diagnostic.response.status).toBe(401);
 
+    const authorizedDiagnostic = await jsonRequest(baseUrl, "/server/status", {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
+    expect(authorizedDiagnostic.response.status).toBe(200);
+    expect(authorizedDiagnostic.body.server.production).toBe(true);
+
     const missing = await jsonRequest(baseUrl, "/apps");
     expect(missing.response.status).toBe(401);
     expect(missing.body.error).toContain("admin token");
@@ -251,16 +257,7 @@ describe("QA regression fixes", () => {
       body: JSON.stringify({ domain: "example.com" })
     });
 
-    expect(status.response.status).toBe(200);
-    expect(status.body.server).toMatchObject({
-      mode: "production",
-      production: true,
-      auth: {
-        required: true,
-        configured: true,
-        tokenSource: "environment"
-      }
-    });
+    expect(status.response.status).toBe(401);
     expect(auth.response.status).toBe(200);
     expect(auth.body).toMatchObject({
       mode: "production",
@@ -272,7 +269,6 @@ describe("QA regression fixes", () => {
         tokenSource: "environment"
       }
     });
-    expect(JSON.stringify(status.body)).not.toContain(adminToken);
     expect(JSON.stringify(auth.body)).not.toContain(adminToken);
     expect(missing.response.status).toBe(401);
   });
@@ -296,7 +292,9 @@ describe("QA regression fixes", () => {
       ROUTELY_ADMIN_TOKEN: adminToken
     });
 
-    const status = await jsonRequest(baseUrl, "/server/status");
+    const status = await jsonRequest(baseUrl, "/server/status", {
+      headers: { authorization: `Bearer ${adminToken}` }
+    });
     const missing = await jsonRequest(baseUrl, "/domains/root", {
       method: "POST",
       body: JSON.stringify({ domain: "example.com" })
