@@ -179,13 +179,55 @@ Empty state:
 
 ### Apps
 
-Purpose: list every managed app and make common actions obvious.
+Purpose: list every managed app and make common actions obvious. For a new user, this page is also the first deployment onboarding surface, not a technical registry/debug screen.
+
+Beginner-first rules:
+
+- If there are no apps, show a `Deploy your first app` onboarding panel with clear source cards. Do not show a large `No app selected` inspector because there is nothing to inspect yet.
+- If `/api/apps` or admin-token setup is unavailable, show a compact, dismissible-looking inline warning above the onboarding content. The warning must not dominate the page or replace the path to add an app.
+- Replace infrastructure copy like `Start all scope` with plain language: `Start all ready apps on this server` and `Apps that still need setup will stay off`.
+- Always answer these beginner questions in visible copy: `Where is my app source?`, `What stack did Routely detect?`, `What URL will open?`, and `What do I do next?`.
+- Preserve the Spotify-inspired dark surface system: no light admin cards, no giant red/yellow error slabs, and no generic SaaS template panels.
+
+Empty-state source cards:
+
+- `GitHub repo` — connect/select a repository and branch; icon should read as GitHub/source control.
+- `Local folder` — choose or type a host path such as `/home/me/projects/my-app`; icon should read as folder/path.
+- `Docker Compose` — use an existing `docker-compose.yml` or `compose.yml`; icon should read as Compose/containers.
+- `Dockerfile` — build one service from a Dockerfile; icon should read as container image.
+- `Node / Next.js` — detect package manager, build command, start command, and port; icon should read as JS/Node/Next.
+- `Static site` — serve built assets or a static output directory; icon should read as globe/page.
+- `Custom` — manual recipe for stacks not detected yet; icon should read as tools/sliders.
+
+Icon guidance:
+
+- Use purposeful dependencies or local SVGs for stack icons. `lucide-react`, `simple-icons`, Devicon SVGs, or focused local icon components are acceptable if committed with the slice.
+- Icons must have accessible labels and a consistent tile treatment on dark panels.
+- Brand icons may be monochrome or subtly branded, but Routely Green remains the primary action accent.
+
+Recommended layout:
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│ Apps                                  Add app / Start ready   │
+├──────────────────────────────────────────────────────────────┤
+│ compact warning only when API/auth unavailable               │
+├──────────────────────────────────────────────────────────────┤
+│ Deploy your first app                                        │
+│ [GitHub repo] [Local folder] [Docker Compose] [Dockerfile]    │
+│ [Node/Next]   [Static site]  [Custom]                         │
+├──────────────────────────────────────────────────────────────┤
+│ When apps exist: searchable list + app detail preview         │
+└──────────────────────────────────────────────────────────────┘
+```
 
 Each app card/row must show:
 
 - Name.
 - Status and readiness.
 - Source type: local folder or GitHub.
+- Source detail: local absolute path or `owner/repo` + branch.
+- Detected stack/recipe: Compose, Dockerfile, Node/Next.js, static, custom, or unknown.
 - Enabled/disabled state.
 - Primary domain or local URL.
 - Services count.
@@ -197,15 +239,34 @@ Rules:
 - Do not show `Start` as enabled for apps that failed readiness.
 - `Disable` means exclude from auto-start, not delete.
 - Failed apps must show the next fix step.
+- App detail/preview panels should only appear when an app exists or a source card is actively selected.
+- Never hide source paths, repository names, branches, detected recipe, exposed ports, or domain/local URL behind hover-only UI.
 
 ### Add App Wizard
 
-Purpose: beginner-friendly setup that still verifies real execution.
+Purpose: Dokploy-inspired, beginner-friendly setup that still verifies real execution. The user should feel they are choosing `what they already have` rather than configuring infrastructure.
+
+Entry behavior:
+
+- `Add app` opens a focused source-and-stack picker before any advanced form fields.
+- The first screen uses large dark source cards with stack icons and one-sentence explanations.
+- A selected source card reveals only the fields needed for that path.
+- Advanced recipe fields stay collapsed until detection has produced a candidate or the user chooses `Custom`.
+
+Source card fields:
+
+- `GitHub repo`: installation/account, repository, branch, optional project subdirectory.
+- `Local folder`: absolute host path, optional project subdirectory, folder existence hint, and read-permission hint.
+- `Docker Compose`: compose file path, project directory, services to expose, and env file.
+- `Dockerfile`: context path, Dockerfile path, build args, container port, and health check.
+- `Node / Next.js`: package manager, install/build/start commands, output mode, app port, and env file.
+- `Static site`: source/output directory, build command when needed, public directory, and route/domain.
+- `Custom`: editable recipe name, services, image/build source, ports, env, volumes, and health command.
 
 Steps:
 
 1. Source — local folder or GitHub repo.
-2. Detect — show recipe candidates and confidence.
+2. Detect — show stack/recipe candidates, confidence, files found, and paths used.
 3. Configure — app name, services, ports, env, build/start settings.
 4. Verify — build/start/health test run with live logs.
 5. Finish — ready/enabled or saved as needs-fix.
@@ -216,6 +277,9 @@ State rules:
 - Verification logs are visible by default.
 - Passing verification can enable `Add and start`.
 - Failing verification can save draft but cannot mark ready.
+- Every step must show the resolved source path/repository and selected recipe so the user never loses context.
+- Field labels use beginner language first and technical details second, for example `App folder path` with helper text `Absolute path on the machine running routely`.
+- Verification errors must name the failing step and next fix, not only raw logs.
 
 ### App Detail
 

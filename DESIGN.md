@@ -38,3 +38,16 @@ The accepted frontend baseline after Slice 1B is a Spotify-inspired dark operati
 - No active backup/restore UI and no light/cream stale-data panels.
 
 Future frontend work must preserve this baseline unless the user explicitly approves a new visual direction.
+
+## Apps And Add App Direction
+
+The Apps area must feel like a beginner-friendly deployment console, not a registry table for experts.
+
+- Empty Apps state is an onboarding surface titled around `Deploy your first app`.
+- Add App follows a Dokploy-inspired source-first flow: choose what source/stack exists, then configure only what is needed.
+- Source/stack cards use recognizable icon tiles for GitHub repo, Local folder, Docker Compose, Dockerfile, Node/Next.js, Static site, and Custom.
+- Local folder and Compose paths must be visible as paths on the runtime host, for example `/home/user/projects/app`.
+- GitHub apps must show `owner/repo`, branch, and optional subdirectory.
+- App cards must expose source, detected recipe/stack, readiness, URL/domain, and safe actions without hiding essentials in hover-only UI.
+- API/auth/daemon errors stay compact and actionable; they should not bury the Add App path.
+- The visual language remains Spotify-inspired: dark charcoal surfaces, pill controls, green primary CTAs, compact helper copy, and no light admin panels.

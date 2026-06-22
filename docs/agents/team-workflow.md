@@ -47,5 +47,6 @@ Security validates trust boundaries from `docs/architecture.md` and `docs/verifi
 
 - Each role commits only owned files for the current slice after relevant checks pass.
 - Preserve unrelated dirty worktree changes.
-- Push after committing when remote access is available and the user requested push-on-change.
+- Push after committing through SSH when remote access is available and the user requested push-on-change: `git@github.com:ruddypp/routely.git`.
+- Do not attempt HTTPS push in agent sessions; switch `origin` to SSH first if needed.
 - If checks fail for unrelated reasons or push fails, report exact commands and errors.

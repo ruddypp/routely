@@ -24,6 +24,7 @@ Auto-commit rules:
 - Run the relevant checks first. At minimum, prefer `npm run lint` and the narrow build/test command for touched workspaces. For broad changes, run `npm run build --workspaces --if-present` when practical.
 - If a relevant check cannot be run or fails for an unrelated reason, document that in the final response and do not hide it in the commit message.
 - Use concise commit messages, for example `docs: add mvp blueprint` or `feat: add app setup wizard shell`.
+- Push with SSH only: `git@github.com:ruddypp/routely.git`. Agents must not attempt HTTPS push for this repo because non-interactive HTTPS auth fails and creates noisy handoffs.
 - If the user explicitly asks not to commit or push, follow the user's latest instruction.
 - Never use destructive git commands to prepare a commit. Preserve existing user changes.
 

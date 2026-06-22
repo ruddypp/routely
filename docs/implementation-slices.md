@@ -8,7 +8,7 @@ Every slice must end with:
 
 - Relevant tests/checks.
 - A concise commit containing only owned files.
-- Push after commit when push access is available and the user has requested push-on-change.
+- Push after commit through SSH when push access is available and the user has requested push-on-change: `git@github.com:ruddypp/routely.git`.
 - Final handoff that states what changed, what passed, and what remains blocked.
 
 ## Global Rules
@@ -21,6 +21,7 @@ Every slice must end with:
 - Do not mark apps ready without setup verification.
 - Do not create broad rewrites that mix unrelated modules.
 - Dependencies are allowed when they improve quality; explain why, keep them focused, and include package/lockfile changes in the same slice commit.
+- Do not use HTTPS push in agent sessions. If needed, run `git remote set-url origin git@github.com:ruddypp/routely.git` before pushing.
 
 ## Slice 0 — Documentation Reset
 
@@ -273,6 +274,35 @@ Acceptance criteria:
 - User can add GitHub app through wizard where credentials exist.
 - Failed verification cannot be marked ready.
 - Wizard copy is beginner-friendly and actionable.
+
+## Slice 9A — Beginner Apps And Add App Correction
+
+Owner: Frontend.
+
+Status: Immediate corrective slice after FE-02. The previous Apps/Services polish kept the dark surface direction but did not make first deployment obvious for beginners.
+
+Blocked by: Slice 1B and the current Apps page implementation.
+
+What to fix:
+
+- Redesign the Apps/Services empty state into a `Deploy your first app` onboarding surface.
+- Add Dokploy-inspired source/stack cards with icons: GitHub repo, Local folder, Docker Compose, Dockerfile, Node/Next.js, Static site, and Custom.
+- Keep API/auth/registry errors as compact inline warnings so the user can still understand the add-app path.
+- Remove confusing empty inspector states such as a large `No app selected` panel when there are zero apps.
+- Show source path/repository, branch, detected stack/recipe, port, and URL/domain clearly on app cards and wizard context.
+- Rewrite technical lifecycle copy into beginner language, especially Start All behavior and readiness blocking.
+- Preserve the Spotify-inspired dark Routely baseline from Slice 1B.
+
+Acceptance criteria:
+
+- A first-time user can tell exactly where to click to add an app within five seconds of opening `Apps`.
+- Local folder flow visibly asks for an absolute path on the runtime host and explains that the host is the machine running `routely`.
+- GitHub flow visibly asks for repository, branch, and optional project subdirectory.
+- Stack/source cards include recognizable icons/images and short, plain explanations.
+- Existing apps expose source detail, stack/recipe, readiness, lifecycle state, local/public URL, and safe actions without hover-only disclosure.
+- Failed or unavailable backend state is honest but visually secondary.
+- No fake healthy/running/traffic/readiness data is introduced.
+- Final handoff includes screenshot path, changed files, dependencies, checks, commit hash, and SSH push status.
 
 ## Slice 10 — Auto-Start And App Lifecycle Controls
 

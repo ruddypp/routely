@@ -83,7 +83,7 @@ The readiness gate prevents broken apps from entering auto-start. It passes only
 3. Routely checks Docker availability, Compose availability, ports, data directory, and permissions.
 4. Routely starts the daemon/API, proxy, dashboard, and monitoring collector.
 5. Routely opens or prints the dashboard URL.
-6. Dashboard shows an empty state: “Add your first app”.
+6. Dashboard and Apps show an empty state: “Add your first app” with beginner-friendly source cards.
 
 Failure behavior:
 
@@ -94,8 +94,8 @@ Failure behavior:
 ### 2. Add App From Local Folder
 
 1. User clicks `Add app`.
-2. User chooses `Local folder`.
-3. Routely lets the user pick or type a path on the runtime host.
+2. User chooses the `Local folder` source card with a folder/path icon.
+3. Routely lets the user pick or type an absolute path on the runtime host, for example `/home/user/projects/my-app`.
 4. Routely scans the folder for Compose files, Dockerfile, package manager files, env examples, ports, and health hints.
 5. Routely proposes a recipe with confidence level and editable fields.
 6. User confirms app name, service name, port, env, and domain placeholder.
@@ -107,7 +107,7 @@ Failure behavior:
 ### 3. Add App From GitHub
 
 1. User clicks `Add app`.
-2. User chooses `GitHub repo`.
+2. User chooses the `GitHub repo` source card with a repository icon.
 3. Routely shows connected installations/repositories.
 4. User selects repository and branch.
 5. Routely clones or fetches the source into managed storage on the runtime host.

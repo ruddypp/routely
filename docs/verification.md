@@ -95,5 +95,11 @@ After each completed slice:
 
 1. Run relevant checks.
 2. Commit only files owned by the slice.
-3. Push the commit when remote access is configured and the user requested push-on-change.
+3. Push the commit over SSH when remote access is configured and the user requested push-on-change: `git@github.com:ruddypp/routely.git`.
 4. If push fails, report the exact error and leave the local commit intact.
+
+Do not use HTTPS push in non-interactive agent sessions. If the remote is HTTPS, switch it first:
+
+```bash
+git remote set-url origin git@github.com:ruddypp/routely.git
+```
