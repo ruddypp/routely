@@ -186,11 +186,12 @@ Acceptance:
 - Start All starts every enabled app and skips disabled apps with clear reason copy.
 - Stop affects the running app now; disable excludes the app from future Start All without deleting it.
 - Logs, status, health, dependency, crash, and port conflict states are visible and actionable.
+- Dashboard shell, module headers, app rows, and primary actions remain readable and reachable at mobile, tablet, and desktop widths without horizontal page overflow.
 
 Verification:
 
 - CLI tests and dashboard API tests cover enabled filtering, stop vs disable semantics, port conflict, app crash, logs, and health unavailable states.
-- QA records local smoke results for desktop/tablet/mobile.
+- QA records local smoke results for desktop/tablet/mobile, including a viewport overflow assertion at 375px, 768px, and 1280px.
 
 ### Slice 4: One-VPS Bootstrap And Auth
 
