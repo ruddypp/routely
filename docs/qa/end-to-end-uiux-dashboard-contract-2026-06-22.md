@@ -261,7 +261,64 @@ Use this decision tree before rendering any public-alpha control:
 | `apps/web/src/lib/dashboard-operations.ts` | Treat current helper labels as canonical for GitHub, deployments, domains, TLS, env, logs, databases, backups, and auth. |
 | `apps/web/src/lib/app-registry-form.ts` | Keep the verified type/driver/preset lists narrow. Add new options only after Backend and QA verify them against the three public-alpha demos. |
 
+## Demo Gap List For Frontend
+
+These gaps are based on the current dashboard shell, primitives, `dashboard-client.tsx`, and helper copy. They are not production-code edits; they are the executable UI/UX handoff for the Frontend owner.
+
+### Local Dashboard-First Demo Gaps
+
+| Gap | Expected user-facing copy | Visual state | Acceptance criteria |
+| --- | --- | --- | --- |
+| App enablement copy is too generic in the app form. Current label `Enabled` can be read as runtime status instead of Start All participation. | Form label: `Included in Start All`. Helper: `When off, this resource stays registered and editable but Start All skips it.` Row badge for disabled resource: `Start All skips: disabled`. | Use warning/muted badge, not error. Keep the row visible in Apps and inspector. | A disabled app is visible in Apps, editable from the form, excluded from Start All, and the copy never implies deletion or a stopped runtime. |
+| No first-run preset decision flow before exposing all registry fields. Current form shows type, preset, driver, command, Compose, GitHub, domains, env, and volume fields in one dense grid. | Form intro: `Choose the closest stack path, then fill only the fields this driver supports.` Preset helper: `Command and Compose can run locally. Dockerfile deploy is a production bridge only.` | Add a compact `Stack path` section or grouped visual blocks before advanced fields; disabled driver-scoped fields remain visibly inactive with helper text. | A new tester can choose `command`, `compose`, or `dockerfile` without guessing which fields will save; unsupported fields are disabled with `Deferred for this driver; not saved.` |
+| Start All plan is present but not scannable enough for QA screenshots. | `Start All will start {n} stopped enabled resources, skip {disabled} disabled, skip {running} already running, and defer {deferred} unsupported drivers.` | Show a readiness strip next to the `Start All` button using ok/warn/muted cards; disabled and deferred counts use warning/muted tones. | Before clicking Start All, the dashboard states exactly which resources will start and why others will not. After clicking, the report shows started/skipped/failed counts and first skipped/failed reasons. |
+| Per-app `Stop` and future `Disable` language are not paired in the same place. Current row has Stop but no row-level disable action; disable lives inside Edit. | Stop helper: `Stops the running process now.` Disable helper: `Excludes this resource from future Start All.` | If a row-level disable control is not implemented, show no fake toggle; surface `Included in Start All` only in Edit and runtime metadata. | QA can stop one app without changing enablement, then disable it from Edit and see Start All skip it on the next run. |
+| Port conflict and crash diagnosis need a single failure pattern. Current generic action error copy may be enough for backend messages but lacks UI contract. | Port conflict: `Port {port} is already in use. Stop the other process or change this resource port.` Crash: `{app} exited. Open logs to inspect the last output.` | Error alert plus row badge `failed` or `crashed`; logs action remains enabled. Use danger only for failed/crashed, not disabled/deferred. | A failed local app shows a failure badge, concrete next action, and reachable logs from Apps, Logs, and inspector. |
+| Mobile bottom nav can hide demo-critical action context. | Top of Apps on mobile: `Start All scope: {n} ready · {disabled} disabled · {deferred} deferred.` | Keep primary action sticky or visible near the module header; mobile nav remains horizontal and labels remain visible. | On mobile, a tester can see Start All state and reach per-app logs without relying on hover titles or truncated nav labels. |
+
+### One-VPS Operations Demo Gaps
+
+| Gap | Expected user-facing copy | Visual state | Acceptance criteria |
+| --- | --- | --- | --- |
+| Mode state is visible, but there is no mode switch contract. A switch must not be added until there is a real API. | Local mode copy: `Local workspace mode: Start All controls local command and Compose resources.` Production mode copy: `One-VPS mode: production actions require admin auth and server doctor readiness.` If no switch API exists: `Mode is reported by the server; switching is deferred for public alpha.` | Use mode chip in the top status bar and Server Status readiness cards. If a switch is added later, disabled state is muted with explicit deferred copy. | The dashboard never offers a fake local/VPS toggle. Users always know whether production actions are blocked by mode, auth, doctor, Docker, or data dir. |
+| Deploy controls appear in Apps, inspector, and Deployments; blockers must stay identical across surfaces. | Disabled title/body: `Deploy blocked: {reason}. Open Server Status to fix readiness.` Driver deferral: `Deploy deferred for this driver.` | Use warning badge for blocked readiness; danger only for failed deploy result. Primary Deploy button is disabled with accessible reason. | Same app shows the same deploy blocker in Apps row, inspector, and Deployments. No surface enables deploy while another blocks it for the same reason. |
+| Compose production parity is deferred, but Dockerfile bridge could still read as the final model. | Section label remains `Dockerfile deploy bridge`. Add detail: `Verified alpha path. Compose production parity remains deferred until Backend exposes it.` | Muted deferred pill beside bridge heading; no success tone for Compose parity. | Public-alpha screenshots cannot be mistaken as claiming production Compose parity before Backend verifies it. |
+| Domain generated-route state may look successful because proxy tone can be ok when generated. | `Generated route` helper: `Proxy config exists; DNS and TLS still need verification.` TLS pending: `Pending TLS is not HTTPS success.` | Generated route uses info/warn, verified TLS uses ok, failed TLS uses danger. `Open HTTPS` remains hidden/disabled until TLS is active/verified. | Domain card separately shows Root, DNS, Proxy, TLS, Target, and Deploy; generated/pending states never use success copy that implies a working HTTPS route. |
+| Env/secrets pending state needs consistent next action. | `Restart needed` for local runtime changes. `Redeploy needed` when the app can deploy. `Local only` when redeploy does not apply. | Warning pills beside each env row and summary cards. Raw secret values are never shown after save. | Saving a secret shows redacted metadata, pending restart/redeploy when applicable, and no raw value in the table, logs, or helper copy. |
+| Database and backup surfaces must keep safety boundaries explicit. | Database helper: `Internal Compose service by default.` Backup helper: `Local file metadata only; no dashboard download or restore.` | Internal database state is ok; public requested is danger. Backup download exposure is danger. Restore deferred is warning/muted. | Database services are not shown as publicly exposed by default; backup runs show file metadata/retention state without a download or destructive restore action. |
+| Notifications sit under Settings and may imply general settings breadth. | Module helper: `Notification channels and delivery attempts only; broader settings are deferred.` | Deferred capability chips for email, escalation, and complex routing. | The Settings module does not imply teams, RBAC, global VPS admin, or unsupported alerting features. |
+
+### GitHub Redeploy Diagnosis Demo Gaps
+
+| Gap | Expected user-facing copy | Visual state | Acceptance criteria |
+| --- | --- | --- | --- |
+| GitHub connect form should block on missing server-side prerequisites before repo mapping. | `GitHub setup incomplete: configure App ID, Client ID, webhook secret, and private key on the server before connecting a repository.` | Top alert or readiness card with missing item in warning/error. Connect button disabled until server-side prerequisites pass. | A tester cannot connect a repo from the UI when webhook signature validation prerequisites are missing; the dashboard names the missing prerequisite. |
+| Repo/branch mapping and auto-deploy need to explain ignored pushes. | Branch helper: `Only pushes to this branch can redeploy this app.` Ignored delivery: `Ignored event: branch not configured for this app.` | Warning tone for ignored/deduped/unmatched deliveries; danger only for invalid signature or failed deploy. | A push to an unconfigured branch appears as ignored with repo, branch, delivery ID, commit when available, and no deployment success copy. |
+| Failed GitHub redeploy diagnosis must bridge delivery, deployment phase, and logs. | `Deploy failed: {phase}. Open deployment logs for build/start/healthcheck output.` | Delivery row danger, deployment row danger, `Open logs` remains available. Latest successful deployment card remains ok/warn separate from the failed attempt. | A deliberately broken push shows delivery ID, repo, branch, commit SHA, matched app, deployment ID, failed phase, failure reason, logs path, and latest successful deployment when available. |
+| Invalid webhook signature must be a security failure, not a normal delivery miss. | `Webhook rejected: invalid signature. Check the GitHub webhook secret on the server.` | Danger alert/badge; no Deploy ID; no retry action from the dashboard. | Invalid signatures never queue deployment and are visually distinct from ignored branch/repo events. |
+| Deployment logs path must be copyable/visible even before loading log text. | `Logs path: /api/deployments/{id}/logs`. Empty log text: `Deployment logs are available but empty.` | Monospace path metadata plus `Open logs` button when deployment ID exists. | QA can cite the logs path from the dashboard screenshot without opening devtools or private chat context. |
+| Untrusted GitHub text needs rendering constraints. | Commit/message labels use plain text only; no Markdown or HTML rendering. Truncated branch/repo/commit text must preserve full value in accessible label/title when useful. | Monospace metadata, line clamp, safe wrapping; no rich rendering of commit messages. | Repo names, branches, commit messages, delivery messages, and failure logs render as text and cannot alter dashboard layout or inject markup. |
+
 ## Demo Acceptance Checks For Frontend
+
+## Gap List By Demo
+
+### Local Dashboard-First Demo
+
+- Expected copy: `Start All starts stopped command/Compose apps; disabled and unsupported resources are skipped.` Visual state: Start All report uses separate started/skipped/failed counts. Acceptance: disabled resources stay visible and editable after bulk actions.
+- Expected copy: `Included in Start All` should clarify enablement better than a generic enabled toggle. Visual state: disabled badge remains near the app name without forcing horizontal overflow. Acceptance: stop-now and disable-future actions use different labels and disabled reasons.
+- Expected copy: `Logs unavailable until the app has run` for empty log states. Visual state: log panels remain reachable from Apps and Logs. Acceptance: failed/crashed apps expose a next diagnostic action.
+
+### One-VPS Operations Demo
+
+- Expected copy: `Run server doctor before production actions` when readiness is unknown. Visual state: Server Status owns auth, Docker, data-dir, and doctor blockers. Acceptance: deploy/domain/backup/notification controls reuse the same blocker reason.
+- Expected copy: `generated proxy route` and `TLS pending` never read as success. Visual state: warning or muted tones for generated/pending/unverified states. Acceptance: HTTPS links appear only when TLS is active or verified.
+- Expected copy: `backup metadata only; restore deferred for public alpha` for backup surfaces. Visual state: no full local path is treated as primary user copy. Acceptance: backup actions avoid destructive restore promises.
+
+### GitHub Redeploy Diagnosis Demo
+
+- Expected copy: `ignored branch`, `invalid signature`, `duplicate delivery`, and `deploy failed: {phase}` must be distinct. Visual state: delivery state and deployment phase are adjacent. Acceptance: a broken redeploy routes to deployment logs without hiding the latest successful deployment.
+- Expected copy: `GitHub App setup missing on server` for incomplete server-side prerequisites. Visual state: connect/deploy controls are disabled with the same setup reason. Acceptance: repo/branch mapping must be visible before any deploy-triggering action.
 
 ### Local Dashboard-First Demo
 
@@ -291,5 +348,6 @@ Use this decision tree before rendering any public-alpha control:
 
 - This document gives Frontend concrete component and page guidance for `types.ts`, `sidebar.tsx`, `top-status-bar.tsx`, `dashboard-client.tsx`, and adjacent state/copy helpers.
 - It names which controls must be hidden, disabled with reasons, or marked `deferred for public alpha`.
+- It includes a gap list grouped by local dashboard-first demo, one-VPS operations demo, and GitHub redeploy diagnosis demo; each gap has expected copy, visual state, and acceptance criteria.
 - It defines IA, navigation labels, lifecycle language, stack preset onboarding, local vs one-VPS mode copy, state taxonomy, failure copy, responsive behavior, accessibility criteria, and deferred-state rules.
 - It intentionally avoids production code changes; implementation belongs to Frontend after this contract is accepted.
