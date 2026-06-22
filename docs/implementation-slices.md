@@ -279,9 +279,16 @@ Acceptance criteria:
 
 Owner: Frontend.
 
-Status: Immediate corrective slice after FE-02. The previous Apps/Services polish kept the dark surface direction but did not follow Dokploy's project model and did not make first deployment obvious for beginners.
+Status: Completed in commit `a7e4da4` on 2026-06-23. The previous Apps/Services polish kept the dark surface direction but did not follow Dokploy's project model and did not make first deployment obvious for beginners.
 
-Blocked by: Slice 1B and the current Apps page implementation.
+Blocked by: none; shipped as the current Apps / Services frontend baseline.
+
+Completion notes:
+
+- Sidebar service modules were collapsed into Apps / Services.
+- Apps / Services now owns the project workspace, create-service menu, source-first Application setup, selected service inspector, and database service panel.
+- Zero-service state no longer renders a right-side `No app selected` inspector.
+- Verification passed: `npx tsc --noEmit --project apps/web/tsconfig.json`, `npm run lint --workspace apps/web`, `npm run test --workspace apps/web`, `npm run build --workspace apps/web`, and `git diff --check`.
 
 What to fix:
 

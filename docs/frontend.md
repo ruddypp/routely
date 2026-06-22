@@ -4,6 +4,36 @@
 
 The Routely dashboard is a Spotify-inspired operations dashboard: dark, polished, compact, and easy to read while running many apps. It should tell the operator what is running, what is broken, what is receiving traffic, and what action is safe to take next.
 
+## Frontend Progress
+
+Last updated: 2026-06-23.
+
+### Completed
+
+- `FE-01 / Slice 1B` — Dashboard visual baseline is accepted as a Spotify-inspired dark operations deck with compact runtime controls, GitHub CTA, host/fleet summary, charts, and honest empty states.
+- `FE-02 / Slice 9A` — Apps / Services IA correction is complete in commit `a7e4da4`. The global sidebar now stays small, while Deployments, Domains, GitHub source, Env / Secrets, Logs, Health, Metrics, Terminal, and Database services belong inside the Apps / Services project workspace.
+- Apps / Services empty state no longer shows a confusing right-side `No app selected` inspector when there are zero services. It shows the `Default project` workspace, compact registry warning, and one clear `Create Service` path.
+- `Create Service` uses the Dokploy-style first-level choices: `Application`, `Database`, `Compose`, with `Template` and `Import` visible but disabled/deferred.
+- Application setup is source-first with recognizable stack/source tiles for GitHub repo, Local folder, Docker Compose, Dockerfile, Node / Next.js, Static site, and Custom.
+- Selected service operations are embedded in Apps / Services through the service inspector/detail tabs, not separate global pages.
+
+### Current Frontend Baseline
+
+- Sidebar: `Dashboard`, `Apps / Services`, `Server Status`, `Notifications / Settings` only.
+- Apps layout: project/environment header, service list, selected service inspector, and database service panel inside the same workspace.
+- Empty state: no split inspector until a service exists or the user explicitly opens Database service creation.
+- Visual style: Spotify-inspired dark shell, charcoal panels, green primary actions, compact inline warnings, no light admin panels.
+
+### Verified In Latest FE Correction
+
+- `npx tsc --noEmit --project apps/web/tsconfig.json`
+- `npm run lint --workspace apps/web`
+- `npm run test --workspace apps/web` — 15 files / 64 tests.
+- `npm run build --workspace apps/web`
+- `git diff --check`
+
+Latest screenshot artifact: `output/playwright/apps-services-final-empty.png`.
+
 ## Design Direction
 
 ### Subject
