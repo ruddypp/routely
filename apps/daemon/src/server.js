@@ -1812,7 +1812,12 @@ app.get("/server/status", async () => {
 
 app.get("/auth/status", async () => {
   const server = publicServerStatus();
-  return { auth: server.auth, mode: server.mode };
+  return {
+    auth: server.auth,
+    mode: server.mode,
+    production: server.production,
+    requiresAuth: server.auth.required
+  };
 });
 
 app.get("/server/doctor", async () => {

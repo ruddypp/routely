@@ -27,6 +27,7 @@ Untrusted or semi-trusted:
 
 - Browser code must use same-origin `/api/*`; it must not call the daemon directly.
 - Production private daemon/API mutation paths require admin token/auth.
+- `ROUTELY_SERVER_MODE=production` is the canonical daemon production-mode signal; dashboard processes should set it with `ROUTELY_ENV=production` so route handlers enforce the same admin-token boundary.
 - GitHub webhooks must validate `X-Hub-Signature-256` before acting.
 - Webhook deliveries should be deduplicated where practical.
 - Only configured repositories and branches should trigger deploys.

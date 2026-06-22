@@ -112,6 +112,14 @@ Current route families in `apps/web/src/app/api` include:
 
 The daemon route families include the corresponding app, deployment, domain, proxy, GitHub, env, health, metrics, database, backup, notification, server, and auth endpoints.
 
+Canonical backend production/auth contract:
+
+- `ROUTELY_SERVER_MODE=production` is the explicit daemon production-mode env contract for one-VPS processes.
+- Persisted `routely server init` foundation state also makes a restarted daemon report production mode.
+- `/server/status` exposes the frontend-safe signal as `server.production`, `server.mode`, and `server.auth.required`/`configured` without returning the admin token, token hash, or token salt.
+- `/auth/status` exposes the same non-secret contract as top-level `production`, `mode`, `requiresAuth`, and `auth.required`/`configured` for route handlers that only need auth state.
+- Frontend route handlers should treat `server.production === true` or `server.auth.required === true` as a production-protected backend state and preserve caller admin-token auth before proxying private daemon operations.
+
 Dashboard implementation rules:
 
 - app setup/editing should use the same normalized app DTOs as CLI/config sync;
