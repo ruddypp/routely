@@ -1,0 +1,11 @@
+# Routely End-to-End Backend Plan
+
+- [ ] Backend: reconcile the current backend baseline before new feature execution. Read `AGENTS.md`, current `git status`, recent commits, `.maestro/playbooks/2026-06-22-Routely-Compose-First-Remediation/`, and `.maestro/playbooks/2026-06-22-Routely-End-to-End-Product-Execution/EXECUTION-MANIFEST.md`. Preserve unrelated dirty worktree changes. Finish or explicitly park any partial backend remediation changes, run focused backend checks, and report the exact baseline commits/checks to Lead before starting new product slices.
+
+- [ ] Backend: implement the single-command local control-plane contract. Ensure `routely` starts or connects to the daemon/dashboard for the active workspace, clearly reports URL/status, handles stale state, and does not require users to understand repo internals. Cover local app registry sync, daemon readiness, dashboard URL, and graceful stop behavior. Add CLI/daemon tests, run `npm run test --workspace apps/cli`, `node --check apps/daemon/src/server.js`, and commit Backend-owned changes if checks pass.
+
+- [ ] Backend: implement robust Start All and per-app lifecycle semantics. Ensure enabled managed apps start in dependency order, disabled apps are skipped with clear reasons, per-app stop/restart works, logs and status remain queryable, and failures do not hide which app failed. Cover command, Compose, and database/service records where currently supported. Add focused lifecycle tests and commit Backend-owned changes after verification.
+
+- [ ] Backend: harden local proxy/routes and stack-template backend contracts. Provide route/proxy status APIs for multiple local apps, route conflict diagnostics, and normalized app/service presets for reasonable stacks. Keep unsupported stacks explicit. Add API/DTO tests and commit Backend-owned changes after verification.
+
+- [ ] Backend: harden one-VPS runtime and production operations. Verify server init/doctor, production auth, data dir, daemon service guidance, Docker/Compose deploy, domain/proxy/TLS state, env/secrets, logs, health, database, backup, notification, and GitHub webhook/redeploy flows. Add tests where environment-independent and document external VPS/DNS/GitHub blockers honestly. Commit Backend-owned changes after verification.
