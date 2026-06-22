@@ -100,6 +100,28 @@ export async function probeRoutelyDaemon(port: number, timeoutMs = 1000): Promis
   return null;
 }
 
+export async function waitForRoutelyEndpoint(
+  port: number,
+  probe: (port: number, timeoutMs?: number) => Promise<string | null>,
+  options: { timeoutMs?: number; intervalMs?: number; probeTimeoutMs?: number } = {}
+): Promise<string | null> {
+  const timeoutMs = Math.max(1, options.timeoutMs ?? 15_000);
+  const intervalMs = Math.max(10, options.intervalMs ?? 250);
+  const probeTimeoutMs = Math.max(1, options.probeTimeoutMs ?? Math.min(1000, intervalMs));
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt <= timeoutMs) {
+    const url = await probe(port, probeTimeoutMs);
+    if (url) {
+      return url;
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  return null;
+}
+
 export async function findExistingRoutelyDashboard(ports: number[]): Promise<string | null> {
   const uniquePorts = [...new Set(ports.filter((port) => Number.isInteger(port) && port > 0))];
   for (const port of uniquePorts) {

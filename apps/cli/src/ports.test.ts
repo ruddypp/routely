@@ -1,7 +1,7 @@
 import { createServer as createNetServer, type Server as NetServer } from "node:net";
 import { createServer as createHttpServer, type Server as HttpServer } from "node:http";
 import { afterEach, describe, expect, it } from "vitest";
-import { findDuplicatePorts, findExistingRoutelyDashboard, findUnavailablePorts, hostBoundPortCandidates, isPortAvailable, probeRoutelyDashboard } from "./ports.js";
+import { findDuplicatePorts, findExistingRoutelyDashboard, findUnavailablePorts, hostBoundPortCandidates, isPortAvailable, probeRoutelyDaemon, probeRoutelyDashboard, waitForRoutelyEndpoint } from "./ports.js";
 
 const servers: Array<NetServer | HttpServer> = [];
 
@@ -106,5 +106,36 @@ describe("port checks", () => {
 
     await expect(probeRoutelyDashboard(port)).resolves.toBe(`http://127.0.0.1:${port}`);
     await expect(findExistingRoutelyDashboard([1, port])).resolves.toBe(`http://127.0.0.1:${port}`);
+  });
+
+  it("detects a Routely daemon health endpoint", async () => {
+    const { port } = await listenHttp((request, response) => {
+      if (request.url === "/health") {
+        response.setHeader("content-type", "application/json");
+        response.end(JSON.stringify({ ok: true, service: "routely-daemon" }));
+        return;
+      }
+      response.statusCode = 404;
+      response.end("not found");
+    });
+
+    await expect(probeRoutelyDaemon(port)).resolves.toBe(`http://127.0.0.1:${port}`);
+  });
+
+  it("waits for a Routely endpoint without claiming readiness forever", async () => {
+    let attempts = 0;
+    const ready = await waitForRoutelyEndpoint(
+      9977,
+      async (port) => {
+        attempts += 1;
+        return attempts === 3 ? `http://127.0.0.1:${port}` : null;
+      },
+      { timeoutMs: 100, intervalMs: 1, probeTimeoutMs: 1 }
+    );
+
+    expect(ready).toBe("http://127.0.0.1:9977");
+
+    const unavailable = await waitForRoutelyEndpoint(9977, async () => null, { timeoutMs: 5, intervalMs: 1, probeTimeoutMs: 1 });
+    expect(unavailable).toBeNull();
   });
 });

@@ -56,7 +56,7 @@ import { createDatabaseService, detectPreset, getAppPreset } from "@routely/pres
 import { validateHostname } from "@routely/proxy";
 import { DependencyCycleError, selectBulkStartApps } from "./dependencies.js";
 import { resolveInstallRoot, resolveWorkspaceRoot } from "./paths.js";
-import { findDuplicatePorts, findExistingRoutelyDashboard, findUnavailablePorts, isPortAvailable, probeRoutelyDaemon, probeRoutelyDashboard } from "./ports.js";
+import { findDuplicatePorts, findExistingRoutelyDashboard, findUnavailablePorts, isPortAvailable, probeRoutelyDaemon, probeRoutelyDashboard, waitForRoutelyEndpoint } from "./ports.js";
 
 type ChildProcess = ReturnType<typeof spawn>;
 type RunningApp = { app: RoutelyAppRecord; child: ChildProcess };
@@ -557,6 +557,46 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolveSleep) => {
     setTimeout(resolveSleep, ms);
   });
+}
+
+function earlyProcessExit(child: ChildProcess, name: string): Promise<never> {
+  return new Promise((_, reject) => {
+    const cleanup = (): void => {
+      child.off("error", onError);
+      child.off("exit", onExit);
+    };
+    const onError = (error: Error): void => {
+      cleanup();
+      reject(new Error(`${name} failed to start: ${error.message}`));
+    };
+    const onExit = (code: number | null, signal: NodeJS.Signals | null): void => {
+      cleanup();
+      const detail = signal ? `signal ${signal}` : `code ${code ?? 0}`;
+      reject(new Error(`${name} exited before it became ready (${detail}).`));
+    };
+
+    child.once("error", onError);
+    child.once("exit", onExit);
+  });
+}
+
+async function waitForManagedEndpoint(
+  name: "daemon" | "dashboard",
+  child: ChildProcess,
+  port: number,
+  probe: (port: number, timeoutMs?: number) => Promise<string | null>,
+  timeoutMs: number
+): Promise<string> {
+  const url = await Promise.race([
+    waitForRoutelyEndpoint(port, probe, { timeoutMs, intervalMs: 300, probeTimeoutMs: 1000 }),
+    earlyProcessExit(child, name)
+  ]);
+
+  if (!url) {
+    throw new Error(`${name} did not become ready on port ${port} within ${Math.round(timeoutMs / 1000)}s.`);
+  }
+
+  return url;
 }
 
 async function stopManagedPid(pid: number, timeoutMs = 1500): Promise<"stopped" | "missing" | "killed"> {
@@ -1087,7 +1127,24 @@ async function upCommand(): Promise<void> {
         ROUTELY_DAEMON_URL: process.env.ROUTELY_DAEMON_URL || `http://127.0.0.1:${daemonPort}`
       });
   if (existingDashboardUrl) {
-    console.log(`Dashboard already running at ${existingDashboardUrl}; reusing it for this workspace.`);
+    console.log(`Dashboard ready: ${existingDashboardUrl} (reused existing Routely dashboard)`);
+  }
+
+  try {
+    const daemonUrl = await waitForManagedEndpoint("daemon", daemon, Number(daemonPort), probeRoutelyDaemon, 15_000);
+    console.log(`Daemon ready:    ${daemonUrl}`);
+
+    if (web) {
+      const dashboardUrl = await waitForManagedEndpoint("dashboard", web, Number(dashboardPort), probeRoutelyDashboard, 30_000);
+      console.log(`Dashboard ready: ${dashboardUrl}`);
+    }
+  } catch (error) {
+    console.error(`Could not start Routely: ${error instanceof Error ? error.message : String(error)}`);
+    console.error("Check the startup output above, then rerun `routely up` after fixing the issue.");
+    daemon.kill("SIGTERM");
+    web?.kill("SIGTERM");
+    db.close();
+    process.exit(1);
   }
 
   for (const app of apps) {
