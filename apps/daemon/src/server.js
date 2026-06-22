@@ -25,6 +25,7 @@ import {
   formatSseEvent,
   healthcheckToPublicDto,
   healthSummaryToPublicDto,
+  isSecretEnvKey,
   loadWorkspaceConfig,
   mergeAppEnv,
   metricSampleToPublicDto,
@@ -858,7 +859,11 @@ function runtimeEnvForApp(appRecord, scope) {
 }
 
 function secretValuesForApp(appRecord) {
-  return listSecretValuesForApp(db, appRecord.id);
+  const configSecrets = Object.entries(appRecord.env || {})
+    .filter(([key]) => isSecretEnvKey(key))
+    .map(([, value]) => String(value || ""))
+    .filter(Boolean);
+  return [...new Set([...listSecretValuesForApp(db, appRecord.id), ...configSecrets])];
 }
 
 function redactForApp(appRecord, value) {

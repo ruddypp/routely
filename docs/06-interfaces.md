@@ -129,6 +129,13 @@ Dashboard implementation rules:
 - production mutation routes must preserve admin auth boundaries;
 - browser responses must not expose raw secret values.
 
+Environment/secrets contract:
+
+- backend DTOs treat keys containing secret/token/password/private/key as secret;
+- common connection-string keys ending in URL/URI/DSN are secret by default, including `DATABASE_URL`, `REDIS_URL`, `MONGODB_URI`, `POSTGRES_URL`, `MYSQL_URL`, `SENTRY_DSN`, and `WEBHOOK_URL`;
+- public app and env DTOs may expose safe env keys and key names, but must not return raw values for inferred or explicitly saved secrets;
+- app and deployment log DTOs redact values inferred as secrets from both saved env rows and `routely.yml` app env.
+
 ## Config Shape
 
 Preferred config file:

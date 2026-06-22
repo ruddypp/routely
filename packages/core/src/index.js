@@ -13,6 +13,20 @@ export const NOTIFICATION_CHANNEL_TYPES = ["webhook", "discord", "telegram"];
 export const NOTIFICATION_EVENTS = ["deploy_succeeded", "deploy_failed", "backup_failed"];
 
 const SECRET_ENV_PATTERN = /(SECRET|TOKEN|PASSWORD|PRIVATE|KEY)/i;
+const EXPLICIT_SECRET_ENV_KEYS = new Set([
+  "DATABASE_URL",
+  "REDIS_URL",
+  "MONGODB_URI",
+  "POSTGRES_URL",
+  "POSTGRESQL_URL",
+  "MYSQL_URL",
+  "MARIADB_URL",
+  "SENTRY_DSN",
+  "WEBHOOK_URL"
+]);
+const PUBLIC_ENV_PREFIX_PATTERN = /^(NEXT_PUBLIC_|PUBLIC_|VITE_)/i;
+const PUBLIC_URL_ENV_KEYS = new Set(["APP_URL", "BASE_URL", "CANONICAL_URL", "HEALTHCHECK_URL", "PUBLIC_URL", "ROOT_URL", "SITE_URL"]);
+const SECRET_URL_ENV_PROVIDER_PATTERN = /(^|_)(DATABASE|DB|POSTGRES|POSTGRESQL|PG|MYSQL|MARIADB|REDIS|MONGO|MONGODB|SENTRY|WEBHOOK|DISCORD|SLACK|TELEGRAM|STRIPE|SUPABASE|NEON|PLANETSCALE|TURSO|PRISMA|AMQP|RABBITMQ|KAFKA|ELASTIC|ELASTICSEARCH|OPENSEARCH|MEILISEARCH|CLICKHOUSE|UPSTASH|QSTASH|SMTP|MAIL|MAILGUN|SENDGRID|TWILIO|AWS|GCP|AZURE|OPENAI|ANTHROPIC|HUGGINGFACE|PINECONE|ALGOLIA|CLOUDFLARE|DOCKER|REGISTRY)(_|$)/i;
 const REDACTED_VALUE = "[redacted]";
 const APP_INPUT_KEYS = new Set([
   "id",
@@ -845,7 +859,12 @@ export function formatSseEvent(event, data, options = {}) {
 }
 
 export function isSecretEnvKey(key) {
-  return SECRET_ENV_PATTERN.test(String(key || ""));
+  const normalized = String(key || "").trim().toUpperCase();
+  if (!normalized) return false;
+  if (SECRET_ENV_PATTERN.test(normalized) || EXPLICIT_SECRET_ENV_KEYS.has(normalized)) return true;
+  if (PUBLIC_ENV_PREFIX_PATTERN.test(normalized) || PUBLIC_URL_ENV_KEYS.has(normalized)) return false;
+  if (/(^|_)(DSN|URI)$/.test(normalized)) return true;
+  return /(^|_)URL$/.test(normalized) && SECRET_URL_ENV_PROVIDER_PATTERN.test(normalized);
 }
 
 export function normalizeEnvKey(key) {
@@ -861,22 +880,24 @@ export function normalizeEnvKey(key) {
 
 export function normalizeAppEnvInput(input = {}) {
   const key = normalizeEnvKey(input.key);
+  const inferredSecret = isSecretEnvKey(key);
   return {
     key,
     value: input.value == null ? "" : String(input.value),
-    isSecret: input.isSecret == null ? isSecretEnvKey(key) : Boolean(input.isSecret),
+    isSecret: inferredSecret || Boolean(input.isSecret),
     scope: input.scope === "local" || input.scope === "production" ? input.scope : "all"
   };
 }
 
 export function appEnvVarToPublicDto(row) {
+  const secret = Boolean(row.is_secret) || isSecretEnvKey(row.key);
   return {
     id: row.id,
     appId: row.app_id,
     key: row.key,
-    value: row.is_secret ? null : row.value,
-    displayValue: row.is_secret ? REDACTED_VALUE : row.value,
-    isSecret: Boolean(row.is_secret),
+    value: secret ? null : row.value,
+    displayValue: secret ? REDACTED_VALUE : row.value,
+    isSecret: secret,
     scope: row.scope || "all",
     needsRestart: Boolean(row.needs_restart),
     needsRedeploy: Boolean(row.needs_redeploy),
@@ -951,7 +972,7 @@ function setIfPresent(target, key, value) {
 
 export function filterExportableEnv(env = {}) {
   return Object.fromEntries(
-    Object.entries(env).filter(([key]) => !SECRET_ENV_PATTERN.test(key))
+    Object.entries(env).filter(([key]) => !isSecretEnvKey(key))
   );
 }
 

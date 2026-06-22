@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
 import { mkdirSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
-import { normalizeAppEnvInput, normalizeAppInput, normalizeBackupSchedule, normalizeDatabaseType, normalizeNotificationChannelInput } from "@routely/core";
+import { isSecretEnvKey, normalizeAppEnvInput, normalizeAppInput, normalizeBackupSchedule, normalizeDatabaseType, normalizeNotificationChannelInput } from "@routely/core";
 
 export const routelyDbVersion = "0.1.0";
 
@@ -908,7 +908,10 @@ export function appEnvPendingState(db, appId) {
 }
 
 export function listSecretValuesForApp(db, appId) {
-  return db.prepare("SELECT value FROM app_env_vars WHERE app_id = ? AND is_secret = 1").all(appId).map((row) => String(row.value || "")).filter(Boolean);
+  return db.prepare("SELECT key, value, is_secret FROM app_env_vars WHERE app_id = ?").all(appId)
+    .filter((row) => row.is_secret || isSecretEnvKey(row.key))
+    .map((row) => String(row.value || ""))
+    .filter(Boolean);
 }
 
 export function recordRuntimeStart(db, appId, pid) {

@@ -503,7 +503,7 @@ describe("QA regression fixes", () => {
 
     const saved = await jsonRequest(baseUrl, `/apps/${app.id}/env`, {
       method: "POST",
-      body: JSON.stringify({ key: "DATABASE_URL", value: "postgres://raw-secret", isSecret: true, scope: "production" })
+      body: JSON.stringify({ key: "DATABASE_URL", value: "postgres://raw-secret", scope: "production" })
     });
 
     expect(saved.response.status).toBe(201);
@@ -514,6 +514,34 @@ describe("QA regression fixes", () => {
 
     const listed = await jsonRequest(baseUrl, `/apps/${app.id}/env`);
     expect(JSON.stringify(listed.body)).not.toContain("postgres://raw-secret");
+  });
+
+  it("redacts URL-shaped secrets from config env in app DTOs and local logs", async () => {
+    const workspace = await createWorkspace();
+    const databaseUrl = "postgres://user:pass@example.com/app";
+    const { baseUrl } = await startDaemon(workspace);
+    const app = await createApp(baseUrl, {
+      name: "config-env-web",
+      driver: "command",
+      command: `${process.execPath} -e "console.log(process.env.DATABASE_URL); setInterval(() => {}, 1000)"`,
+      env: { DATABASE_URL: databaseUrl, PUBLIC_URL: "https://example.com" }
+    });
+
+    const listed = await jsonRequest(baseUrl, "/apps");
+    const listedApp = listed.body.apps.find((item: { id: number }) => item.id === app.id);
+    expect(listedApp.env).toEqual({ PUBLIC_URL: "https://example.com" });
+    expect(listedApp.envKeys).toEqual(["DATABASE_URL", "PUBLIC_URL"]);
+    expect(JSON.stringify(listedApp)).not.toContain(databaseUrl);
+
+    await jsonRequest(baseUrl, `/apps/${app.id}/start`, { method: "POST" });
+    let logs = await jsonRequest(baseUrl, `/apps/${app.id}/logs`);
+    for (let attempt = 0; attempt < 20 && !String(logs.body.logs || "").includes("[redacted]"); attempt += 1) {
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+      logs = await jsonRequest(baseUrl, `/apps/${app.id}/logs`);
+    }
+    expect(logs.body.logs).toContain("[redacted]");
+    expect(JSON.stringify(logs.body)).not.toContain(databaseUrl);
+    await jsonRequest(baseUrl, `/apps/${app.id}/stop`, { method: "POST" });
   });
 
   it("redacts database app env values from create responses", async () => {
@@ -536,16 +564,11 @@ describe("QA regression fixes", () => {
     expect(detail.body.app.env).toEqual({});
   });
 
-  it("redacts app secrets from failed deployment metadata and logs", async () => {
+  it("redacts config env secrets from failed deployment metadata and logs", async () => {
     const workspace = await createWorkspace();
     const secretPath = join(workspace, "raw-secret-source");
     const { baseUrl } = await startDaemon(workspace);
-    const app = await createApp(baseUrl, { name: "web", driver: "dockerfile", path: secretPath, port: 3000 });
-
-    await jsonRequest(baseUrl, `/apps/${app.id}/env`, {
-      method: "POST",
-      body: JSON.stringify({ key: "SECRET_PATH", value: secretPath, isSecret: true, scope: "production" })
-    });
+    const app = await createApp(baseUrl, { name: "web", driver: "dockerfile", path: secretPath, port: 3000, env: { DATABASE_URL: secretPath } });
 
     const queued = await jsonRequest(baseUrl, `/apps/${app.id}/deployments`, { method: "POST" });
     expect(queued.response.status).toBe(202);
