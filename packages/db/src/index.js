@@ -4,6 +4,7 @@ import { dirname, isAbsolute, resolve } from "node:path";
 import { isSecretEnvKey, normalizeAppEnvInput, normalizeAppInput, normalizeBackupSchedule, normalizeDatabaseType, normalizeNotificationChannelInput } from "@routely/core";
 
 export const routelyDbVersion = "0.1.0";
+export const METRIC_SAMPLE_RETENTION_LIMIT = 500;
 
 export function resolveDataDir(root, dataDir = process.env.ROUTELY_DATA_DIR || ".routely") {
   return resolve(root, dataDir);
@@ -1116,13 +1117,15 @@ export function listHealthchecksForApp(db, appId) {
 }
 
 export function recordMetricSample(db, input = {}) {
+  const appId = input.appId || input.app_id || null;
+  const scope = input.scope || "host";
   const result = db.prepare(`
     INSERT INTO metrics_samples (app_id, deployment_id, scope, cpu_percent, memory_bytes, memory_limit_bytes, disk_used_bytes, disk_total_bytes, network_rx_bytes, network_tx_bytes, message)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    input.appId || input.app_id || null,
+    appId,
     input.deploymentId || input.deployment_id || null,
-    input.scope || "host",
+    scope,
     input.cpuPercent == null ? null : Number(input.cpuPercent),
     input.memoryBytes == null ? null : Number(input.memoryBytes),
     input.memoryLimitBytes == null ? null : Number(input.memoryLimitBytes),
@@ -1133,7 +1136,27 @@ export function recordMetricSample(db, input = {}) {
     input.message || null
   );
 
+  pruneMetricSamples(db, { appId, scope });
+
   return db.prepare("SELECT * FROM metrics_samples WHERE id = ?").get(Number(result.lastInsertRowid));
+}
+
+export function pruneMetricSamples(db, options = {}) {
+  const limit = Number.isInteger(options.limit) && options.limit > 0 ? options.limit : METRIC_SAMPLE_RETENTION_LIMIT;
+  const appId = options.appId ?? options.app_id ?? null;
+  const scope = options.scope || "host";
+  const where = appId == null ? "app_id IS NULL AND scope = ?" : "app_id = ? AND scope = ?";
+  const params = appId == null ? [scope] : [appId, scope];
+  return db.prepare(`
+    DELETE FROM metrics_samples
+    WHERE ${where}
+      AND id NOT IN (
+        SELECT id FROM metrics_samples
+        WHERE ${where}
+        ORDER BY sampled_at DESC, id DESC
+        LIMIT ?
+      )
+  `).run(...params, ...params, limit);
 }
 
 export function listMetricSamplesForApp(db, appId, options = {}) {

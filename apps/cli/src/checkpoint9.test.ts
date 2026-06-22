@@ -58,6 +58,24 @@ describe("checkpoint 9 logs, metrics, and health", () => {
     db.close();
   });
 
+  it("bounds retained metric samples while healthchecks stay upserted", async () => {
+    const root = await mkdtemp(join(tmpdir(), "routely-metrics-retention-"));
+    const { db } = initializeRoutely(root);
+    const app = upsertApp(db, { name: "api", driver: "command", path: root, command: "npm run dev" });
+
+    for (let index = 0; index < 505; index += 1) {
+      recordMetricSample(db, { appId: app.id, scope: "container", cpuPercent: index });
+    }
+    upsertHealthcheckResult(db, { appId: app.id, target: "runtime", status: "healthy", message: "first" });
+    upsertHealthcheckResult(db, { appId: app.id, target: "runtime", status: "unhealthy", message: "latest" });
+
+    expect(db.prepare("SELECT COUNT(*) AS count FROM metrics_samples WHERE app_id = ? AND scope = 'container'").get(app.id)?.count).toBe(500);
+    expect(listMetricSamplesForApp(db, app.id)).toHaveLength(30);
+    expect(listHealthchecksForApp(db, app.id)).toHaveLength(1);
+    expect(healthSummaryToPublicDto(listHealthchecksForApp(db, app.id)).message).toBe("latest");
+    db.close();
+  });
+
   it("summarizes missing healthchecks as unavailable for dashboard diagnosis", () => {
     expect(healthSummaryToPublicDto([])).toEqual({
       status: "unknown",
