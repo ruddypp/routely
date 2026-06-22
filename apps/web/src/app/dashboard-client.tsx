@@ -15,7 +15,7 @@ import type { DashboardModuleKey, ServerRailSignal } from "@/components/dashboar
 import { OperationsDashboard } from "@/components/dashboard-visuals/operations-dashboard";
 import { ROUTELY_CHART_COLORS } from "@/components/dashboard-visuals/palette";
 import type { ActivityItem, AppStatusDatum, DiskUsageValue, HostResourceSample } from "@/components/dashboard-visuals/types";
-import { appActionBlockReason, appSupportsBulkStart, bulkStartSkipReason, bulkStartStateLabel, isAppRuntimeRunning, startAllBlockReason, startAllPlan, type BulkStartPlan } from "@/lib/app-lifecycle";
+import { appActionBlockReason, appEnablementBlockReason, appSetupBlockReason, appSupportsBulkStart, bulkStartSkipReason, bulkStartStateLabel, isAppRuntimeRunning, startAllBlockReason, startAllPlan, type AppEnablementAction, type AppLifecycleAction, type BulkStartPlan } from "@/lib/app-lifecycle";
 import { APP_DRIVERS, APP_PRESETS, APP_TYPES, appDriverPatch, appFormFromDaemonApp, appFormPayload, appFormValidationError, blankAppForm, type AppFormState } from "@/lib/app-registry-form";
 import { databaseExposureLabel, deploymentLogsLabel, deploymentStateLabel, domainDnsLabel, domainProxyLabel, domainTargetLabel, domainTlsLabel, envVisibilityLabel, githubConnectionState, githubDeliveryLogPath, githubDeliveryState, githubLatestDelivery, githubRepositoryBranch, isDeploymentInProgress, latestDeployment, latestSuccessfulDeployment, logAvailabilityLabel, productionAuthState, safeEnvDisplay } from "@/lib/dashboard-operations";
 
@@ -423,7 +423,7 @@ type NotificationsResponse = {
   error?: string | null;
 };
 
-type AppAction = "start" | "stop" | "restart";
+type AppAction = AppLifecycleAction | AppEnablementAction;
 type FormMode = "create" | "edit";
 type ModuleKey = DashboardModuleKey;
 type InspectorTab = "overview" | "runtime" | "env" | "logs" | "health" | "deployments" | "domains";
@@ -506,12 +506,6 @@ function compactSource(app: DaemonApp): string {
   if (app.source?.repo) return `${app.source.repo}:${app.source.branch || "main"}`;
   if (app.image) return app.image;
   return app.driver === "compose" ? app.composeService || app.image || "compose service" : app.command || app.dev || "no command";
-}
-
-function domainSummary(domains: DaemonDomain[]): string {
-  if (domains.length === 0) return "no domain";
-  const ready = domains.filter((domain) => (domain.status === "ready" || domain.status === "generated") && domain.dnsStatus === "verified" && ["active", "verified"].includes(domain.tlsStatus)).length;
-  return ready === domains.length ? `${domains.length} ready` : `${ready}/${domains.length} ready`;
 }
 
 function readinessFromStatus(status: string | null | undefined, ready: string[] = []): "ok" | "warn" | "error" {
@@ -652,6 +646,77 @@ function appInitials(name: string): string {
     .map((part) => part[0])
     .join("")
     .toUpperCase() || "A";
+}
+
+function isEnablementAction(action: AppAction): action is AppEnablementAction {
+  return action === "enable" || action === "disable";
+}
+
+function sourceTypeLabel(app: DaemonApp): string {
+  if (app.source?.type === "github" || app.source?.repo) return "GitHub";
+  if (app.source?.type === "local" || app.path) return "Local folder";
+  return "not available";
+}
+
+function sourceDetail(app: DaemonApp): string {
+  if (app.source?.repo) return `${app.source.repo}:${app.source.branch || "main"}`;
+  if (app.path) return shortPath(app.path);
+  return app.image || app.command || app.dev || "not available";
+}
+
+function primaryEndpoint(app: DaemonApp, domains: DaemonDomain[]): { href: string | null; label: string; tone: string } {
+  const domain = domains[0];
+  const configuredDomain = domain?.hostname || app.domains?.[0] || null;
+
+  if (configuredDomain) {
+    const hostname = configuredDomain.replace(/^https?:\/\//, "");
+    const openable = domain && ["active", "verified"].includes(domain.tlsStatus) ? `https://${hostname.replace(/^\*\./, "")}` : null;
+    return { href: openable, label: hostname, tone: openable ? "domain verified" : "domain pending" };
+  }
+
+  const localUrl = appUrl(app);
+  if (localUrl) return { href: localUrl, label: localUrl, tone: "local URL" };
+
+  return { href: null, label: "not available", tone: "endpoint missing" };
+}
+
+function visibleServiceCount(app: DaemonApp): string {
+  if (app.type === "database") return "1 database service";
+  if (app.driver === "compose" && app.composeService) return "1 visible service";
+  return "not available";
+}
+
+function setupVerificationState(app: DaemonApp): { detail: string; label: string; status: string } {
+  const setupBlockReason = appSetupBlockReason(app);
+  const normalizedStatus = app.status.trim().toLowerCase().replace(/[\s_]+/g, "-");
+
+  if (setupBlockReason) {
+    return {
+      detail: setupBlockReason,
+      label: normalizedStatus === "failed" || normalizedStatus.includes("failed") ? "failed setup" : "needs setup",
+      status: normalizedStatus === "failed" || normalizedStatus.includes("failed") ? "failed" : "needs setup"
+    };
+  }
+
+  if (normalizedStatus === "ready") {
+    return { detail: "setup verification passed", label: "ready", status: "ready" };
+  }
+
+  return { detail: "Current API does not expose setup verification state.", label: "not available", status: "unavailable" };
+}
+
+function appAttentionMessage(app: DaemonApp): string | null {
+  const setupBlockReason = appSetupBlockReason(app);
+  if (setupBlockReason) return `${setupBlockReason}. Use Edit or Logs, then verify setup before Start or Enable.`;
+  if (app.needsRestart || app.needsRedeploy) return `Pending changes: ${pendingStateLabel(app)}.`;
+  if (["crashed", "error", "unhealthy"].includes(app.status)) return "Runtime needs attention. Check logs before retrying lifecycle actions.";
+  return null;
+}
+
+function lastRunOrDeployLabel(latestDeployment: DaemonDeployment | null): string {
+  if (!latestDeployment) return "not available";
+  const timestamp = latestDeployment.finishedAt || latestDeployment.startedAt || latestDeployment.createdAt;
+  return `${deploymentStateLabel(latestDeployment)} · ${timeAgo(timestamp)}`;
 }
 
 export default function DashboardClient() {
@@ -1140,20 +1205,27 @@ export default function DashboardClient() {
       setActionByAppId((current) => ({ ...current, [app.id]: action }));
 
       try {
-        const response = await fetch(`/api/apps/${app.id}/${action}`, {
-          method: "POST",
-          cache: "no-store"
-        });
+        const response = isEnablementAction(action)
+          ? await fetch(`/api/apps/${app.id}`, {
+              method: "PATCH",
+              cache: "no-store",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ enabled: action === "enable" })
+            })
+          : await fetch(`/api/apps/${app.id}/${action}`, {
+              method: "POST",
+              cache: "no-store"
+            });
 
         if (!response.ok) {
           throw new Error(await readError(response));
         }
 
-        const data = (await response.json()) as DaemonAppLifecycleResponse;
+        const data = (await response.json()) as DaemonAppLifecycleResponse | { app: DaemonApp };
         replaceApp(data.app);
         setSelectedAppId(data.app.id);
         setLastUpdated(new Date().toISOString());
-        void loadLogs(data.app);
+        if (!isEnablementAction(action)) void loadLogs(data.app);
         void poll();
       } catch (error) {
         setActionError(error instanceof Error ? error.message : `Could not ${action} ${app.name}.`);
@@ -1442,9 +1514,11 @@ export default function DashboardClient() {
 }
 
 function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, deployingByAppId, deploymentsByAppId, disabledCount, domainsByAppId, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onDeploy, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onSelect, onStartAll, runningCount, selectedAppId, server, serviceResources, startAllBusy, startAllPlan: bulkPlan, startAllReason, startAllResult, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; deployingByAppId: Record<number, boolean>; deploymentsByAppId: Map<number, DaemonDeployment>; disabledCount: number; domainsByAppId: Map<number, DaemonDomain[]>; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: () => void; onDeploy: (app: DaemonApp) => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onSelect: (id: number) => void; onStartAll: () => void; runningCount: number; selectedAppId: number | null; server: DaemonServerStatus | null; serviceResources: DaemonApp[]; startAllBusy: boolean; startAllPlan: BulkStartPlan; startAllReason: string | null; startAllResult: DaemonAppStartAllResponse | null; stoppedCount: number }) {
+  const attentionCount = apps.filter((app) => Boolean(appAttentionMessage(app))).length;
+
   return (
-    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="apps" stats={<><MetricPill label="running" value={`${runningCount}/${apps.length}`} accent /><MetricPill label="services" value={String(serviceResources.length)} /><MetricPill label="stopped" value={String(stoppedCount)} /><MetricPill label="disabled" value={String(disabledCount)} /></>} actions={<><Button onClick={onStartAll} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || "Start stopped enabled command and Compose resources"} variant="primary">Start All</Button><PillButton onClick={onCreate} strong disabled={!connected}>Add resource</PillButton></>} />
+    <section className={`min-w-0 overflow-hidden rounded-[22px] border border-[#2D352F]/70 bg-[#101412] ${PANEL_SHADOW}`}>
+      <ModuleHeader module="apps" stats={<><MetricPill label="running" value={`${runningCount}/${apps.length}`} accent /><MetricPill label="attention" value={String(attentionCount)} /><MetricPill label="services" value={String(serviceResources.length)} /><MetricPill label="stopped" value={String(stoppedCount)} /><MetricPill label="disabled" value={String(disabledCount)} /></>} actions={<><Button onClick={onStartAll} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || "Start stopped enabled command and Compose resources that passed setup gates"} variant="primary">Start All</Button><PillButton onClick={onCreate} strong disabled={!connected}>Add app</PillButton></>} />
 
       {!connected && health ? <Alert title="Daemon offline" message={health.error || "Start Routely from the CLI to bring the server session online."} /> : null}
       {actionError ? <Alert title="Action failed" message={actionError} /> : null}
@@ -1454,7 +1528,7 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
       <div className="border-b border-white/5 bg-black/20 px-4 py-3">
         <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Start All scope</p>
         <p className="mt-1 text-sm text-muted">
-          Starts {bulkPlan.stoppedStartableCount} stopped enabled command/Compose resources through <code className="font-mono text-foreground">/api/apps/start-all</code>. Disabled resources stay visible and skipped; Dockerfile lifecycle remains deferred. CLI fallback: <code className="font-mono text-foreground">routely up</code>.
+          Starts {bulkPlan.stoppedStartableCount} stopped enabled command/Compose resources through <code className="font-mono text-foreground">/api/apps/start-all</code>. Disabled resources stay visible and skipped; Start All is disabled while enabled resources are failed or need setup verification.
         </p>
       </div>
 
@@ -1464,10 +1538,16 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
         {loading ? <LoadingRows /> : apps.length === 0 ? <EmptyState connected={connected} onAdd={onCreate} /> : (
           <>
             <ResourceSection title="Apps" count={appResources.length} />
-            {appResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} server={server} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+            <div className="grid gap-3 p-3 sm:p-4">
+              {appResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} server={server} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+            </div>
             <ResourceSection title="Services & databases" count={serviceResources.length} />
             {serviceResources.length === 0 ? <ServiceEmpty /> : null}
-            {serviceResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} server={server} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+            {serviceResources.length ? (
+              <div className="grid gap-3 p-3 sm:p-4">
+                {serviceResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} server={server} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+              </div>
+            ) : null}
           </>
         )}
       </div>
@@ -2263,57 +2343,69 @@ function AppRow({
 }) {
   const busy = Boolean(currentAction);
   const running = app.status === "running" || app.status === "starting";
-  const localUrl = appUrl(app);
-  const disabledReason = !app.enabled ? "Disabled" : !connected ? "Offline" : null;
+  const endpoint = primaryEndpoint(app, domains);
+  const setup = setupVerificationState(app);
+  const attentionMessage = appAttentionMessage(app);
   const deployReason = deployBlockReason(app, connected, server);
-  const pending = pendingStateLabel(app);
   const bulkStartReason = bulkStartSkipReason(app);
   const startReason = appActionBlockReason(app, "start", connected, busy);
   const stopReason = appActionBlockReason(app, "stop", connected, busy);
   const restartReason = appActionBlockReason(app, "restart", connected, busy);
+  const enablementAction: AppEnablementAction = app.enabled ? "disable" : "enable";
+  const enablementReason = appEnablementBlockReason(app, enablementAction, connected, busy);
 
   return (
-    <article className={`grid min-w-0 gap-3 border-b border-white/5 px-3 py-3 transition hover:bg-white/[0.035] sm:px-4 lg:grid-cols-[minmax(220px,0.78fr)_minmax(0,1.22fr)] xl:grid-cols-[minmax(240px,0.72fr)_minmax(0,1.28fr)] ${active ? "bg-white/[0.055] shadow-[3px_0_0_0_var(--accent)_inset]" : ""}`}>
-      <button type="button" onClick={onSelect} className={`min-w-0 rounded-md text-left ${FOCUS_RING}`}>
-        <div className="flex items-center gap-3">
-          <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-black ${running ? "bg-accent text-black" : "bg-surface-raised text-muted"}`}>
+    <article className={`grid min-w-0 gap-4 rounded-[18px] border border-[#2D352F]/70 bg-[#171C1A] p-3 transition hover:border-[#3A453D] hover:bg-[#1B221D] sm:p-4 xl:grid-cols-[minmax(250px,0.78fr)_minmax(0,1.22fr)] ${active ? "shadow-[3px_0_0_0_var(--accent)_inset,0_18px_38px_rgba(0,0,0,0.28)]" : "shadow-[0_10px_28px_rgba(0,0,0,0.18)]"}`}>
+      <div className="min-w-0">
+        <button type="button" onClick={onSelect} className={`w-full min-w-0 rounded-xl text-left ${FOCUS_RING}`}>
+          <span className="flex items-center gap-3">
+            <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-full text-xs font-black ${running ? "bg-accent text-black shadow-[0_0_22px_rgba(30,215,96,0.2)]" : "bg-surface-raised text-muted"}`}>
             {appInitials(app.name)}
-          </span>
-          <span className="min-w-0 flex-1">
-            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <span className="min-w-[8rem] max-w-full flex-1 truncate text-sm font-bold">{app.name}</span>
-              {disabledReason ? <span className="max-w-full rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{disabledReason}</span> : null}
-              {bulkStartReason ? <span title={bulkStartReason} className="max-w-full truncate rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">{bulkStartStateLabel(app)}</span> : null}
-              {app.needsRestart || app.needsRedeploy ? <span className="max-w-full rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">pending</span> : null}
             </span>
-            <span className="block truncate font-mono text-[11px] text-muted">{resourceLabel(app)} · {app.driver}/{app.preset}</span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-base font-black leading-tight">{app.name}</span>
+              <span className="mt-1 block truncate font-mono text-[11px] text-muted">{resourceLabel(app)} · {app.driver}/{app.preset}</span>
+            </span>
           </span>
+        </button>
+
+        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5">
+          <StatusBadge status={app.status} />
+          <Badge status={setup.status} title={setup.detail} variant="status">{setup.label}</Badge>
+          <Badge variant={app.enabled ? "success" : "neutral"}>{app.enabled ? "auto-start enabled" : "auto-start disabled"}</Badge>
+          <Badge variant={sourceTypeLabel(app) === "not available" ? "neutral" : "info"}>{sourceTypeLabel(app)}</Badge>
+          {bulkStartReason ? <span title={bulkStartReason} className="max-w-full truncate rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">{bulkStartStateLabel(app)}</span> : null}
         </div>
-      </button>
-      <div className="grid min-w-0 grid-cols-2 gap-2 text-[11px] text-muted sm:grid-cols-4 xl:grid-cols-2">
-        <Meta label="Path" value={shortPath(app.path)} mono />
-        <Meta label="Port" value={app.port ? `:${app.port}` : "none"} mono />
-        <Meta label="Domain" value={domainSummary(domains)} mono />
-        <Meta label="Source" value={compactSource(app)} mono />
+
+        {attentionMessage ? (
+          <div className="mt-3 rounded-[14px] border border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
+            {attentionMessage}
+          </div>
+        ) : null}
       </div>
-      <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2">
-        <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">Runtime</p>
-          <div className="mt-1"><StatusBadge status={app.status} /></div>
+
+      <div className="grid min-w-0 gap-3">
+        <dl className="grid min-w-0 grid-cols-2 gap-3 text-[11px] text-muted md:grid-cols-3 xl:grid-cols-4">
+          <Meta label="Readiness" value={setup.label} />
+          <Meta label="Endpoint" value={endpoint.label} mono wide />
+          <Meta label="Source detail" value={sourceDetail(app)} mono />
+          <Meta label="Services" value={visibleServiceCount(app)} />
+          <Meta label="Last run/deploy" value={lastRunOrDeployLabel(latestDeployment)} />
+          <Meta label="Enabled" value={app.enabled ? "enabled" : "disabled"} />
+          <Meta label="Updated" value={timeAgo(app.updatedAt)} />
+          <Meta label="Endpoint state" value={endpoint.tone} />
+        </dl>
+
+        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 sm:gap-2 xl:justify-end">
+          <RoundAction label="Start" onClick={() => onAction("start")} disabled={Boolean(startReason)} reason={startReason} active={currentAction === "start"} />
+          <RoundAction label="Stop" onClick={() => onAction("stop")} disabled={Boolean(stopReason)} reason={stopReason} active={currentAction === "stop"} />
+          <RoundAction label="Restart" onClick={() => onAction("restart")} disabled={Boolean(restartReason)} reason={restartReason} active={currentAction === "restart"} />
+          <RoundAction label={app.enabled ? "Disable" : "Enable"} onClick={() => onAction(enablementAction)} disabled={Boolean(enablementReason)} reason={enablementReason} active={currentAction === enablementAction} />
+          <ActionLink href={endpoint.href}>Open</ActionLink>
+          <PillButton onClick={onLogs} disabled={!connected}>Logs</PillButton>
+          <PillButton onClick={onDeploy} disabled={Boolean(deployReason) || deploying}>{deploying ? "Deploying" : "Deploy"}</PillButton>
+          <PillButton onClick={onEdit} disabled={!connected}>Edit</PillButton>
         </div>
-        <Meta label="Pending" value={pending} />
-        <Meta label="Start All" value={bulkStartStateLabel(app)} />
-        <Meta label="Deploy" value={deployReason || (latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : "ready")} />
-        <Meta label="Updated" value={timeAgo(app.updatedAt)} />
-      </div>
-      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 sm:gap-2 lg:col-span-2 lg:justify-end">
-        <RoundAction label="Start" onClick={() => onAction("start")} disabled={Boolean(startReason)} reason={startReason} active={currentAction === "start"} />
-        <RoundAction label="Stop" onClick={() => onAction("stop")} disabled={Boolean(stopReason)} reason={stopReason} active={currentAction === "stop"} />
-        <RoundAction label="Restart" onClick={() => onAction("restart")} disabled={Boolean(restartReason)} reason={restartReason} active={currentAction === "restart"} />
-        <ActionLink href={localUrl}>Open</ActionLink>
-        <PillButton onClick={onLogs} disabled={!connected}>Logs</PillButton>
-        <PillButton onClick={onDeploy} disabled={Boolean(deployReason) || deploying}>{deploying ? "Deploying" : "Deploy"}</PillButton>
-        <PillButton onClick={onEdit} disabled={!connected}>Edit</PillButton>
       </div>
       <div className="hidden">
         <StatusBadge status={app.status} />
@@ -3045,8 +3137,8 @@ function EmptyState({ connected, onAdd }: { connected: boolean; onAdd: () => voi
     <UiEmptyState
       action={<PillButton onClick={onAdd} strong disabled={!connected}>Add app</PillButton>}
       icon="R"
-      message="Create a command app here or sync an existing `routely.yml` registry."
-      title="No apps registered"
+      message="Add a local folder or GitHub-backed app. Routely should run setup verification before an app becomes ready or joins auto-start."
+      title="No apps yet"
     />
   );
 }
