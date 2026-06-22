@@ -20,6 +20,52 @@ Routely is a small control room for solo developers running many apps from one m
 - `Warning Amber` — `#D97706` for pending/needs setup states.
 - `Failure Red` — `#DC2626` for failed/error states.
 
+
+### Visual Quality Bar
+
+The dashboard must not look like the old alpha dashboard after the next visual checkpoint. FE-01 only modularized the shell; the next frontend checkpoint must actively redesign the operational surface.
+
+Required visual outcomes:
+
+- A new above-the-fold dashboard composition, not the previous section stack with renamed components.
+- A strong Server Rail that feels like the product signature, with compact host identity and live operational chips.
+- Real chart components for host and app signals, using empty/pending states when data is not available instead of fake success data.
+- Cards with clear hierarchy: hero status, metric charts, app fleet status, recent incidents, logs/activity.
+- A more polished app-shell treatment: intentional spacing, consistent radius, focused color use, and readable density.
+- No active Backups/Restore UI in nav, overview cards, or app operations.
+
+### Approved UI Dependencies
+
+Frontend agents may install small, focused UI dependencies when they improve implementation quality and do not replace the Routely design system.
+
+Approved for the visual dashboard checkpoint:
+
+- `recharts` for React-native charts. Recharts is documented as a composable React chart library and its current docs show responsive chart primitives suitable for LineChart, AreaChart, BarChart, and RadialBarChart.
+- `lucide-react` for lightweight operational icons when plain text is not enough.
+- `clsx` only if class composition becomes noisy.
+
+Do not add a heavy dashboard/admin template package. Do not add a full component framework unless a later ADR approves it.
+
+### Chart Requirements
+
+The first visual dashboard pass must include reusable chart primitives, even if some panels render honest empty states until backend samples exist.
+
+Required chart modules:
+
+- `HostResourceChart` — small line/area chart for CPU and memory samples.
+- `DiskUsageGauge` — radial or progress-style disk usage visualization.
+- `TrafficSparkline` — app/domain traffic sparkline with a clear empty state when no proxy traffic exists.
+- `AppStatusChart` — compact stacked bar or donut-style status distribution for running/stopped/failed/disabled/needs setup.
+- `ActivityTimeline` — visual event timeline for starts, stops, verification failures, domain events, and recent logs.
+
+Rules:
+
+- Use real backend samples when available.
+- If the backend has only current values, render current-value cards plus a chart empty state that says what data is missing.
+- Never fabricate healthy/running/traffic values just to fill a chart.
+- Charts must have accessible labels and non-color text summaries.
+- Chart colors must use the Routely palette, not random library defaults.
+
 ### Typography
 
 - Display/UI: system sans, with restrained weight and tight labels.
@@ -72,12 +118,14 @@ Purpose: show runtime host and app fleet health at a glance.
 
 Must show:
 
-- Server Rail.
-- App counts by state: running, stopped, needs setup, failed, disabled.
-- Host cards: disk, CPU, memory, uptime.
-- Traffic summary: requests or route hits by app/domain when available.
+- Server Rail with host identity, Docker/Compose status, CPU, memory, disk, uptime, and refresh state.
+- Dashboard hero panel that answers: “Is this runtime host healthy and are my apps running?”
+- App status chart: running, stopped, needs setup, failed, disabled.
+- Host resource charts: CPU and memory trends when samples exist; honest empty states otherwise.
+- Disk usage gauge with used/free summary.
+- Traffic sparkline or traffic empty state per app/domain.
 - Recent incidents: failed setup, failed health, failed domain verification.
-- Recently active logs.
+- Recently active logs/activity timeline.
 - Quick actions: Add app, Start all, Stop all.
 
 Empty state:
@@ -241,3 +289,5 @@ Avoid:
 - Temporary fixtures are allowed only inside isolated prototype/demo modules and must not report fake readiness.
 - Keep feature modules small enough for a specialist to own without loading the whole app.
 - Each frontend slice must include UI, loading/error/empty states, route integration, and tests where an adjacent test pattern exists.
+- Visual checkpoints must include a screenshot or concise visual QA note in the final handoff.
+- If a dependency is added, explain why it was needed, keep it focused, and include the lockfile/package changes in the same commit.

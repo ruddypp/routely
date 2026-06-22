@@ -23,3 +23,15 @@ Read `docs/frontend.md` for:
 - Component module breakdown.
 - Copy rules.
 - Accessibility and responsive requirements.
+
+## Current Visual Checkpoint
+
+The next frontend checkpoint is not another shell refactor. It must make the dashboard visibly feel like Routely:
+
+- Server Rail as the product signature.
+- Host/app monitoring charts using `recharts` where useful.
+- Disk, CPU, memory, app status, activity, and traffic surfaces.
+- Honest empty states instead of fake metrics.
+- No active backup/restore UI.
+
+See `docs/frontend.md` and `docs/implementation-slices.md` Slice 1A.

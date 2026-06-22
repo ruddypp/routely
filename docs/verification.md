@@ -16,8 +16,10 @@ Routely must be proven by behavior, not by configuration existing on disk. A fea
 
 - Run the relevant app/web tests.
 - Run lint for `apps/web` when practical.
-- Run a browser smoke for touched flows when practical.
+- Run `npm run build --workspace apps/web` for dashboard-shell, dependency, chart, route, or layout changes.
+- Run a browser smoke or provide a screenshot/visual QA note for touched UI flows when practical.
 - Verify loading, empty, error, and failure states.
+- For visual checkpoints, verify the result does not preserve the old alpha layout with only renamed components.
 
 ### Backend changes
 

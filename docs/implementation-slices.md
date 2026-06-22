@@ -59,6 +59,36 @@ Acceptance criteria:
 - `dashboard-client` no longer owns shell, navigation, all sections, and all operations in one large component.
 - UI tests or smoke tests cover page render and navigation.
 
+## Slice 1A — Visual Operations Dashboard Redesign
+
+Owner: Frontend.
+
+Blocked by: Slice 1.
+
+Why this exists:
+
+- Slice 1 modularized the shell but intentionally preserved much of the old dashboard look.
+- The product now needs a visible redesign pass before deeper frontend feature work.
+
+What to build:
+
+- Redesign the dashboard home into a polished operations dashboard, not a renamed version of the old alpha layout.
+- Install and use `recharts` for chart primitives if it is not already installed.
+- Optionally install `lucide-react` for focused operational icons.
+- Build reusable chart modules for host resources, disk usage, app status distribution, traffic, and activity timeline.
+- Use real backend data where available; use honest empty/pending states where data does not exist.
+- Keep Backups/Restore hidden from active UI.
+
+Acceptance criteria:
+
+- The dashboard has a visibly new composition and no longer reads as the previous alpha dashboard.
+- Server Rail is visually prominent and useful.
+- At least three chart/visualization components are rendered on the dashboard path: host resources, disk usage, and app status or traffic.
+- Charts use Routely palette tokens and accessible labels.
+- No fake healthy/running/traffic values are invented.
+- Relevant web lint, tests, and build pass.
+- Final handoff includes files changed, dependency changes, checks, commit hash, push status, and screenshot/visual QA note.
+
 ## Slice 2 — Prefactor Daemon Route Modules
 
 Owner: Backend.
