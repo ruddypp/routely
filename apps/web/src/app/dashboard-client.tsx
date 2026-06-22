@@ -12,9 +12,12 @@ import { SkeletonRows } from "@/components/ui/skeleton";
 import { DashboardShell } from "@/components/dashboard-shell/dashboard-shell";
 import { ModuleHeader } from "@/components/dashboard-shell/module-header";
 import type { DashboardModuleKey, ServerRailSignal } from "@/components/dashboard-shell/types";
+import { OperationsDashboard } from "@/components/dashboard-visuals/operations-dashboard";
+import { ROUTELY_CHART_COLORS } from "@/components/dashboard-visuals/palette";
+import type { ActivityItem, AppStatusDatum, DiskUsageValue, HostResourceSample } from "@/components/dashboard-visuals/types";
 import { appActionBlockReason, appSupportsBulkStart, bulkStartSkipReason, bulkStartStateLabel, isAppRuntimeRunning, startAllBlockReason, startAllPlan, type BulkStartPlan } from "@/lib/app-lifecycle";
 import { APP_DRIVERS, APP_PRESETS, APP_TYPES, appDriverPatch, appFormFromDaemonApp, appFormPayload, appFormValidationError, blankAppForm, type AppFormState } from "@/lib/app-registry-form";
-import { backupRestoreLabel, backupRunFileState, backupStorageLabel, databaseExposureLabel, deploymentLogsLabel, deploymentStateLabel, domainDnsLabel, domainProxyLabel, domainTargetLabel, domainTlsLabel, envVisibilityLabel, githubConnectionState, githubDeliveryLogPath, githubDeliveryState, githubLatestDelivery, githubRepositoryBranch, isDeploymentInProgress, latestDeployment, latestSuccessfulDeployment, logAvailabilityLabel, productionAuthState, safeEnvDisplay } from "@/lib/dashboard-operations";
+import { databaseExposureLabel, deploymentLogsLabel, deploymentStateLabel, domainDnsLabel, domainProxyLabel, domainTargetLabel, domainTlsLabel, envVisibilityLabel, githubConnectionState, githubDeliveryLogPath, githubDeliveryState, githubLatestDelivery, githubRepositoryBranch, isDeploymentInProgress, latestDeployment, latestSuccessfulDeployment, logAvailabilityLabel, productionAuthState, safeEnvDisplay } from "@/lib/dashboard-operations";
 
 type DaemonApp = {
   id: number;
@@ -196,56 +199,6 @@ type DaemonDatabase = {
   composeFile: string | null;
   volumeName: string | null;
   envKeys: string[];
-  createdAt: string;
-  updatedAt: string;
-};
-
-type DaemonBackupJob = {
-  id: number;
-  databaseId: number;
-  databaseName: string | null;
-  databaseType: string | null;
-  enabled: boolean;
-  schedule: string | null;
-  retentionDays: number;
-  retentionStatus?: string;
-  storageType?: string;
-  storageStatus?: string;
-  restoreStatus?: string;
-  localDir: string | null;
-  lastRunStatus: string | null;
-  lastRunAt: string | null;
-  lastRunMessage: string | null;
-  createdAt: string;
-  updatedAt: string;
-};
-
-type DaemonBackupRun = {
-  id: number;
-  backupJobId: number;
-  databaseId: number;
-  databaseName: string | null;
-  databaseType: string | null;
-  status: string;
-  trigger: string;
-  storageType?: string;
-  storageStatus?: string;
-  restoreStatus?: string;
-  downloadUrl?: string | null;
-  filePath: string | null;
-  fileName?: string | null;
-  file?: {
-    available: boolean;
-    path: string | null;
-    name: string | null;
-    sizeBytes: number | null;
-    servesFile: boolean;
-    downloadUrl: string | null;
-  };
-  sizeBytes: number | null;
-  message: string | null;
-  startedAt: string | null;
-  finishedAt: string | null;
   createdAt: string;
   updatedAt: string;
 };
@@ -435,14 +388,6 @@ type DatabasesResponse = {
   error?: string | null;
 };
 
-type BackupsResponse = {
-  jobs: DaemonBackupJob[];
-  runs: DaemonBackupRun[];
-  job?: DaemonBackupJob;
-  run?: DaemonBackupRun;
-  error?: string | null;
-};
-
 type DaemonNotificationChannel = {
   id: number;
   name: string;
@@ -567,12 +512,6 @@ function domainSummary(domains: DaemonDomain[]): string {
   if (domains.length === 0) return "no domain";
   const ready = domains.filter((domain) => (domain.status === "ready" || domain.status === "generated") && domain.dnsStatus === "verified" && ["active", "verified"].includes(domain.tlsStatus)).length;
   return ready === domains.length ? `${domains.length} ready` : `${ready}/${domains.length} ready`;
-}
-
-function statusTone(status: string): "ok" | "warn" | "error" {
-  if (["running", "succeeded", "healthy", "ready", "verified", "active", "enabled", "ok"].includes(status)) return "ok";
-  if (["failed", "crashed", "error", "unhealthy"].includes(status)) return "error";
-  return "warn";
 }
 
 function readinessFromStatus(status: string | null | undefined, ready: string[] = []): "ok" | "warn" | "error" {
@@ -728,11 +667,6 @@ export default function DashboardClient() {
   const [databaseActionById, setDatabaseActionById] = useState<Record<number, string | null>>({});
   const [databaseSaving, setDatabaseSaving] = useState(false);
   const [databaseForm, setDatabaseForm] = useState({ type: "postgres", name: "postgres" });
-  const [backupJobs, setBackupJobs] = useState<DaemonBackupJob[]>([]);
-  const [backupRuns, setBackupRuns] = useState<DaemonBackupRun[]>([]);
-  const [backupsError, setBackupsError] = useState<string | null>(null);
-  const [backupActionById, setBackupActionById] = useState<Record<number, string | null>>({});
-  const [backupForm, setBackupForm] = useState({ databaseId: "", schedule: "0 2 * * *", retentionDays: "7" });
   const [notificationChannels, setNotificationChannels] = useState<DaemonNotificationChannel[]>([]);
   const [notificationAttempts, setNotificationAttempts] = useState<DaemonNotificationAttempt[]>([]);
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
@@ -770,7 +704,7 @@ export default function DashboardClient() {
     if (showRefresh) setRefreshing(true);
 
     try {
-      const [healthRes, appsRes, serverRes, deploymentsRes, domainsRes, proxyRes, githubRes, metricsRes, databasesRes, backupsRes, notificationsRes] = await Promise.all([
+      const [healthRes, appsRes, serverRes, deploymentsRes, domainsRes, proxyRes, githubRes, metricsRes, databasesRes, notificationsRes] = await Promise.all([
         fetch("/api/health", { cache: "no-store" }),
         fetch("/api/apps", { cache: "no-store" }),
         fetch("/api/server/status", { cache: "no-store" }),
@@ -780,7 +714,6 @@ export default function DashboardClient() {
         fetch("/api/github/status", { cache: "no-store" }),
         fetch("/api/metrics?refresh=false", { cache: "no-store" }),
         fetch("/api/databases", { cache: "no-store" }),
-        fetch("/api/backups", { cache: "no-store" }),
         fetch("/api/notifications", { cache: "no-store" })
       ]);
 
@@ -793,7 +726,6 @@ export default function DashboardClient() {
       const githubData = (await githubRes.json().catch(() => ({ github: null, error: "GitHub status unavailable." }))) as GithubStatusResponse;
       const metricsData = (await metricsRes.json().catch(() => ({ metrics: [], error: "Metrics unavailable." }))) as MetricsResponse;
       const databasesData = (await databasesRes.json().catch(() => ({ databases: [], error: "Databases unavailable." }))) as DatabasesResponse;
-      const backupsData = (await backupsRes.json().catch(() => ({ jobs: [], runs: [], error: "Backups unavailable." }))) as BackupsResponse;
       const notificationsData = (await notificationsRes.json().catch(() => ({ channels: [], attempts: [], error: "Notifications unavailable." }))) as NotificationsResponse;
 
       if (!mounted.current) return;
@@ -816,15 +748,11 @@ export default function DashboardClient() {
       setHostMetricsError(metricsData.error || null);
       setDatabases(databasesData.databases || []);
       setDatabasesError(databasesData.error || null);
-      setBackupJobs(backupsData.jobs || []);
-      setBackupRuns(backupsData.runs || []);
-      setBackupsError(backupsData.error || null);
       setNotificationChannels(notificationsData.channels || []);
       setNotificationAttempts(notificationsData.attempts || []);
       setNotificationsError(notificationsData.error || null);
       setRootDomainInput((current) => current || domainsData.rootDomain || "");
       setGithubForm((current) => ({ ...current, appId: current.appId || String(appsData.apps?.find((app) => app.driver === "dockerfile")?.id || "") }));
-      setBackupForm((current) => ({ ...current, databaseId: current.databaseId || String(databasesData.databases?.[0]?.id || "") }));
       setLastUpdated(new Date().toISOString());
       setSelectedAppId((current) => current ?? appsData.apps?.[0]?.id ?? null);
     } catch {
@@ -839,7 +767,6 @@ export default function DashboardClient() {
       setGithubError("Dashboard could not reach its API.");
       setHostMetricsError("Dashboard could not reach its API.");
       setDatabasesError("Dashboard could not reach its API.");
-      setBackupsError("Dashboard could not reach its API.");
       setNotificationsError("Dashboard could not reach its API.");
     } finally {
       if (mounted.current) setLoading(false);
@@ -1096,7 +1023,6 @@ export default function DashboardClient() {
       const data = (await response.json()) as { app: DaemonApp; database: DaemonDatabase };
       setDatabases((current) => [...current.filter((item) => item.id !== data.database.id), data.database].sort((a, b) => a.name.localeCompare(b.name)));
       setApps((current) => [...current.filter((item) => item.id !== data.app.id), data.app].sort((a, b) => a.name.localeCompare(b.name)));
-      setBackupForm((current) => ({ ...current, databaseId: String(data.database.id) }));
       void poll();
     } catch (error) {
       setDatabasesError(error instanceof Error ? error.message : "Could not create database.");
@@ -1120,72 +1046,6 @@ export default function DashboardClient() {
       setDatabaseActionById((current) => ({ ...current, [database.id]: null }));
     }
   }, [poll]);
-
-  const enableBackup = useCallback(async () => {
-    if (!backupForm.databaseId) {
-      setBackupsError("Choose a database before enabling backups.");
-      return;
-    }
-    setBackupsError(null);
-    try {
-      const response = await fetch("/api/backups", {
-        method: "POST",
-        cache: "no-store",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ databaseId: Number(backupForm.databaseId), schedule: backupForm.schedule.trim() || null, retentionDays: Number(backupForm.retentionDays || 7) })
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const data = (await response.json()) as BackupsResponse;
-      setBackupJobs(data.jobs || []);
-      setBackupRuns(data.runs || []);
-      void poll();
-    } catch (error) {
-      setBackupsError(error instanceof Error ? error.message : "Could not enable backups.");
-    }
-  }, [backupForm.databaseId, backupForm.retentionDays, backupForm.schedule, poll]);
-
-  const runBackup = useCallback(async (job: DaemonBackupJob) => {
-    setBackupsError(null);
-    setBackupActionById((current) => ({ ...current, [job.id]: "run" }));
-    try {
-      const response = await fetch(`/api/backups/${job.id}/run`, {
-        method: "POST",
-        cache: "no-store",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ trigger: "manual" })
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const data = (await response.json()) as BackupsResponse;
-      setBackupJobs(data.jobs || []);
-      setBackupRuns(data.runs || []);
-      void poll();
-    } catch (error) {
-      setBackupsError(error instanceof Error ? error.message : `Could not run backup for ${job.databaseName || job.databaseId}.`);
-    } finally {
-      setBackupActionById((current) => ({ ...current, [job.id]: null }));
-    }
-  }, [poll]);
-
-  const toggleBackup = useCallback(async (job: DaemonBackupJob, enabled: boolean) => {
-    setBackupsError(null);
-    setBackupActionById((current) => ({ ...current, [job.id]: enabled ? "enable" : "disable" }));
-    try {
-      const response = await fetch(`/api/backups/${job.id}`, {
-        method: "PATCH",
-        cache: "no-store",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ enabled })
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const data = (await response.json()) as BackupsResponse;
-      setBackupJobs(data.jobs || []);
-      setBackupRuns(data.runs || []);
-    } catch (error) {
-      setBackupsError(error instanceof Error ? error.message : "Could not update backup job.");
-    } finally {
-      setBackupActionById((current) => ({ ...current, [job.id]: null }));
-    }
-  }, []);
 
   const applyNotifications = useCallback((data: NotificationsResponse) => {
     setNotificationChannels(data.channels || []);
@@ -1456,8 +1316,8 @@ export default function DashboardClient() {
                 connected={connected}
                 deployments={deployments}
                 domains={domains}
-                domainsMeta={domainsMeta}
-                github={github}
+                hostMetrics={hostMetrics}
+                hostMetricsError={hostMetricsError}
                 healthchecksUnavailable={appsError || deploymentsError}
                 onSelect={setActiveModule}
                 proxyRoutes={proxyRoutes}
@@ -1481,8 +1341,6 @@ export default function DashboardClient() {
             {activeModule === "github" ? <GithubModule apps={dockerfileApps} connected={connected} deployments={deployments} github={github} githubError={githubError} githubForm={githubForm} githubSaving={githubSaving} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onGithubConnect={() => void connectGithubRepository()} onGithubFormChange={setGithubForm} /> : null}
 
             {activeModule === "databases" ? <DatabasesModule connected={connected} databaseActionById={databaseActionById} databaseForm={databaseForm} databaseSaving={databaseSaving} databases={databases} databasesError={databasesError} loading={moduleLoading} onCreateDatabase={() => void createDatabase()} onDatabaseAction={(database, action) => void runDatabaseAction(database, action)} onDatabaseFormChange={setDatabaseForm} /> : null}
-
-            {activeModule === "backups" ? <BackupsModule backupActionById={backupActionById} backupForm={backupForm} backupJobs={backupJobs} backupRuns={backupRuns} backupsError={backupsError} connected={connected} databases={databases} loading={moduleLoading} onBackupFormChange={setBackupForm} onEnableBackup={() => void enableBackup()} onRunBackup={(job) => void runBackup(job)} onToggleBackup={(job, enabled) => void toggleBackup(job, enabled)} /> : null}
 
             {activeModule === "settings" ? (
               <NotificationsPanel
@@ -1938,21 +1796,6 @@ function DatabasesModule({ connected, databaseActionById, databaseForm, database
   );
 }
 
-function BackupsModule({ backupActionById, backupForm, backupJobs, backupRuns, backupsError, connected, databases, loading, onBackupFormChange, onEnableBackup, onRunBackup, onToggleBackup }: { backupActionById: Record<number, string | null>; backupForm: { databaseId: string; schedule: string; retentionDays: string }; backupJobs: DaemonBackupJob[]; backupRuns: DaemonBackupRun[]; backupsError: string | null; connected: boolean; databases: DaemonDatabase[]; loading: boolean; onBackupFormChange: (form: { databaseId: string; schedule: string; retentionDays: string }) => void; onEnableBackup: () => void; onRunBackup: (job: DaemonBackupJob) => void; onToggleBackup: (job: DaemonBackupJob, enabled: boolean) => void }) {
-  const latestRun = backupRuns[0] || null;
-  const failedRuns = backupRuns.filter((run) => run.status === "failed");
-  return (
-    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="backups" stats={<><ReadinessCard label="Jobs" value={loading ? "loading" : String(backupJobs.length)} status={backupJobs.length ? "ok" : "warn"} /><ReadinessCard label="Latest" value={latestRun?.status || "never"} status={latestRun?.status === "succeeded" ? "ok" : latestRun?.status === "failed" ? "error" : "warn"} /><ReadinessCard label="Failed" value={String(failedRuns.length)} status={failedRuns.length ? "error" : "ok"} /><ReadinessCard label="Storage" value="local files" status="ok" /></>} />
-      {backupsError ? <Alert title="Backup action failed" message={backupsError} /> : null}
-      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]">
-        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r"><ResourceSection title="Enable backup job" count={databases.length} /><div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[minmax(120px,0.9fr)_minmax(0,1fr)_100px_auto]"><UiSelect value={backupForm.databaseId} onChange={(event) => onBackupFormChange({ ...backupForm, databaseId: event.target.value })} disabled={!connected || databases.length === 0} label="Database"><option value="">Choose</option>{databases.map((database) => <option key={database.id} value={database.id}>{database.name}</option>)}</UiSelect><Field label="Schedule" value={backupForm.schedule} onChange={(value) => onBackupFormChange({ ...backupForm, schedule: value })} placeholder="0 2 * * *" disabled={!connected} mono /><Field label="Keep days" value={backupForm.retentionDays} onChange={(value) => onBackupFormChange({ ...backupForm, retentionDays: value })} placeholder="7" disabled={!connected} type="number" /><div className="flex items-end"><PillButton strong onClick={onEnableBackup} disabled={!connected || !backupForm.databaseId}>Enable</PillButton></div></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Storage" value="local backup directory" /><Meta label="Restore" value="deferred, not exposed" /></div></div><DeferredCapabilityList items={["External object storage deferred", "Restore UI deferred until backend exists", "Backup files stay local"]} /><ResourceSection title="Backup jobs" count={backupJobs.length} />{loading ? <LoadingRows /> : backupJobs.length === 0 ? <DataEmpty title="No backup jobs" detail="Enable a job for a database to schedule local backups or run one manually." /> : backupJobs.map((job) => <BackupJobLedgerRow key={job.id} busy={backupActionById[job.id]} connected={connected} job={job} latestRun={backupRuns.find((run) => run.backupJobId === job.id) || null} onRunBackup={onRunBackup} onToggleBackup={onToggleBackup} />)}</div>
-        <div className="min-w-0"><ResourceSection title="Run history" count={backupRuns.length} />{loading ? <LoadingRows /> : backupRuns.length === 0 ? <DataEmpty title="No backup runs" detail="Manual and scheduled runs will appear here with file or failure message state." /> : backupRuns.map((run) => <BackupRunLedgerRow key={run.id} run={run} />)}</div>
-      </div>
-    </section>
-  );
-}
-
 function DatabaseLedgerRow({ busy, connected, database, onAction }: { busy: string | null | undefined; connected: boolean; database: DaemonDatabase; onAction: (database: DaemonDatabase, action: "start" | "stop") => void }) {
   const running = database.status === "running";
   const exposure = databaseExposureLabel(database);
@@ -1979,67 +1822,9 @@ function DatabaseLedgerRow({ busy, connected, database, onAction }: { busy: stri
         <Meta label="App" value={database.appName || "service only"} />
         <Meta label="Env keys" value={database.envKeys.length ? database.envKeys.join(", ") : "none"} mono wide />
       </div>
-      <div className="flex flex-wrap gap-1.5 xl:justify-end xl:flex-nowrap">
+      <div className="flex flex-wrap gap-1.5 xl:flex-nowrap xl:justify-end">
         <PillButton onClick={() => onAction(database, "start")} disabled={!connected || Boolean(busy) || running}>{busy === "start" ? "Starting" : "Start"}</PillButton>
         <PillButton onClick={() => onAction(database, "stop")} disabled={!connected || Boolean(busy) || !running}>{busy === "stop" ? "Stopping" : "Stop"}</PillButton>
-      </div>
-    </article>
-  );
-}
-
-function BackupJobLedgerRow({ busy, connected, job, latestRun, onRunBackup, onToggleBackup }: { busy: string | null | undefined; connected: boolean; job: DaemonBackupJob; latestRun: DaemonBackupRun | null; onRunBackup: (job: DaemonBackupJob) => void; onToggleBackup: (job: DaemonBackupJob, enabled: boolean) => void }) {
-  const storage = backupStorageLabel(job);
-  const restore = backupRestoreLabel(job);
-  return (
-    <article className="grid gap-3 border-b border-white/5 px-4 py-3 transition hover:bg-white/[0.025] xl:grid-cols-[minmax(180px,0.85fr)_minmax(260px,1.05fr)_minmax(220px,0.95fr)_auto] xl:items-center">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2">
-          <StatusBadge status={job.enabled ? "running" : "stopped"} />
-          <p className="truncate text-sm font-bold">{job.databaseName || `database ${job.databaseId}`}</p>
-          <span className="rounded-full bg-surface-raised px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{job.databaseType || "db"}</span>
-        </div>
-        <p className="mt-1 truncate font-mono text-[11px] text-muted">{job.localDir || "default backup dir"} · {storage.label}</p>
-      </div>
-      <div className="grid min-w-0 grid-cols-2 gap-2 text-xs sm:grid-cols-3 xl:grid-cols-2">
-        <Meta label="Schedule" value={job.schedule || "manual only"} mono />
-        <Meta label="Retention" value={job.retentionStatus || `${job.retentionDays} days`} />
-        <Meta label="Storage" value={storage.label} />
-        <Meta label="Restore" value={restore.label} />
-        <Meta label="Last run" value={job.lastRunAt ? timeAgo(job.lastRunAt) : "never"} />
-        <Meta label="Last state" value={job.lastRunStatus || "none"} />
-      </div>
-      <div className="min-w-0 text-xs text-muted">
-        <p className="line-clamp-2 break-words">{job.lastRunMessage || latestRun?.message || (latestRun ? backupRunFileState(latestRun).label : null) || "No run message recorded."}</p>
-        {latestRun ? <p className="mt-1 truncate font-mono text-[11px]">run #{latestRun.id} · {latestRun.status} · {latestRun.storageStatus || "metadata-only"} · {formatBytes(latestRun.sizeBytes)}</p> : null}
-      </div>
-      <div className="flex flex-wrap gap-1.5 xl:justify-end xl:flex-nowrap">
-        <PillButton onClick={() => onRunBackup(job)} disabled={!connected || Boolean(busy)}>{busy === "run" ? "Running" : "Run"}</PillButton>
-        <PillButton onClick={() => onToggleBackup(job, !job.enabled)} disabled={!connected || Boolean(busy)}>{busy === "enable" ? "Enabling" : busy === "disable" ? "Disabling" : job.enabled ? "Disable" : "Enable"}</PillButton>
-      </div>
-    </article>
-  );
-}
-
-function BackupRunLedgerRow({ run }: { run: DaemonBackupRun }) {
-  const fileState = backupRunFileState(run);
-  return (
-    <article className="grid gap-3 border-b border-white/5 px-4 py-3 transition hover:bg-white/[0.025] xl:grid-cols-[minmax(180px,0.8fr)_minmax(220px,0.85fr)_minmax(260px,1.15fr)] xl:items-start">
-      <div className="min-w-0">
-        <div className="flex flex-wrap items-center gap-2"><StatusBadge status={run.status} /><p className="truncate text-sm font-bold">#{run.id} {run.databaseName || `database ${run.databaseId}`}</p></div>
-        <p className="mt-1 truncate font-mono text-[11px] text-muted">{run.databaseType || "database"} · {run.trigger}</p>
-      </div>
-      <div className="grid grid-cols-2 gap-2 text-xs">
-        <Meta label="Started" value={timeAgo(run.startedAt || run.createdAt)} />
-        <Meta label="Finished" value={timeAgo(run.finishedAt)} />
-        <Meta label="Size" value={formatBytes(run.sizeBytes)} />
-        <Meta label="Job" value={`#${run.backupJobId}`} mono />
-        <Meta label="Storage" value={run.storageStatus || "metadata-only"} />
-        <Meta label="Restore" value={run.restoreStatus || "deferred"} />
-      </div>
-      <div className="min-w-0">
-        <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">File / message</p>
-        <p className={`mt-1 break-all font-mono text-[11px] ${fileState.tone === "error" ? "text-negative" : "text-muted"}`}>{fileState.label}{run.message ? ` · ${run.message}` : ""}</p>
-        <p className={`mt-1 text-[11px] ${fileState.label === "download exposed" ? "text-negative" : "text-muted"}`}>{fileState.label === "download exposed" ? "download URL exposed unexpectedly; review daemon response" : "local file metadata only; no dashboard download"}</p>
       </div>
     </article>
   );
@@ -2065,97 +1850,123 @@ function DataEmpty({ detail, title }: { detail: string; title: string }) {
   );
 }
 
-function OverviewPanel({ apps, connected, deployments, domains, domainsMeta, github, healthchecksUnavailable, onSelect, proxyRoutes, server, workspace }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; domainsMeta: { rootDomain: string | null; serverPublicIp: string | null }; github: DaemonGithubStatus | null; healthchecksUnavailable: string | null | undefined; onSelect: (module: ModuleKey) => void; proxyRoutes: DaemonProxyRoute[]; server: DaemonServerStatus | null; workspace: string }) {
-  const failedDeploys = deployments.filter((deployment) => deployment.status === "failed").slice(0, 3);
-  const recentDeploys = deployments.slice(0, 5);
-  const domainAttention = domains.filter((domain) => domain.dnsStatus !== "verified" || domain.tlsStatus !== "active").slice(0, 4);
-  const pendingApps = apps.filter((app) => app.needsRedeploy || app.needsRestart);
-  const running = apps.filter((app) => app.status === "running").length;
-  const stopped = apps.filter((app) => app.status === "stopped").length;
-  const crashed = apps.filter((app) => app.status === "crashed" || app.status === "failed").length;
-  const disabled = apps.filter((app) => !app.enabled).length;
-  const latestDeploy = deployments[0] || null;
+function OverviewPanel({ apps, connected, deployments, domains, healthchecksUnavailable, hostMetrics, hostMetricsError, onSelect, proxyRoutes, server, workspace }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; healthchecksUnavailable: string | null | undefined; hostMetrics: DaemonMetricSample[]; hostMetricsError: string | null; onSelect: (module: ModuleKey) => void; proxyRoutes: DaemonProxyRoute[]; server: DaemonServerStatus | null; workspace: string }) {
+  const appResources = apps.filter((app) => app.type !== "database");
+  const latestHostMetric = hostMetrics[0] || null;
+  const sortedHostMetrics = [...hostMetrics].sort((first, second) => timeValue(first.sampledAt) - timeValue(second.sampledAt)).slice(-12);
+  const hostSamples: HostResourceSample[] = sortedHostMetrics.map((sample, index) => {
+    const sampledAt = new Date(sample.sampledAt);
+    return {
+      label: Number.isNaN(sampledAt.valueOf()) ? `#${index + 1}` : sampledAt.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      cpu: sample.cpuPercent,
+      memory: sample.memoryBytes != null && sample.memoryLimitBytes ? (sample.memoryBytes / sample.memoryLimitBytes) * 100 : null
+    };
+  });
+  const memoryLabel = latestHostMetric?.memoryBytes == null
+    ? "pending"
+    : latestHostMetric.memoryLimitBytes
+      ? `${((latestHostMetric.memoryBytes / latestHostMetric.memoryLimitBytes) * 100).toFixed(1)}%`
+      : formatBytes(latestHostMetric.memoryBytes);
+  const diskPercent = latestHostMetric?.diskUsedBytes != null && latestHostMetric.diskTotalBytes ? (latestHostMetric.diskUsedBytes / latestHostMetric.diskTotalBytes) * 100 : null;
+  const disk: DiskUsageValue = {
+    usedBytes: latestHostMetric?.diskUsedBytes ?? null,
+    totalBytes: latestHostMetric?.diskTotalBytes ?? null,
+    usedLabel: latestHostMetric?.diskUsedBytes == null ? "pending" : formatBytes(latestHostMetric.diskUsedBytes),
+    totalLabel: latestHostMetric?.diskTotalBytes == null ? "pending" : formatBytes(latestHostMetric.diskTotalBytes),
+    percent: diskPercent
+  };
+
+  const statusCounts = appResources.reduce<Record<string, number>>((counts, app) => {
+    const key = appStatusBucket(app);
+    counts[key] = (counts[key] || 0) + 1;
+    return counts;
+  }, {});
+  const appStatus: AppStatusDatum[] = [
+    { key: "running", label: "Running", value: statusCounts.running || 0, color: ROUTELY_CHART_COLORS.runningGreen },
+    { key: "stopped", label: "Stopped", value: statusCounts.stopped || 0, color: ROUTELY_CHART_COLORS.routeBlue },
+    { key: "needs-setup", label: "Needs setup", value: statusCounts.needsSetup || 0, color: ROUTELY_CHART_COLORS.warningAmber },
+    { key: "failed", label: "Failed", value: statusCounts.failed || 0, color: ROUTELY_CHART_COLORS.failureRed },
+    { key: "disabled", label: "Disabled", value: statusCounts.disabled || 0, color: ROUTELY_CHART_COLORS.mutedInk }
+  ];
+  const runningCount = statusCounts.running || 0;
+  const pendingCount = (statusCounts.needsSetup || 0) + (statusCounts.failed || 0);
   const verifiedDomains = domains.filter((domain) => domain.dnsStatus === "verified" || domain.status === "ready").length;
-  const enabledRoutes = proxyRoutes.filter((route) => route.enabled).length;
-  const githubConnected = Boolean(github?.repositories.some((repo) => repo.connectedAppId));
-  const urgent = [
-    ...failedDeploys.map((deployment) => ({ key: `deploy-${deployment.id}`, title: deployment.appName || `deployment ${deployment.id}`, detail: deployment.errorMessage || deployment.phase, tone: "error" as const, module: "deployments" as ModuleKey })),
-    ...domainAttention.map((domain) => ({ key: `domain-${domain.id}`, title: domain.hostname, detail: `${domain.dnsStatus} DNS · ${httpsSummary([domain])}`, tone: tlsTone(domain.tlsStatus), module: "domains" as ModuleKey })),
-    ...pendingApps.slice(0, 5).map((app) => ({ key: `pending-${app.id}`, title: app.name, detail: pendingStateLabel(app), tone: "warn" as const, module: "apps" as ModuleKey }))
-  ].slice(0, 7);
+  const activeRoutes = proxyRoutes.filter((route) => route.enabled).length;
+  const activity = dashboardActivityItems({ apps: appResources, deployments, domains });
 
   return (
-    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
-      <div className="grid gap-4 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.9fr)] xl:items-start">
-        <div className="min-w-0">
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Solo operator console</p>
-          <h1 className="text-xl font-bold leading-tight">Runtime host operations</h1>
-          <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
-            <Meta label="Daemon" value={connected ? "connected" : "offline"} />
-            <Meta label="Mode" value={server?.mode || "local"} />
-            <Meta label="Workspace" value={workspace} mono wide />
-            <Meta label="Data dir" value={server?.dataDir || "runtime host state"} mono wide />
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
-          <ReadinessCard label="Daemon" value={connected ? "online" : "offline"} status={connected ? "ok" : "error"} />
-          <ReadinessCard label="Server" value={server?.readiness?.ok ? "ready" : server?.production ? "check" : "local"} status={server?.readiness?.ok || !server?.production ? "ok" : "warn"} />
-          <ReadinessCard label="Apps" value={`${running}/${apps.length} run`} status={running || apps.length === 0 ? "ok" : "warn"} />
-          <ReadinessCard label="Pending" value={String(pendingApps.length)} status={pendingApps.length ? "warn" : "ok"} />
-        </div>
-      </div>
-      {healthchecksUnavailable ? <Alert title="Some overview data is stale" message={healthchecksUnavailable} /> : null}
-      <div className="grid gap-3 px-4 py-4 xl:grid-cols-[1.05fr_0.95fr]">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <OverviewStatusCard title="Resources" action="Apps" onAction={() => onSelect("apps")} items={[`running ${running}`, `stopped ${stopped}`, `crashed ${crashed}`, `disabled ${disabled}`]} tone={crashed ? "error" : pendingApps.length ? "warn" : "ok"} />
-          <OverviewStatusCard title="Latest deploy" action="Deploy" onAction={() => onSelect("deployments")} items={latestDeploy ? [latestDeploy.appName || `app ${latestDeploy.appId}`, deploymentStateLabel(latestDeploy), timeAgo(latestDeploy.updatedAt)] : ["no deployments", "Dockerfile bridge only"]} tone={latestDeploy ? statusTone(latestDeploy.status) : "warn"} />
-          <OverviewStatusCard title="Domains & proxy" action="Domains" onAction={() => onSelect("domains")} items={[domainsMeta.rootDomain || "root unset", `${verifiedDomains}/${domains.length} DNS ready`, `${enabledRoutes} generated routes`]} tone={domains.length && verifiedDomains === domains.length ? "ok" : domains.length ? "warn" : "warn"} />
-          <OverviewStatusCard title="GitHub deploys" action="GitHub" onAction={() => onSelect("github")} items={[github?.configured ? "GitHub app configured" : "GitHub app missing", githubConnected ? "repo connected" : "no repo connected", latestDeploy ? `latest deploy ${deploymentStateLabel(latestDeploy)}` : "no deploy history"]} tone={githubConnected ? "ok" : "warn"} />
-        </div>
-        <OverviewList title="Urgent next actions" empty="No loaded blockers from current data." action="Review" onAction={() => onSelect(urgent[0]?.module || "apps")}>
-          {urgent.map((item) => <TimelineRow key={item.key} title={item.title} detail={item.detail} tone={item.tone} />)}
-        </OverviewList>
-      </div>
-      <div className="grid gap-3 border-t border-white/5 bg-black/10 px-4 py-4 lg:grid-cols-2">
-        <OverviewList title="Recent deployments" empty="No deployments yet." action="Deployments" onAction={() => onSelect("deployments")}>
-          {recentDeploys.slice(0, 3).map((deployment) => <TimelineRow key={deployment.id} title={`#${deployment.id} ${deployment.appName || "app"}`} detail={`${deploymentStateLabel(deployment)} · ${timeAgo(deployment.updatedAt)}`} tone={deployment.status === "failed" ? "error" : deployment.status === "succeeded" ? "ok" : "warn"} />)}
-        </OverviewList>
-        <OverviewList title="Domain readiness" empty="No domains configured." action="Domains" onAction={() => onSelect("domains")}>
-          {domains.slice(0, 4).map((domain) => <TimelineRow key={domain.id} title={domain.hostname} detail={`${domainDnsLabel(domain.dnsStatus)} · ${domainTlsLabel(domain.tlsStatus)}`} tone={domain.dnsStatus !== "verified" ? "warn" : tlsTone(domain.tlsStatus)} />)}
-        </OverviewList>
-      </div>
-    </section>
+    <>
+      {healthchecksUnavailable ? <DashboardNotice title="Some dashboard data is stale" detail={healthchecksUnavailable} /> : null}
+      <OperationsDashboard
+        activeRoutes={activeRoutes}
+        activity={activity}
+        appStatus={appStatus}
+        connected={connected}
+        disk={disk}
+        domainsReadyLabel={`${verifiedDomains}/${domains.length}`}
+        hostMetricError={hostMetricsError}
+        hostSamples={hostSamples}
+        mode={server?.mode || "local"}
+        onNavigate={onSelect}
+        pendingCount={pendingCount}
+        resourceSummary={{ cpu: formatPercent(latestHostMetric?.cpuPercent ?? null) || "pending", memory: memoryLabel }}
+        runningCount={runningCount}
+        serverReady={Boolean(server?.readiness?.ok)}
+        totalApps={appResources.length}
+        trafficPoints={[]}
+        workspace={workspace}
+      />
+    </>
   );
 }
 
-function OverviewStatusCard({ action, items, onAction, title, tone }: { action: string; items: string[]; onAction: () => void; title: string; tone: "ok" | "warn" | "error" }) {
-  const color = tone === "ok" ? "bg-accent" : tone === "warn" ? "bg-warning" : "bg-negative";
-  return (
-    <button type="button" onClick={onAction} className={`min-w-0 rounded-md bg-black/20 px-3 py-3 text-left transition hover:bg-white/[0.035] ${INSET_RING} ${FOCUS_RING}`}>
-      <div className="flex items-center justify-between gap-3">
-        <span className="flex min-w-0 items-center gap-2">
-          <span className={`h-2 w-2 shrink-0 rounded-full ${color}`} />
-          <span className="truncate text-sm font-bold">{title}</span>
-        </span>
-        <span className="shrink-0 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{action}</span>
-      </div>
-      <div className="mt-3 grid gap-1">
-        {items.map((item) => <p key={item} className="truncate text-[11px] text-muted">{item}</p>)}
-      </div>
-    </button>
-  );
+function appStatusBucket(app: DaemonApp): "running" | "stopped" | "needsSetup" | "failed" | "disabled" {
+  if (!app.enabled) return "disabled";
+  if (["crashed", "failed", "error"].includes(app.status)) return "failed";
+  if (app.needsRedeploy || app.needsRestart || app.status.includes("needs") || app.status === "pending") return "needsSetup";
+  if (isAppRuntimeRunning(app)) return "running";
+  if (app.status === "stopped") return "stopped";
+  return "needsSetup";
 }
 
-function OverviewList({ action, children, empty, onAction, title }: { action: string; children: ReactNode; empty: string; onAction: () => void; title: string }) {
-  const items = Array.isArray(children) ? children.filter(Boolean) : children;
-  const hasItems = Array.isArray(items) ? items.length > 0 : Boolean(items);
+function dashboardActivityItems({ apps, deployments, domains }: { apps: DaemonApp[]; deployments: DaemonDeployment[]; domains: DaemonDomain[] }): ActivityItem[] {
+  const failedDeploys = deployments.filter((deployment) => deployment.status === "failed").slice(0, 3).map((deployment) => ({
+    id: `deploy-failed-${deployment.id}`,
+    title: deployment.appName || `Deployment ${deployment.id}`,
+    detail: deployment.errorMessage || `Deploy ${deployment.phase}`,
+    timestamp: timeAgo(deployment.updatedAt),
+    tone: "error" as const
+  }));
+  const recentDeploys = deployments.slice(0, 4).map((deployment) => ({
+    id: `deploy-${deployment.id}`,
+    title: deployment.appName || `Deployment ${deployment.id}`,
+    detail: `Deploy ${deploymentStateLabel(deployment)} · ${deploymentSource(deployment)}`,
+    timestamp: timeAgo(deployment.updatedAt),
+    tone: deployment.status === "failed" ? "error" as const : deployment.status === "succeeded" ? "ok" as const : "warn" as const
+  }));
+  const domainItems = domains.filter((domain) => domain.dnsStatus !== "verified" || domain.tlsStatus !== "active").slice(0, 3).map((domain) => ({
+    id: `domain-${domain.id}`,
+    title: domain.hostname,
+    detail: `${domainDnsLabel(domain.dnsStatus)} · ${domainTlsLabel(domain.tlsStatus)}`,
+    timestamp: timeAgo(domain.updatedAt),
+    tone: domain.dnsStatus === "verified" ? "warn" as const : "error" as const
+  }));
+  const appItems = apps.filter((app) => app.needsRedeploy || app.needsRestart || ["crashed", "failed", "error"].includes(app.status)).slice(0, 4).map((app) => ({
+    id: `app-${app.id}`,
+    title: app.name,
+    detail: pendingStateLabel(app),
+    timestamp: timeAgo(app.updatedAt),
+    tone: ["crashed", "failed", "error"].includes(app.status) ? "error" as const : "warn" as const
+  }));
+
+  return [...failedDeploys, ...appItems, ...domainItems, ...recentDeploys].slice(0, 8);
+}
+
+function DashboardNotice({ detail, title }: { detail: string; title: string }) {
   return (
-    <div className={`min-w-0 rounded-md bg-black/20 ${INSET_RING}`}>
-      <div className="flex items-center justify-between border-b border-white/5 px-3 py-2">
-        <h2 className="text-sm font-bold">{title}</h2>
-        <button type="button" onClick={onAction} className={`rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted transition hover:text-accent ${FOCUS_RING}`}>{action}</button>
-      </div>
-      <div className="divide-y divide-white/5">{hasItems ? items : <p className="px-3 py-3 text-xs text-muted">{empty}</p>}</div>
+    <div className="rounded-[1.35rem] border border-[#F59E0B]/35 bg-[#FFF7ED] px-4 py-3 text-[#172033] shadow-[0_18px_50px_rgba(217,119,6,0.12)]">
+      <p className="text-sm font-black">{title}</p>
+      <p className="mt-1 text-xs leading-5 text-[#92400E]">{detail}</p>
     </div>
   );
 }
@@ -2251,19 +2062,6 @@ function NotificationAttemptRow({ attempt }: { attempt: DaemonNotificationAttemp
         <p className="mt-1 break-words text-xs text-muted">{attempt.message || "No delivery message."}</p>
       </div>
     </article>
-  );
-}
-
-function TimelineRow({ detail, title, tone }: { detail: string; title: string; tone: "ok" | "warn" | "error" }) {
-  const color = tone === "ok" ? "bg-accent" : tone === "warn" ? "bg-warning" : "bg-negative";
-  return (
-    <div className="grid grid-cols-[auto_1fr] gap-2 px-3 py-2">
-      <span className={`mt-1.5 h-2 w-2 rounded-full ${color}`} />
-      <div className="min-w-0">
-        <p className="truncate text-xs font-bold">{title}</p>
-        <p className="truncate text-[11px] text-muted">{detail}</p>
-      </div>
-    </div>
   );
 }
 

@@ -11,7 +11,6 @@ export type DashboardModuleKey =
   | "github"
   | "env"
   | "databases"
-  | "backups"
   | "server"
   | "settings";
 
@@ -67,14 +66,11 @@ export const DASHBOARD_NAV_GROUPS: DashboardNavGroup[] = [
   }
 ];
 
-const HIDDEN_MODULES: DashboardModule[] = [
-  { key: "backups", label: "Backups", summary: "Deferred in this MVP" }
-];
 
 export const DASHBOARD_MODULES = DASHBOARD_NAV_GROUPS.flatMap((group) => group.modules);
 
 export function getDashboardModule(key: DashboardModuleKey): DashboardModule {
-  return [...DASHBOARD_MODULES, ...HIDDEN_MODULES].find((module) => module.key === key) || DASHBOARD_MODULES[0];
+  return DASHBOARD_MODULES.find((module) => module.key === key) || DASHBOARD_MODULES[0];
 }
 
 export type ServerRailTone = "ok" | "warn" | "error" | "muted";
