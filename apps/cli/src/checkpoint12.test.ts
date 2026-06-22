@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { runServerDoctorChecks } from "@routely/core";
+import { hashAdminToken, runServerDoctorChecks } from "@routely/core";
 import { signGithubWebhookPayload } from "@routely/github";
 import { createDeployment, getAppByName, initializeRoutely, listProxyRoutes, saveServerFoundationState, updateDeployment } from "@routely/db";
 
@@ -158,6 +158,54 @@ describe("QA regression fixes", () => {
     });
     expect(authorized.response.status).toBe(200);
     expect(authorized.body.apps).toEqual([]);
+
+    const authStatus = await jsonRequest(baseUrl, "/auth/status");
+    expect(authStatus.response.status).toBe(200);
+    expect(authStatus.body).toMatchObject({
+      mode: "production",
+      auth: {
+        required: true,
+        configured: true,
+        tokenSource: "environment"
+      }
+    });
+  });
+
+  it("enforces persisted production mode as the canonical backend auth signal", async () => {
+    const workspace = await createWorkspace();
+    const adminToken = randomUUID();
+    const { db } = initializeRoutely(workspace);
+    saveServerFoundationState(db, {
+      mode: "production",
+      dataDir: join(workspace, "production-data"),
+      initializedAt: new Date().toISOString(),
+      adminTokenHash: "hash",
+      adminTokenSalt: "salt",
+      adminTokenCreatedAt: new Date().toISOString()
+    });
+    db.close();
+    const { baseUrl } = await startDaemon(workspace, {
+      ROUTELY_SERVER_MODE: "local",
+      ROUTELY_ADMIN_TOKEN: adminToken
+    });
+
+    const authStatus = await jsonRequest(baseUrl, "/auth/status");
+    expect(authStatus.body).toMatchObject({
+      mode: "production",
+      auth: {
+        required: true,
+        configured: true,
+        tokenSource: "environment"
+      }
+    });
+
+    const missing = await jsonRequest(baseUrl, "/apps/start-all", { method: "POST" });
+    expect(missing.response.status).toBe(401);
+
+    const authorized = await jsonRequest(baseUrl, "/apps", {
+      headers: { "x-routely-admin-token": adminToken }
+    });
+    expect(authorized.response.status).toBe(200);
   });
 
   it("rejects unauthenticated production mutation endpoints", async () => {
@@ -181,6 +229,93 @@ describe("QA regression fixes", () => {
     });
     expect(authorized.response.status).toBe(200);
     expect(authorized.body.rootDomain).toBe("example.com");
+  });
+
+  it("exposes production auth state without leaking the admin token when dashboard env is unset", async () => {
+    const workspace = await createWorkspace();
+    const adminToken = randomUUID();
+    const { baseUrl } = await startDaemon(workspace, {
+      ROUTELY_ENV: "",
+      ROUTELY_SERVER_MODE: "production",
+      ROUTELY_ADMIN_TOKEN: adminToken
+    });
+
+    const status = await jsonRequest(baseUrl, "/server/status");
+    const auth = await jsonRequest(baseUrl, "/auth/status");
+    const missing = await jsonRequest(baseUrl, "/domains/root", {
+      method: "POST",
+      body: JSON.stringify({ domain: "example.com" })
+    });
+
+    expect(status.response.status).toBe(200);
+    expect(status.body.server).toMatchObject({
+      mode: "production",
+      production: true,
+      auth: {
+        required: true,
+        configured: true,
+        tokenSource: "environment"
+      }
+    });
+    expect(auth.response.status).toBe(200);
+    expect(auth.body).toMatchObject({
+      mode: "production",
+      auth: {
+        required: true,
+        configured: true,
+        tokenSource: "environment"
+      }
+    });
+    expect(JSON.stringify(status.body)).not.toContain(adminToken);
+    expect(JSON.stringify(auth.body)).not.toContain(adminToken);
+    expect(missing.response.status).toBe(401);
+  });
+
+  it("uses persisted production foundation state as the backend auth contract at daemon startup", async () => {
+    const workspace = await createWorkspace();
+    const adminToken = randomUUID();
+    const hashed = hashAdminToken(adminToken);
+    const { db } = initializeRoutely(workspace);
+    saveServerFoundationState(db, {
+      mode: "production",
+      dataDir: join(workspace, ".routely", "server"),
+      initializedAt: new Date().toISOString(),
+      adminTokenHash: hashed.hash,
+      adminTokenSalt: hashed.salt,
+      adminTokenCreatedAt: new Date().toISOString()
+    });
+    db.close();
+    const { baseUrl } = await startDaemon(workspace, {
+      ROUTELY_ENV: "",
+      ROUTELY_ADMIN_TOKEN: adminToken
+    });
+
+    const status = await jsonRequest(baseUrl, "/server/status");
+    const missing = await jsonRequest(baseUrl, "/domains/root", {
+      method: "POST",
+      body: JSON.stringify({ domain: "example.com" })
+    });
+    const authorized = await jsonRequest(baseUrl, "/domains/root", {
+      method: "POST",
+      headers: { authorization: `Bearer ${adminToken}` },
+      body: JSON.stringify({ domain: "example.com" })
+    });
+
+    expect(status.response.status).toBe(200);
+    expect(status.body.server).toMatchObject({
+      mode: "production",
+      production: true,
+      auth: {
+        required: true,
+        configured: true,
+        tokenSource: "environment"
+      }
+    });
+    expect(JSON.stringify(status.body)).not.toContain(adminToken);
+    expect(JSON.stringify(status.body)).not.toContain(hashed.hash);
+    expect(JSON.stringify(status.body)).not.toContain(hashed.salt);
+    expect(missing.response.status).toBe(401);
+    expect(authorized.response.status).toBe(200);
   });
 
   it("round-trips disabled Compose app metadata through config, DB, daemon DTOs, and CLI output", async () => {

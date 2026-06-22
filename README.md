@@ -133,12 +133,15 @@ This is the alpha direction for a single Linux VPS. Keep the dashboard behind pr
 
 ```bash
 ROUTELY_ENV=production
+ROUTELY_SERVER_MODE=production
 ROUTELY_DATA_DIR=/var/lib/routely
 ROUTELY_DAEMON_HOST=127.0.0.1
 ROUTELY_DAEMON_PORT=9977
 ROUTELY_DASHBOARD_PORT=3030
 ROUTELY_SERVER_PUBLIC_IP=<server-ip>
 ```
+
+`ROUTELY_SERVER_MODE=production` is the canonical backend production-mode signal for the daemon and same-origin dashboard route handlers. Keep `ROUTELY_ENV=production` set for the dashboard process as well, and configure `ROUTELY_ADMIN_TOKEN` anywhere server-side code proxies production daemon requests.
 
 3. Initialize production state and save the printed admin token somewhere private:
 
