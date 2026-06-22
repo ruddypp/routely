@@ -2,93 +2,128 @@
 
 ## Frontend Goal
 
-The Routely dashboard is an operations dashboard: it tells the operator what is running, what is broken, what is receiving traffic, and what action is safe to take next. It must be lighter than an enterprise observability suite and more practical than a static app list.
+The Routely dashboard is a Spotify-inspired operations dashboard: dark, polished, compact, and easy to read while running many apps. It should tell the operator what is running, what is broken, what is receiving traffic, and what action is safe to take next.
 
 ## Design Direction
 
 ### Subject
 
-Routely is a small control room for solo developers running many apps from one machine. The UI should feel like a calm server console: precise, fast, low-ceremony, and readable under pressure.
+Routely is a runtime-host console for solo developers. The user runs `routely`, opens a dashboard, starts every enabled app, then monitors and controls each app from one place.
+
+### Visual North Star
+
+Use Spotify's product UI as the main visual inspiration, adapted for app/server operations:
+
+- Dark immersive shell.
+- Layered charcoal panels.
+- Rounded/pill controls.
+- Compact high-density content.
+- Green healthy/running accent.
+- Clear white text hierarchy.
+- Charts that feel like part of a dark console.
+
+Do not copy Spotify branding, logos, exact layouts, or proprietary assets. Routely must remain its own product.
 
 ### Palette
 
-- `Host Ink` — `#172033` for primary text and navigation.
-- `Panel Mist` — `#F6F8FB` for page background.
-- `Rack Line` — `#DCE3EE` for borders and dividers.
-- `Route Blue` — `#2563EB` for primary actions and active routes.
-- `Running Green` — `#18A058` for healthy/running states.
-- `Warning Amber` — `#D97706` for pending/needs setup states.
-- `Failure Red` — `#DC2626` for failed/error states.
+- `Stage Black` — `#0A0D0B` for the app background.
+- `Deck Black` — `#101412` for sidebar and deep shell surfaces.
+- `Panel Charcoal` — `#171C1A` for cards and dashboard panels.
+- `Elevated Charcoal` — `#222823` for raised widgets and hover states.
+- `Soft Border` — `#2D352F` for subtle dividers.
+- `Primary Text` — `#F7FFF9` for key headings and numbers.
+- `Muted Text` — `#A8B3AD` for secondary labels.
+- `Routely Green` — `#1ED760` for running, healthy, primary CTAs, and active navigation.
+- `Route Blue` — `#4F8CFF` for domains/routes and links.
+- `Warning Amber` — `#F59E0B` for pending/needs setup.
+- `Failure Red` — `#EF4444` for failed/error states.
 
+### Typography
 
-### Visual Quality Bar
+- UI/body: system sans with compact line-height and strong weight contrast.
+- Data/logs/terminal: monospace stack for ports, metrics, paths, env keys, and log lines.
+- Large dashboard numbers should be bold and tight, not oversized magazine headlines.
+- Labels should be small, uppercase, and muted where they support scanning.
 
-The dashboard must not look like the old alpha dashboard after the next visual checkpoint. FE-01 only modularized the shell; the next frontend checkpoint must actively redesign the operational surface.
+### Shape, Spacing, And Density
+
+- Default panel radius: `18px` to `24px`.
+- Buttons: pill radius, clear hover/focus states.
+- Icon actions: circular or pill-shaped.
+- Cards should be compact and content-rich; avoid huge empty panels.
+- Main content should fit meaningful information above the fold on 1365px-wide screens.
+- Avoid light beige/white command-board panels unless a future theme explicitly adds light mode.
+
+### Signature Element
+
+Use a compact `Server Rail`, not a tall top banner. It should behave like Spotify's top player/status strip translated to server operations.
+
+Server Rail content:
+
+- Runtime host name.
+- Session state.
+- Daemon state.
+- Docker state.
+- Compose state.
+- CPU/RAM/Disk quick chips.
+- Uptime.
+- Refresh action.
+
+Server Rail rules:
+
+- Height should stay compact.
+- It should use dark/elevated surfaces.
+- Chips should be pill-shaped.
+- Warnings/errors should not explode into giant panels.
+- If data is unavailable, show a small warning chip and a short inline reason.
+
+## Visual Quality Bar
+
+The current dashboard redesign is not acceptable if it still looks like a generic light admin board, has a giant stale-data card, or uses a tall navy banner with disconnected white content panels.
 
 Required visual outcomes:
 
-- A new above-the-fold dashboard composition, not the previous section stack with renamed components.
-- A strong Server Rail that feels like the product signature, with compact host identity and live operational chips.
-- Real chart components for host and app signals, using empty/pending states when data is not available instead of fake success data.
-- Cards with clear hierarchy: hero status, metric charts, app fleet status, recent incidents, logs/activity.
-- A more polished app-shell treatment: intentional spacing, consistent radius, focused color use, and readable density.
+- The first impression is dark Spotify-inspired Routely, not a light dashboard template.
+- Sidebar, Server Rail, and dashboard content share one dark visual system.
+- Server Rail is compact and integrated into the shell.
+- Dashboard cards are polished charcoal surfaces, not white/cream blocks.
+- Charts are real components with dark-theme styling and accessible summaries.
+- Stale/unavailable data appears as compact inline warnings, not a huge empty warning column.
 - No active Backups/Restore UI in nav, overview cards, or app operations.
 
-### Approved UI Dependencies
+## Approved UI Dependencies
 
-Frontend agents may install small, focused UI dependencies when they improve implementation quality and do not replace the Routely design system.
+Frontend agents may install dependencies liberally when they improve the UI, interaction quality, accessibility, or implementation speed. Dependencies must still be purposeful and committed with package/lockfile changes.
 
-Approved for the visual dashboard checkpoint:
+Recommended examples:
 
-- `recharts` for React-native charts. Recharts is documented as a composable React chart library and its current docs show responsive chart primitives suitable for LineChart, AreaChart, BarChart, and RadialBarChart.
-- `lucide-react` for lightweight operational icons when plain text is not enough.
-- `clsx` only if class composition becomes noisy.
+- `recharts` for charts.
+- `lucide-react` for lightweight icons.
+- `clsx` or `tailwind-merge` for class composition.
+- `framer-motion` for subtle motion if it improves polish without distracting.
+- Focused Radix primitives if a real interaction needs accessible popover/dialog/tabs behavior.
 
-Do not add a heavy dashboard/admin template package. Do not add a full component framework unless a later ADR approves it.
+Do not add a heavy admin template that dictates Routely's design language.
 
-### Chart Requirements
+## Chart Requirements
 
-The first visual dashboard pass must include reusable chart primitives, even if some panels render honest empty states until backend samples exist.
+The visual dashboard must include reusable chart/visual modules, even when some panels render honest empty states until backend samples exist.
 
 Required chart modules:
 
-- `HostResourceChart` — small line/area chart for CPU and memory samples.
-- `DiskUsageGauge` — radial or progress-style disk usage visualization.
-- `TrafficSparkline` — app/domain traffic sparkline with a clear empty state when no proxy traffic exists.
-- `AppStatusChart` — compact stacked bar or donut-style status distribution for running/stopped/failed/disabled/needs setup.
-- `ActivityTimeline` — visual event timeline for starts, stops, verification failures, domain events, and recent logs.
+- `HostResourceChart` — dark line/area chart for CPU and memory samples.
+- `DiskUsageGauge` — circular/progress disk usage visualization.
+- `TrafficSparkline` — route/app traffic sparkline with dark empty state when no proxy traffic exists.
+- `AppStatusChart` — compact status distribution for running/stopped/failed/disabled/needs setup.
+- `ActivityTimeline` — dense event timeline for starts, stops, verification failures, domain events, and recent logs.
 
 Rules:
 
 - Use real backend samples when available.
-- If the backend has only current values, render current-value cards plus a chart empty state that says what data is missing.
+- If the backend has only current values, render current-value cards plus a compact empty chart state.
 - Never fabricate healthy/running/traffic values just to fill a chart.
 - Charts must have accessible labels and non-color text summaries.
 - Chart colors must use the Routely palette, not random library defaults.
-
-### Typography
-
-- Display/UI: system sans, with restrained weight and tight labels.
-- Data/terminal/logs: monospace stack for metrics, ports, IDs, and log lines.
-- Copy style: direct verbs, no marketing language inside operational surfaces.
-
-### Signature Element
-
-Use a persistent `Server Rail`: a compact top/status strip that shows runtime host identity, Docker status, CPU/RAM/disk, uptime, and server session state. This makes the dashboard feel placement-neutral: the server is the machine currently running Routely.
-
-```text
-┌────────────────────────────────────────────────────────────┐
-│ Server Rail: host • Docker ok • CPU • RAM • Disk • Uptime  │
-├───────────────┬────────────────────────────────────────────┤
-│ Sidebar       │ Page content                               │
-│ Dashboard     │                                            │
-│ Apps          │                                            │
-│ Databases     │                                            │
-│ Activity      │                                            │
-│ Server        │                                            │
-│ Settings      │                                            │
-└───────────────┴────────────────────────────────────────────┘
-```
 
 ## Information Architecture
 
@@ -118,15 +153,27 @@ Purpose: show runtime host and app fleet health at a glance.
 
 Must show:
 
-- Server Rail with host identity, Docker/Compose status, CPU, memory, disk, uptime, and refresh state.
-- Dashboard hero panel that answers: “Is this runtime host healthy and are my apps running?”
+- Compact dark Server Rail.
+- Hero/fleet panel that answers: “Is this runtime host healthy and are my apps running?”
 - App status chart: running, stopped, needs setup, failed, disabled.
-- Host resource charts: CPU and memory trends when samples exist; honest empty states otherwise.
+- Host resource charts: CPU and memory trends when samples exist; compact empty states otherwise.
 - Disk usage gauge with used/free summary.
 - Traffic sparkline or traffic empty state per app/domain.
-- Recent incidents: failed setup, failed health, failed domain verification.
-- Recently active logs/activity timeline.
+- Recent incidents and activity timeline.
+- Recently active logs.
 - Quick actions: Add app, Start all, Stop all.
+
+Layout guidance:
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│ compact dark Server Rail                                     │
+├──────────────┬───────────────────────────────────────────────┤
+│ dark sidebar │ hero/fleet status       app status + disk     │
+│              │ host resource charts    traffic + activity    │
+│              │ app/service list strip  logs/incidents        │
+└──────────────┴───────────────────────────────────────────────┘
+```
 
 Empty state:
 
@@ -231,7 +278,8 @@ Must show:
 
 Split UI by feature, not by one giant dashboard client:
 
-- `dashboard-shell` — layout, sidebar, server rail, nav.
+- `dashboard-shell` — layout, sidebar, compact Server Rail, nav.
+- `dashboard-visuals` — dark dashboard hero, charts, app status, traffic, activity.
 - `server-status` — host metrics, Docker status, doctor cards.
 - `apps-list` — app cards/table and bulk controls.
 - `app-detail` — tabbed app workspace.
@@ -272,6 +320,7 @@ Avoid:
 - “Something went wrong.”
 - “Deployment successful” when only config was saved.
 - “Production ready” unless readiness and runtime checks passed.
+- Giant stale-data panels that hide useful dashboard content.
 
 ## Accessibility And Responsiveness
 
@@ -280,6 +329,7 @@ Avoid:
 - Logs and terminal need readable contrast and copy controls.
 - Mobile layout can collapse navigation, but app action buttons must remain reachable.
 - Destructive actions need confirmation and clear target names.
+- Dark surfaces must maintain contrast for text, charts, and focus rings.
 
 ## Frontend Execution Rules
 

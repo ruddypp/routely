@@ -90,6 +90,37 @@ Acceptance criteria:
 - Relevant web lint, tests, and build pass.
 - Final handoff includes files changed, dependency changes, checks, commit hash, push status, and screenshot/visual QA note.
 
+## Slice 1B — Spotify-Inspired Dashboard Correction
+
+Owner: Frontend.
+
+Blocked by: Slice 1A.
+
+Why this exists:
+
+- Slice 1A introduced charts but still produced a light command-board layout that does not match the requested Spotify-inspired Routely UI.
+- The next pass must correct visual direction, not add more features.
+
+What to build:
+
+- Convert the dashboard shell/content to the Spotify-inspired dark console defined in `docs/frontend.md`.
+- Replace light/cream/white dashboard panels with layered charcoal panels.
+- Make Server Rail compact and integrated into the dark shell instead of a tall banner.
+- Rework stale/unavailable data into compact warning chips or inline empty states.
+- Keep existing chart components but restyle them for the dark palette.
+- Improve above-the-fold density so host/app status, charts, activity, and quick actions are readable without giant empty blocks.
+- Keep Backups/Restore hidden from active UI.
+
+Acceptance criteria:
+
+- Screenshot clearly reads as a dark Spotify-inspired operational console.
+- No large white/cream stale-data panels remain on the dashboard home.
+- Server Rail height is compact and dashboard content begins high on the page.
+- At least three visual/chart components remain present and dark-theme styled.
+- Empty/unavailable states are honest but visually subordinate to operational content.
+- Relevant web lint, tests, and build pass.
+- Final handoff includes screenshot path or image, files changed, checks, commit hash, and push status.
+
 ## Slice 2 — Prefactor Daemon Route Modules
 
 Owner: Backend.
