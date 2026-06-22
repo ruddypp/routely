@@ -16,14 +16,22 @@ export function OperationsDashboard({
   hostMetricError,
   hostSamples,
   mode,
-  onNavigate,
+  notices,
+  onConnectGithub,
+  onRefresh,
+  onStartAll,
+  onStopAll,
   pendingCount,
+  refreshing,
   resourceSummary,
   runningCount,
   serverReady,
+  startAllBusy,
+  startAllReason,
+  stopAllBusy,
+  stopAllReason,
   totalApps,
-  trafficPoints,
-  workspace
+  trafficPoints
 }: {
   activeRoutes: number;
   activity: ActivityItem[];
@@ -34,102 +42,147 @@ export function OperationsDashboard({
   hostMetricError?: string | null;
   hostSamples: HostResourceSample[];
   mode: string;
-  onNavigate: (module: "apps" | "deployments" | "domains" | "github" | "server") => void;
+  notices: string[];
+  onConnectGithub: () => void;
+  onRefresh: () => void;
+  onStartAll: () => void;
+  onStopAll: () => void;
   pendingCount: number;
+  refreshing: boolean;
   resourceSummary: { cpu: string; memory: string };
   runningCount: number;
   serverReady: boolean;
+  startAllBusy: boolean;
+  startAllReason: string | null;
+  stopAllBusy: boolean;
+  stopAllReason: string | null;
   totalApps: number;
   trafficPoints: TrafficPoint[];
-  workspace: string;
 }) {
   const healthTone = connected && serverReady ? "Ready" : connected ? "Needs checks" : "Offline";
-  const heroDetail = connected
-    ? "This Routely server session is reporting through the dashboard API. Charts only render values returned by the backend."
-    : "Dashboard data is unavailable until the Routely server session reconnects.";
+  const stateTone = connected && serverReady ? "ok" : connected ? "warn" : "error";
+  const alertMessages = Array.from(new Set([...notices, hostMetricError].filter((message): message is string => Boolean(message))));
 
   return (
-    <div className="grid gap-4 text-[#172033]">
-      <section className="overflow-hidden rounded-[1.75rem] border border-[#DCE3EE] bg-[#F6F8FB] shadow-[0_34px_90px_rgba(23,32,51,0.14)]">
-        <div className="grid min-h-[290px] gap-5 bg-[linear-gradient(135deg,#F6F8FB_0%,#FFFFFF_48%,#EAF1FF_100%)] p-5 lg:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)] lg:p-6">
-          <div className="flex min-w-0 flex-col justify-between gap-6">
-            <div>
-              <div className="inline-flex items-center gap-2 rounded-full border border-[#DCE3EE] bg-white px-3 py-1 text-[11px] font-black uppercase tracking-[0.16em] text-[#2563EB] shadow-[0_10px_30px_rgba(37,99,235,0.08)]">
-                <span className={`h-2 w-2 rounded-full ${connected ? "bg-[#18A058]" : "bg-[#DC2626]"}`} aria-hidden="true" />
-                Runtime host command board
-              </div>
-              <h1 className="mt-4 max-w-3xl text-3xl font-black leading-[0.95] tracking-[-0.04em] text-[#172033] sm:text-5xl">
-                {workspace}
-              </h1>
-              <p className="mt-4 max-w-2xl text-sm leading-6 text-[#475569]">{heroDetail}</p>
-            </div>
+    <div className="grid gap-3 text-[#F7FFF9]">
+      <section className="rounded-[24px] border border-[#2D352F] bg-[#101412] p-3 shadow-[0_24px_80px_rgba(0,0,0,0.34)]" aria-labelledby="runtime-control-title">
+        <div className="grid gap-3 xl:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.08fr)_minmax(340px,0.8fr)]">
+          <RuntimeControlPanel
+            mode={mode}
+            onConnectGithub={onConnectGithub}
+            onRefresh={onRefresh}
+            onStartAll={onStartAll}
+            onStopAll={onStopAll}
+            refreshing={refreshing}
+            startAllBusy={startAllBusy}
+            startAllReason={startAllReason}
+            stopAllBusy={stopAllBusy}
+            stopAllReason={stopAllReason}
+          />
 
-            <div className="flex flex-wrap gap-2">
-              <HeroButton label="Open apps" onClick={() => onNavigate("apps")} />
-              <HeroButton label="Review server" onClick={() => onNavigate("server")} variant="secondary" />
-              <HeroButton label="Deployments" onClick={() => onNavigate("deployments")} variant="secondary" />
-            </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <HeroMetric label="State" value={healthTone} tone={stateTone} />
+            <HeroMetric label="Session" value={mode || "runtime host"} />
+            <HeroMetric label="Running" value={`${runningCount}/${totalApps}`} tone={runningCount ? "ok" : "info"} />
+            <HeroMetric label="Attention" value={String(pendingCount)} tone={pendingCount ? "warn" : "ok"} />
+            <MiniMetric title="CPU" value={resourceSummary.cpu} detail="latest sample" color={ROUTELY_CHART_COLORS.routeBlue} />
+            <MiniMetric title="RAM" value={resourceSummary.memory} detail="latest sample" color={ROUTELY_CHART_COLORS.routelyGreen} />
+            <MiniMetric title="Domains" value={domainsReadyLabel} detail="DNS ready" color={ROUTELY_CHART_COLORS.routeBlue} />
+            <MiniMetric title="Routes" value={String(activeRoutes)} detail="proxy enabled" color={ROUTELY_CHART_COLORS.routelyGreen} />
           </div>
 
-          <div className="grid content-between gap-3 rounded-[1.35rem] border border-[#DCE3EE] bg-white/82 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]">
-            <div className="flex items-center justify-between gap-3 border-b border-[#DCE3EE] pb-3">
-              <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[#64748B]">Server session</p>
-                <p className="mt-1 text-2xl font-black text-[#172033]">{healthTone}</p>
-              </div>
-              <div className="grid h-16 w-16 place-items-center rounded-2xl bg-[#172033] font-mono text-xl font-black text-white shadow-[0_18px_35px_rgba(23,32,51,0.22)]">R</div>
-            </div>
-
-            <div className="grid gap-2 sm:grid-cols-2">
-              <HeroMetric label="Mode" value={mode || "local"} />
-              <HeroMetric label="Apps running" value={`${runningCount}/${totalApps}`} />
-              <HeroMetric label="Needs attention" value={String(pendingCount)} tone={pendingCount ? "warn" : "ok"} />
-              <HeroMetric label="Domains" value={domainsReadyLabel} />
-              <HeroMetric label="Routes" value={String(activeRoutes)} />
-              <HeroMetric label="Server ready" value={serverReady ? "yes" : "pending"} tone={serverReady ? "ok" : "warn"} />
-            </div>
+          <div className="grid gap-3">
+            {alertMessages.length > 0 ? <CompactWarning messages={alertMessages} /> : null}
+            <ActivityTimeline items={activity.slice(0, 3)} />
           </div>
         </div>
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(360px,0.75fr)]">
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,1.15fr)_minmax(320px,0.85fr)]">
         <HostResourceChart cpuLabel={resourceSummary.cpu} emptyReason={hostMetricError} memoryLabel={resourceSummary.memory} samples={hostSamples} />
         <DiskUsageGauge disk={disk} />
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <div className="grid gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <AppStatusChart data={appStatus} total={totalApps} />
         <TrafficSparkline activeRoutes={activeRoutes} points={trafficPoints} />
       </div>
 
-      <ActivityTimeline items={activity} />
+      {activity.length > 3 ? <ActivityTimeline items={activity.slice(3)} /> : null}
     </div>
   );
 }
 
-function HeroButton({ label, onClick, variant = "primary" }: { label: string; onClick: () => void; variant?: "primary" | "secondary" }) {
-  const primary = variant === "primary";
+function RuntimeControlPanel({ mode, onConnectGithub, onRefresh, onStartAll, onStopAll, refreshing, startAllBusy, startAllReason, stopAllBusy, stopAllReason }: { mode: string; onConnectGithub: () => void; onRefresh: () => void; onStartAll: () => void; onStopAll: () => void; refreshing: boolean; startAllBusy: boolean; startAllReason: string | null; stopAllBusy: boolean; stopAllReason: string | null }) {
+  return (
+    <div className="grid content-between gap-4 rounded-[20px] border border-[#2D352F] bg-[#171C1A] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]">
+      <div>
+        <div className="flex items-center justify-between gap-3">
+          <p id="runtime-control-title" className="text-[10px] font-black uppercase tracking-[0.18em] text-[#1ED760]">Runtime controls</p>
+          <span className="rounded-full border border-[#2D352F] bg-[#222823] px-2.5 py-1 font-mono text-[10px] font-black uppercase tracking-[0.08em] text-[#A8B3AD]">{mode || "runtime host"}</span>
+        </div>
+        <p className="mt-3 max-w-sm text-sm leading-5 text-[#A8B3AD]">Start or stop managed runtime apps using existing lifecycle APIs. No server state is invented here.</p>
+      </div>
+
+      <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+        <DashboardActionButton label={startAllBusy ? "Starting" : "Start"} onClick={onStartAll} disabled={Boolean(startAllReason)} reason={startAllReason} tone="primary" />
+        <DashboardActionButton label={stopAllBusy ? "Stopping" : "Stop"} onClick={onStopAll} disabled={Boolean(stopAllReason)} reason={stopAllReason} tone="danger" />
+        <DashboardActionButton label={refreshing ? "Refreshing" : "Refresh"} onClick={onRefresh} disabled={refreshing} reason={refreshing ? "refresh in progress" : null} />
+        <DashboardActionButton label="Connect GitHub" onClick={onConnectGithub} />
+      </div>
+    </div>
+  );
+}
+
+function CompactWarning({ messages }: { messages: string[] }) {
+  return (
+    <div className="grid gap-2 rounded-[18px] border border-[#F59E0B]/35 bg-[#F59E0B]/10 px-3 py-2 text-xs font-bold text-[#F7FFF9]">
+      {messages.map((message) => (
+        <div key={message} className="flex min-w-0 items-center gap-2">
+          <span className="h-2 w-2 shrink-0 rounded-full bg-[#F59E0B]" aria-hidden="true" />
+          <span className="truncate">{message}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function DashboardActionButton({ disabled = false, label, onClick, reason, tone = "secondary" }: { disabled?: boolean; label: string; onClick: () => void; reason?: string | null; tone?: "primary" | "secondary" | "danger" }) {
+  const toneClass = tone === "primary"
+    ? "border-[#1ED760]/40 bg-[#1ED760] text-[#061007] shadow-[0_14px_34px_rgba(30,215,96,0.18)] hover:bg-[#28E36B]"
+    : tone === "danger"
+      ? "border-[#EF4444]/35 bg-[#EF4444]/14 text-[#F7FFF9] hover:border-[#EF4444]/65 hover:bg-[#EF4444]/20"
+      : "border-[#2D352F] bg-[#222823] text-[#F7FFF9] hover:border-[#1ED760] hover:text-[#1ED760]";
+
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`rounded-full px-4 py-2 text-sm font-black transition active:translate-y-px ${
-        primary
-          ? "bg-[#2563EB] text-white shadow-[0_16px_40px_rgba(37,99,235,0.24)] hover:bg-[#1D4ED8]"
-          : "border border-[#DCE3EE] bg-white text-[#172033] hover:border-[#2563EB] hover:text-[#2563EB]"
-      }`}
+      disabled={disabled}
+      title={reason || label}
+      className={`h-10 rounded-full border px-4 text-sm font-black transition active:translate-y-px disabled:cursor-not-allowed disabled:opacity-45 ${toneClass}`}
     >
       {label}
     </button>
   );
 }
 
-function HeroMetric({ label, tone = "info", value }: { label: string; tone?: "ok" | "warn" | "info"; value: string }) {
-  const color = tone === "ok" ? ROUTELY_CHART_COLORS.runningGreen : tone === "warn" ? ROUTELY_CHART_COLORS.warningAmber : ROUTELY_CHART_COLORS.routeBlue;
+function HeroMetric({ label, tone = "info", value }: { label: string; tone?: "ok" | "warn" | "error" | "info"; value: string }) {
+  const color = tone === "ok" ? ROUTELY_CHART_COLORS.routelyGreen : tone === "warn" ? ROUTELY_CHART_COLORS.warningAmber : tone === "error" ? ROUTELY_CHART_COLORS.failureRed : ROUTELY_CHART_COLORS.routeBlue;
   return (
-    <div className="rounded-2xl border border-[#DCE3EE] bg-[#F6F8FB] px-3 py-2">
-      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#64748B]">{label}</p>
-      <p className="mt-1 flex items-center gap-2 font-mono text-lg font-black text-[#172033]"><span className="h-2 w-2 rounded-full" style={{ background: color }} />{value}</p>
+    <div className="rounded-[18px] border border-[#2D352F] bg-[#171C1A] px-3 py-2">
+      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#A8B3AD]">{label}</p>
+      <p className="mt-1 flex items-center gap-2 font-mono text-base font-black text-[#F7FFF9]"><span className="h-2 w-2 rounded-full" style={{ background: color }} />{value}</p>
+    </div>
+  );
+}
+
+function MiniMetric({ color, detail, title, value }: { color: string; detail: string; title: string; value: string }) {
+  return (
+    <div className="rounded-[20px] border border-[#2D352F] bg-[#171C1A]/92 px-4 py-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)]">
+      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#A8B3AD]">{title}</p>
+      <p className="mt-1 flex items-center gap-2 font-mono text-xl font-black text-[#F7FFF9]"><span className="h-2.5 w-2.5 rounded-full" style={{ background: color }} />{value}</p>
+      <p className="mt-1 text-xs text-[#A8B3AD]">{detail}</p>
     </div>
   );
 }

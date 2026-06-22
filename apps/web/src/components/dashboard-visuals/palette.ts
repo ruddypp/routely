@@ -1,11 +1,13 @@
 export const ROUTELY_CHART_COLORS = {
-  hostInk: "#172033",
-  panelMist: "#F6F8FB",
-  rackLine: "#DCE3EE",
-  routeBlue: "#2563EB",
-  runningGreen: "#18A058",
-  warningAmber: "#D97706",
-  failureRed: "#DC2626",
-  mutedInk: "#64748B",
-  white: "#FFFFFF"
+  stageBlack: "#0A0D0B",
+  deckBlack: "#101412",
+  panelCharcoal: "#171C1A",
+  elevatedCharcoal: "#222823",
+  softBorder: "#2D352F",
+  primaryText: "#F7FFF9",
+  mutedText: "#A8B3AD",
+  routelyGreen: "#1ED760",
+  routeBlue: "#4F8CFF",
+  warningAmber: "#F59E0B",
+  failureRed: "#EF4444"
 } as const;

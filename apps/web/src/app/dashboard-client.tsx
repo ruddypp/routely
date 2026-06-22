@@ -485,7 +485,7 @@ function pendingStateLabel(app: DaemonApp): string {
   if (restart && redeploy) return "restart + redeploy needed";
   if (restart) return "restart needed";
   if (redeploy) return "redeploy needed";
-  if (localOnly) return "local restart applies";
+  if (localOnly) return "runtime host restart applies";
   return "no pending changes";
 }
 
@@ -547,13 +547,13 @@ function httpsSummary(domains: DaemonDomain[]): string {
 function deploymentSource(deployment: DaemonDeployment): string {
   const branch = deployment.branch ? `:${deployment.branch}` : "";
   const commit = deployment.commitSha ? ` @ ${deployment.commitSha.slice(0, 7)}` : "";
-  return deployment.repo ? `${deployment.repo}${branch}${commit}` : deployment.sourceType || "local source";
+  return deployment.repo ? `${deployment.repo}${branch}${commit}` : deployment.sourceType || "runtime host source";
 }
 
 function appDeployMetadata(app: DaemonApp, latest: DaemonDeployment | undefined): string {
   const image = latest?.imageTag || app.image || "image pending";
   const container = latest?.containerName || "container pending";
-  const ports = latest?.hostPort ? `127.0.0.1:${latest.hostPort}->${latest.containerPort || "container"}` : app.port ? `local :${app.port}` : "port pending";
+  const ports = latest?.hostPort ? `127.0.0.1:${latest.hostPort}->${latest.containerPort || "container"}` : app.port ? `runtime host :${app.port}` : "port pending";
   return `${image} · ${container} · ${ports}`;
 }
 
@@ -581,6 +581,18 @@ function serverCheckRailSignal(label: string, check: DaemonServerCheck | undefin
     detail: check?.message || undefined,
     tone: check ? check.status : "muted"
   };
+}
+
+function runtimeSessionLabel(mode?: string | null): string {
+  if (!mode || mode === "local") return "runtime host";
+  return mode;
+}
+
+function stopAllBlockReason(apps: DaemonApp[], connected: boolean, busy: boolean): string | null {
+  if (busy) return "Stop All is already running";
+  if (!connected) return "daemon offline";
+  if (apps.length === 0) return "no resources registered";
+  return apps.some((app) => isAppRuntimeRunning(app)) ? null : "no running resources";
 }
 
 function metricRailSignal(label: string, value: string | null, detail?: string): ServerRailSignal {
@@ -688,6 +700,7 @@ export default function DashboardClient() {
   const [actionByAppId, setActionByAppId] = useState<Record<number, AppAction | null>>({});
   const [actionError, setActionError] = useState<string | null>(null);
   const [startAllBusy, setStartAllBusy] = useState(false);
+  const [stopAllBusy, setStopAllBusy] = useState(false);
   const [startAllResult, setStartAllResult] = useState<DaemonAppStartAllResponse | null>(null);
   const [selectedAppId, setSelectedAppId] = useState<number | null>(null);
   const [logs, setLogs] = useState<DaemonAppLogsResponse | null>(null);
@@ -1224,13 +1237,14 @@ export default function DashboardClient() {
   const disabledCount = apps.filter((app) => !app.enabled).length;
   const appResources = apps.filter((app) => app.type === "app" || app.type === "worker" || app.type === "static");
   const serviceResources = apps.filter((app) => !(app.type === "app" || app.type === "worker" || app.type === "static"));
-  const workspace = health?.health?.workspace || "local workspace";
+  const workspace = health?.health?.workspace || "runtime host workspace";
   const stoppedCount = Math.max(0, apps.length - runningCount);
   const dockerfileApps = appResources.filter((app) => app.driver === "dockerfile");
   const appModuleTabs: Record<"env" | "logs" | "health", InspectorTab> = { env: "env", logs: "logs", health: "health" };
   const moduleLoading = loading || refreshing;
   const bulkStartPlan = useMemo(() => startAllPlan(apps), [apps]);
   const startAllReason = startAllBlockReason(apps, connected, startAllBusy);
+  const stopAllReason = stopAllBlockReason(apps, connected, stopAllBusy);
 
   const runStartAll = useCallback(async () => {
     const blocked = startAllBlockReason(apps, connected, startAllBusy);
@@ -1281,6 +1295,58 @@ export default function DashboardClient() {
     }
   }, [apps, connected, poll, startAllBusy]);
 
+  const runStopAll = useCallback(async () => {
+    const blocked = stopAllBlockReason(apps, connected, stopAllBusy);
+    if (blocked) {
+      setActionError(blocked);
+      return;
+    }
+
+    const stoppableApps = apps.filter((app) => isAppRuntimeRunning(app));
+    setActionError(null);
+    setStopAllBusy(true);
+    setActionByAppId((current) => ({
+      ...current,
+      ...Object.fromEntries(stoppableApps.map((app) => [app.id, "stop" as AppAction]))
+    }));
+
+    const failures: string[] = [];
+    let firstStoppedApp: DaemonApp | null = null;
+
+    try {
+      for (const app of stoppableApps) {
+        try {
+          const response = await fetch(`/api/apps/${app.id}/stop`, {
+            method: "POST",
+            cache: "no-store"
+          });
+
+          if (!response.ok) {
+            throw new Error(await readError(response));
+          }
+
+          const data = (await response.json()) as DaemonAppLifecycleResponse;
+          replaceApp(data.app);
+          firstStoppedApp ||= data.app;
+        } catch (error) {
+          failures.push(`${app.name}: ${error instanceof Error ? error.message : "stop failed"}`);
+        }
+      }
+
+      if (firstStoppedApp) setSelectedAppId(firstStoppedApp.id);
+      setLastUpdated(new Date().toISOString());
+      if (failures.length > 0) setActionError(`Stop all completed with failures: ${failures.join("; ")}`);
+      void poll();
+    } finally {
+      setStopAllBusy(false);
+      setActionByAppId((current) => {
+        const next = { ...current };
+        for (const app of stoppableApps) next[app.id] = null;
+        return next;
+      });
+    }
+  }, [apps, connected, poll, replaceApp, stopAllBusy]);
+
   const latestHostMetric = hostMetrics[0] || null;
   const memoryRail = formatUsedTotal(latestHostMetric?.memoryBytes ?? null, latestHostMetric?.memoryLimitBytes ?? null);
   const diskRail = formatUsedTotal(latestHostMetric?.diskUsedBytes ?? null, latestHostMetric?.diskTotalBytes ?? null);
@@ -1302,7 +1368,7 @@ export default function DashboardClient() {
         docker: serverCheckRailSignal("docker", dockerCheck),
         loading,
         memory: metricUnavailable ? { label: "RAM", ...metricUnavailable } : metricRailSignal("RAM", memoryRail.value, memoryRail.detail || metricDetail),
-        mode: serverStatus?.mode || "local",
+        mode: runtimeSessionLabel(serverStatus?.mode),
         refreshing,
         updated: timeAgo(lastUpdated),
         uptime: health?.health?.startedAt ? timeAgo(health.health.startedAt) : "pending",
@@ -1319,18 +1385,17 @@ export default function DashboardClient() {
                 hostMetrics={hostMetrics}
                 hostMetricsError={hostMetricsError}
                 healthchecksUnavailable={appsError || deploymentsError}
-                onSelect={setActiveModule}
+                onConnectGithub={() => setActiveModule("github")}
+                onRefresh={() => void poll(true)}
+                onStartAll={() => void runStartAll()}
+                onStopAll={() => void runStopAll()}
                 proxyRoutes={proxyRoutes}
+                refreshing={refreshing || loading}
                 server={serverStatus}
-                workspace={workspace}
-              />
-            ) : null}
-
-            {activeModule === "overview" ? (
-              <ServerFoundationPanel
-                connected={connected}
-                error={serverError}
-                server={serverStatus}
+                startAllBusy={startAllBusy}
+                startAllReason={startAllReason}
+                stopAllBusy={stopAllBusy}
+                stopAllReason={stopAllReason}
               />
             ) : null}
 
@@ -1381,7 +1446,7 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
     <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
       <ModuleHeader module="apps" stats={<><MetricPill label="running" value={`${runningCount}/${apps.length}`} accent /><MetricPill label="services" value={String(serviceResources.length)} /><MetricPill label="stopped" value={String(stoppedCount)} /><MetricPill label="disabled" value={String(disabledCount)} /></>} actions={<><Button onClick={onStartAll} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || "Start stopped enabled command and Compose resources"} variant="primary">Start All</Button><PillButton onClick={onCreate} strong disabled={!connected}>Add resource</PillButton></>} />
 
-      {!connected && health ? <Alert title="Daemon offline" message={health.error || "Start Routely from the CLI to bring the local control plane online."} /> : null}
+      {!connected && health ? <Alert title="Daemon offline" message={health.error || "Start Routely from the CLI to bring the server session online."} /> : null}
       {actionError ? <Alert title="Action failed" message={actionError} /> : null}
       {appsError ? <Alert title="Registry unavailable" message={appsError} /> : null}
       {startAllResult ? <StartAllReport result={startAllResult} /> : null}
@@ -1850,7 +1915,7 @@ function DataEmpty({ detail, title }: { detail: string; title: string }) {
   );
 }
 
-function OverviewPanel({ apps, connected, deployments, domains, healthchecksUnavailable, hostMetrics, hostMetricsError, onSelect, proxyRoutes, server, workspace }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; healthchecksUnavailable: string | null | undefined; hostMetrics: DaemonMetricSample[]; hostMetricsError: string | null; onSelect: (module: ModuleKey) => void; proxyRoutes: DaemonProxyRoute[]; server: DaemonServerStatus | null; workspace: string }) {
+function OverviewPanel({ apps, connected, deployments, domains, healthchecksUnavailable, hostMetrics, hostMetricsError, onConnectGithub, onRefresh, onStartAll, onStopAll, proxyRoutes, refreshing, server, startAllBusy, startAllReason, stopAllBusy, stopAllReason }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; healthchecksUnavailable: string | null | undefined; hostMetrics: DaemonMetricSample[]; hostMetricsError: string | null; onConnectGithub: () => void; onRefresh: () => void; onStartAll: () => void; onStopAll: () => void; proxyRoutes: DaemonProxyRoute[]; refreshing: boolean; server: DaemonServerStatus | null; startAllBusy: boolean; startAllReason: string | null; stopAllBusy: boolean; stopAllReason: string | null }) {
   const appResources = apps.filter((app) => app.type !== "database");
   const latestHostMetric = hostMetrics[0] || null;
   const sortedHostMetrics = [...hostMetrics].sort((first, second) => timeValue(first.sampledAt) - timeValue(second.sampledAt)).slice(-12);
@@ -1882,11 +1947,11 @@ function OverviewPanel({ apps, connected, deployments, domains, healthchecksUnav
     return counts;
   }, {});
   const appStatus: AppStatusDatum[] = [
-    { key: "running", label: "Running", value: statusCounts.running || 0, color: ROUTELY_CHART_COLORS.runningGreen },
+    { key: "running", label: "Running", value: statusCounts.running || 0, color: ROUTELY_CHART_COLORS.routelyGreen },
     { key: "stopped", label: "Stopped", value: statusCounts.stopped || 0, color: ROUTELY_CHART_COLORS.routeBlue },
     { key: "needs-setup", label: "Needs setup", value: statusCounts.needsSetup || 0, color: ROUTELY_CHART_COLORS.warningAmber },
     { key: "failed", label: "Failed", value: statusCounts.failed || 0, color: ROUTELY_CHART_COLORS.failureRed },
-    { key: "disabled", label: "Disabled", value: statusCounts.disabled || 0, color: ROUTELY_CHART_COLORS.mutedInk }
+    { key: "disabled", label: "Disabled", value: statusCounts.disabled || 0, color: ROUTELY_CHART_COLORS.mutedText }
   ];
   const runningCount = statusCounts.running || 0;
   const pendingCount = (statusCounts.needsSetup || 0) + (statusCounts.failed || 0);
@@ -1895,28 +1960,33 @@ function OverviewPanel({ apps, connected, deployments, domains, healthchecksUnav
   const activity = dashboardActivityItems({ apps: appResources, deployments, domains });
 
   return (
-    <>
-      {healthchecksUnavailable ? <DashboardNotice title="Some dashboard data is stale" detail={healthchecksUnavailable} /> : null}
-      <OperationsDashboard
-        activeRoutes={activeRoutes}
-        activity={activity}
-        appStatus={appStatus}
-        connected={connected}
-        disk={disk}
-        domainsReadyLabel={`${verifiedDomains}/${domains.length}`}
-        hostMetricError={hostMetricsError}
-        hostSamples={hostSamples}
-        mode={server?.mode || "local"}
-        onNavigate={onSelect}
-        pendingCount={pendingCount}
-        resourceSummary={{ cpu: formatPercent(latestHostMetric?.cpuPercent ?? null) || "pending", memory: memoryLabel }}
-        runningCount={runningCount}
-        serverReady={Boolean(server?.readiness?.ok)}
-        totalApps={appResources.length}
-        trafficPoints={[]}
-        workspace={workspace}
-      />
-    </>
+    <OperationsDashboard
+      activeRoutes={activeRoutes}
+      activity={activity}
+      appStatus={appStatus}
+      connected={connected}
+      disk={disk}
+      domainsReadyLabel={`${verifiedDomains}/${domains.length}`}
+      hostMetricError={hostMetricsError}
+      hostSamples={hostSamples}
+      mode={runtimeSessionLabel(server?.mode)}
+      notices={healthchecksUnavailable ? [healthchecksUnavailable] : []}
+      onConnectGithub={onConnectGithub}
+      onRefresh={onRefresh}
+      onStartAll={onStartAll}
+      onStopAll={onStopAll}
+      pendingCount={pendingCount}
+      refreshing={refreshing}
+      resourceSummary={{ cpu: formatPercent(latestHostMetric?.cpuPercent ?? null) || "pending", memory: memoryLabel }}
+      runningCount={runningCount}
+      serverReady={Boolean(server?.readiness?.ok)}
+      startAllBusy={startAllBusy}
+      startAllReason={startAllReason}
+      stopAllBusy={stopAllBusy}
+      stopAllReason={stopAllReason}
+      totalApps={appResources.length}
+      trafficPoints={[]}
+    />
   );
 }
 
@@ -1960,15 +2030,6 @@ function dashboardActivityItems({ apps, deployments, domains }: { apps: DaemonAp
   }));
 
   return [...failedDeploys, ...appItems, ...domainItems, ...recentDeploys].slice(0, 8);
-}
-
-function DashboardNotice({ detail, title }: { detail: string; title: string }) {
-  return (
-    <div className="rounded-[1.35rem] border border-[#F59E0B]/35 bg-[#FFF7ED] px-4 py-3 text-[#172033] shadow-[0_18px_50px_rgba(217,119,6,0.12)]">
-      <p className="text-sm font-black">{title}</p>
-      <p className="mt-1 text-xs leading-5 text-[#92400E]">{detail}</p>
-    </div>
-  );
 }
 
 function NotificationsPanel({ attempts, channels, connected, error, form, loading, notificationActionById, onChange, onCreate, onTest, onToggle, saving }: { attempts: DaemonNotificationAttempt[]; channels: DaemonNotificationChannel[]; connected: boolean; error: string | null; form: { type: string; name: string; url: string; botToken: string; chatId: string; events: string }; loading: boolean; notificationActionById: Record<number, string | null>; onChange: (form: { type: string; name: string; url: string; botToken: string; chatId: string; events: string }) => void; onCreate: () => void; onTest: (channel: DaemonNotificationChannel) => void; onToggle: (channel: DaemonNotificationChannel, enabled: boolean) => void; saving: boolean }) {
@@ -2070,7 +2131,7 @@ function ServerFoundationPanel({ connected, error, server }: { connected: boolea
   const dockerChecks = checks.filter((check) => ["docker", "docker-compose"].includes(check.id));
   const portChecks = checks.filter((check) => check.id.startsWith("port-"));
   const dataCheck = checks.find((check) => check.id === "data-dir");
-  const authStatus = server?.auth.configured ? "ready" : server?.auth.required ? "missing" : "local bypass";
+  const authStatus = server?.auth.configured ? "ready" : server?.auth.required ? "missing" : "session bypass";
 
   return (
     <section className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW} lg:col-span-2`}>
@@ -2085,7 +2146,7 @@ function ServerFoundationPanel({ connected, error, server }: { connected: boolea
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-          <ReadinessCard label="Mode" value={server?.mode || "local"} status={server?.production ? "warn" : "ok"} />
+          <ReadinessCard label="Session" value={runtimeSessionLabel(server?.mode)} status={server?.production ? "warn" : "ok"} />
           <ReadinessCard label="Auth" value={authStatus} status={server?.auth.configured || !server?.auth.required ? "ok" : "error"} />
           <ReadinessCard label="Docker" value={summaryStatus(dockerChecks)} status={worstStatus(dockerChecks)} />
           <ReadinessCard label="Ports" value={summaryStatus(portChecks)} status={worstStatus(portChecks)} />
@@ -2432,7 +2493,7 @@ function DetailPanel({
     return (
       <aside className={`rounded-lg bg-surface px-4 py-10 text-center ${PANEL_SHADOW} lg:sticky lg:top-[84px]`}>
         <p className="text-sm font-bold">No app selected</p>
-        <p className="mt-1 text-sm text-muted">Select a local app to inspect its command, URL, dependencies, and logs.</p>
+        <p className="mt-1 text-sm text-muted">Select an app to inspect its command, URL, dependencies, and logs.</p>
       </aside>
     );
   }
@@ -2617,7 +2678,7 @@ function DetailPanel({
               <ReadinessCard label="Restart" value={appEnv?.pending.needsRestart ? "needed" : "clean"} status={appEnv?.pending.needsRestart ? "warn" : "ok"} />
               <ReadinessCard label="Redeploy" value={redeployPending.label} status={redeployPending.status} />
             </div>
-            <p className="mt-3 text-xs text-muted">Stored env values override portable `routely.yml` env at runtime. Secret values are hidden after save and injected into local starts and Dockerfile deployments.</p>
+            <p className="mt-3 text-xs text-muted">Stored env values override portable `routely.yml` env at runtime. Secret values are hidden after save and injected into runtime host starts and Dockerfile deployments.</p>
           </div>
 
           {envError ? <div className="border-b border-negative/20 bg-negative/10 px-4 py-2 text-xs text-negative">{envError}</div> : null}
@@ -2658,7 +2719,7 @@ function DetailPanel({
               <div className="mt-3 flex flex-wrap items-center gap-2">
                 {row.needsRestart ? <span className="rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">restart needed</span> : null}
                 {row.needsRedeploy && appCanRedeploy(app) ? <span className="rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">redeploy needed</span> : null}
-                {row.needsRedeploy && !appCanRedeploy(app) ? <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">local only</span> : null}
+                {row.needsRedeploy && !appCanRedeploy(app) ? <span className="rounded-full bg-white/10 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">runtime host only</span> : null}
                 <PillButton onClick={() => void unsetEnv(row.key)} disabled={!connected || envSaving}>Unset</PillButton>
               </div>
             </div>
@@ -2747,14 +2808,14 @@ function AppForm({
   const envHelper = form.envLocked
     ? "Stored env keys are preserved by this form; edit values in Env/Secrets."
     : "Portable non-secret KEY=value metadata. Store secrets in Env/Secrets.";
-  const commandHelper = commandFieldsEnabled ? "Saved for local command-driver resources." : "Deferred for this driver; not saved.";
+  const commandHelper = commandFieldsEnabled ? "Saved for command-driver resources." : "Deferred for this driver; not saved.";
   const composeHelper = composeFieldsEnabled ? "Saved for Compose-backed apps and services." : "Only saved for compose-driver resources.";
 
   return (
     <form onSubmit={onSubmit} className="border-b border-white/5 bg-black/25 px-4 py-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{mode === "create" ? "Add local resource" : "Edit local resource"}</p>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{mode === "create" ? "Add resource" : "Edit resource"}</p>
           <h2 className="text-base font-bold">Registry definition</h2>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex">
@@ -2809,7 +2870,7 @@ function AppForm({
         <label className={`flex items-center justify-between rounded-md bg-surface-raised px-3 py-2 ${INSET_RING} ${saving ? "opacity-60" : ""}`}>
           <span>
             <span className="block text-xs font-bold">Enabled</span>
-            <span className="text-[11px] text-muted">Included in local runner</span>
+            <span className="text-[11px] text-muted">Included in runtime host runner</span>
           </span>
           <input checked={form.enabled} onChange={(event) => update({ enabled: event.target.checked })} disabled={saving} type="checkbox" className="h-4 w-4 accent-[var(--accent)]" />
         </label>
@@ -2953,7 +3014,7 @@ function ResourceSection({ count, title }: { count: number; title: string }) {
 function ServiceEmpty() {
   return (
     <div className="border-b border-white/5 px-4 py-4 text-sm text-muted">
-      No local services registered.
+      No services registered.
     </div>
   );
 }
@@ -2985,7 +3046,7 @@ function EmptyState({ connected, onAdd }: { connected: boolean; onAdd: () => voi
       action={<PillButton onClick={onAdd} strong disabled={!connected}>Add app</PillButton>}
       icon="R"
       message="Create a command app here or sync an existing `routely.yml` registry."
-      title="No local apps registered"
+      title="No apps registered"
     />
   );
 }
