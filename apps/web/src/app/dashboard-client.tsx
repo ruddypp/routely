@@ -1656,43 +1656,46 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
 }
 
 function ProjectWorkspaceHeader({ appCount, attentionCount, connected, disabledCount, environmentName, onCreate, onOpenDatabases, onStartReady, projectDescription, runningCount, serviceCount, startAllBusy, startAllReason, stoppedCount }: { appCount: number; attentionCount: number; connected: boolean; disabledCount: number; environmentName: string; onCreate: (sourceId?: SourceStackId) => void; onOpenDatabases: () => void; onStartReady: () => void; projectDescription: string; runningCount: number; serviceCount: number; startAllBusy: boolean; startAllReason: string | null; stoppedCount: number }) {
+  const resourceCount = appCount + serviceCount;
+
   return (
-    <div className="border-b border-white/5 bg-[radial-gradient(circle_at_top_left,rgba(30,215,96,0.14),transparent_32%),linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0)_42%)] px-4 py-4 sm:px-5 sm:py-5">
-      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-        <div className="min-w-0">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-accent">
-              <Layers3 className="h-3.5 w-3.5" aria-hidden="true" /> Project
+    <div className="border-b border-white/5 bg-[#101412] px-4 py-4 sm:px-5">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 space-y-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-accent/20 bg-accent/10 text-accent">
+              <Layers3 className="h-4.5 w-4.5" aria-hidden="true" />
             </span>
-            <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{environmentName} environment</span>
-            <span className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${connected ? "border-accent/20 bg-accent/10 text-accent" : "border-warning/20 bg-warning/10 text-warning"}`}>{connected ? "server online" : "server offline"}</span>
+            <h1 className="text-xl font-black leading-tight text-foreground sm:text-2xl">Default project</h1>
+            <span className="rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{environmentName}</span>
+            <span className={`rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${connected ? "border-accent/20 bg-accent/10 text-accent" : "border-warning/20 bg-warning/10 text-warning"}`}>{connected ? "server online" : "server offline"}</span>
           </div>
-          <h1 className="mt-3 text-2xl font-black leading-tight text-foreground sm:text-3xl">Default project</h1>
-          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">{projectDescription}</p>
+          <p className="max-w-3xl text-sm leading-6 text-muted">{projectDescription}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            <ProjectMetaPill label="Applications" value={String(appCount)} accent />
+            <ProjectMetaPill label="Resources" value={String(resourceCount)} />
+            <ProjectMetaPill label="Running" value={`${runningCount}/${resourceCount || 0}`} />
+            <ProjectMetaPill label="Attention" value={String(attentionCount)} tone={attentionCount ? "warn" : "muted"} />
+            <ProjectMetaPill label="Stopped / disabled" value={`${stoppedCount}/${disabledCount}`} />
+          </div>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
           <Button variant="secondary">Project Environment</Button>
           <Button onClick={onStartReady} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || "Start ready services in this project"} variant="secondary">Start ready</Button>
           <CreateServiceMenu connected={connected} onCreateApplication={() => onCreate("github")} onCreateCompose={() => onCreate("compose")} onCreateDatabase={onOpenDatabases} />
         </div>
       </div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-        <ProjectStat label="applications" value={String(appCount)} accent />
-        <ProjectStat label="resources" value={String(appCount + serviceCount)} />
-        <ProjectStat label="running" value={`${runningCount}/${appCount + serviceCount || 0}`} />
-        <ProjectStat label="attention" value={String(attentionCount)} />
-        <ProjectStat label="stopped / disabled" value={`${stoppedCount}/${disabledCount}`} />
-      </div>
     </div>
   );
 }
 
-function ProjectStat({ accent, label, value }: { accent?: boolean; label: string; value: string }) {
+function ProjectMetaPill({ accent, label, tone = "muted", value }: { accent?: boolean; label: string; tone?: "muted" | "warn"; value: string }) {
+  const valueColor = accent ? "text-accent" : tone === "warn" ? "text-warning" : "text-foreground";
   return (
-    <div className="rounded-2xl border border-white/8 bg-black/24 px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset]">
-      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{label}</p>
-      <p className={`mt-1 text-lg font-black ${accent ? "text-accent" : "text-foreground"}`}>{value}</p>
-    </div>
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-white/10 bg-black/25 px-2.5 py-1 text-[11px] text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.035)_inset]">
+      <strong className={valueColor}>{value}</strong>
+      <span>{label}</span>
+    </span>
   );
 }
 
@@ -1707,14 +1710,15 @@ function CreateServiceMenu({ connected, onCreateApplication, onCreateCompose, on
   return (
     <div className="relative">
       <Button onClick={() => setOpen((current) => !current)} disabled={!connected} variant="primary">
-        <PackagePlus className="h-4 w-4" aria-hidden="true" /> Create Service
+        <PackagePlus className="h-4 w-4" aria-hidden="true" /> Create Service <span className="text-xs opacity-70">⌄</span>
       </Button>
       {open ? (
-        <div className="absolute right-0 z-30 mt-2 w-[240px] overflow-hidden rounded-2xl border border-[#2D352F] bg-[#101412] p-2 shadow-[0_24px_70px_rgba(0,0,0,0.48)]">
-          <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted">Actions</p>
+        <div className="absolute right-0 z-30 mt-2 w-[260px] overflow-hidden rounded-2xl border border-[#2D352F] bg-[#0D120F]/95 p-1.5 shadow-[0_24px_70px_rgba(0,0,0,0.52)] backdrop-blur">
+          <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted">Create service</p>
           <CreateServiceMenuItem icon={AppWindow} title="Application" detail="GitHub, local path, Dockerfile, Node/Next" onClick={() => choose(onCreateApplication)} />
           <CreateServiceMenuItem icon={Database} title="Database" detail="Postgres, MySQL, Redis, MongoDB" onClick={() => choose(onCreateDatabase)} />
           <CreateServiceMenuItem icon={Boxes} title="Compose" detail="Existing compose.yml stack" onClick={() => choose(onCreateCompose)} />
+          <div className="my-1 h-px bg-white/5" />
           <CreateServiceMenuItem disabled icon={Workflow} title="Template" detail="Deferred until templates are ready" />
           <CreateServiceMenuItem disabled icon={FileCode2} title="Import" detail="Deferred compose import" />
         </div>
@@ -1729,13 +1733,13 @@ function CreateServiceMenuItem({ detail, disabled, icon: Icon, onClick, title }:
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${FOCUS_RING} ${disabled ? "cursor-not-allowed opacity-45" : "hover:bg-white/[0.06]"}`}
+      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition ${FOCUS_RING} ${disabled ? "cursor-not-allowed opacity-45" : "hover:bg-white/[0.06]"}`}
     >
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-accent/20 bg-accent/10 text-accent">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-accent/20 bg-accent/10 text-accent shadow-[0_0_18px_rgba(30,215,96,0.08)]">
         <Icon className="h-4.5 w-4.5" aria-hidden="true" />
       </span>
       <span className="min-w-0">
-        <span className="block text-sm font-bold text-foreground">{title}</span>
+        <span className="block text-sm font-black text-foreground">{title}</span>
         <span className="mt-0.5 block truncate text-[11px] text-muted">{detail}</span>
       </span>
     </button>
@@ -1744,18 +1748,18 @@ function CreateServiceMenuItem({ detail, disabled, icon: Icon, onClick, title }:
 
 function ProjectServicesToolbar({ appCount, onStartAll, readyCount, startAllBusy, startAllReason }: { appCount: number; onStartAll: () => void; readyCount: number; startAllBusy: boolean; startAllReason: string | null }) {
   return (
-    <div className="border-b border-white/5 bg-black/20 px-4 py-3">
+    <div className="border-b border-white/5 bg-[#0C100E] px-4 py-3">
       <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-        <div className="flex flex-wrap items-center gap-3">
-          <label className="flex items-center gap-2 text-sm text-muted">
-            <input disabled type="checkbox" className="h-4 w-4 rounded border-white/10 bg-black/30 accent-[var(--accent)]" />
+        <div className="flex flex-wrap items-center gap-2">
+          <label className="flex items-center gap-2 rounded-full border border-white/10 bg-black/20 px-2.5 py-1.5 text-sm text-muted">
+            <input disabled type="checkbox" className="h-3.5 w-3.5 rounded border-white/10 bg-black/30 accent-[var(--accent)]" />
             Select All {appCount > 0 ? `(${appCount})` : ""}
           </label>
           <Button disabled variant="secondary">Bulk Actions</Button>
-          <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] text-muted">Sort: Last deploy</span>
+          <span className="rounded-full border border-white/10 bg-black/20 px-3 py-1.5 text-[11px] text-muted">Sort: Last deploy</span>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-          <input disabled placeholder="Search services..." className="h-9 rounded-full border border-white/10 bg-black/25 px-3 text-sm text-muted outline-none" />
+          <input disabled placeholder="Search services..." className="h-9 rounded-full border border-white/10 bg-black/20 px-3 text-sm text-muted outline-none placeholder:text-muted/70" />
           <Button onClick={onStartAll} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || `${readyCount} stopped services can start`} variant="secondary">Start ready</Button>
         </div>
       </div>
@@ -1765,14 +1769,16 @@ function ProjectServicesToolbar({ appCount, onStartAll, readyCount, startAllBusy
 
 function ProjectEmptyState() {
   return (
-    <div className="px-4 py-12 text-center">
-      <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-[#2D352F] bg-[#171C1A] text-accent">
-        <AppWindow className="h-7 w-7" aria-hidden="true" />
+    <div className="px-4 py-10 text-center">
+      <div className="mx-auto max-w-xl rounded-[24px] border border-[#2D352F]/80 bg-[#121713] px-6 py-8 shadow-[0_20px_54px_rgba(0,0,0,0.22)]">
+        <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl border border-accent/20 bg-accent/10 text-accent">
+          <AppWindow className="h-6 w-6" aria-hidden="true" />
+        </div>
+        <h2 className="mt-4 text-lg font-black">No services found</h2>
+        <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-muted">
+          Create a service from the header. Application opens source setup, Compose asks for a compose file, and Database opens data services.
+        </p>
       </div>
-      <h2 className="mt-4 text-xl font-black">No services found</h2>
-      <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted">
-        Create a service from the header. Choose Application for app code, Compose for an existing compose file, or Database for stateful services.
-      </p>
     </div>
   );
 }
@@ -3136,7 +3142,7 @@ function AppForm({
   }
 
   return (
-    <form onSubmit={onSubmit} className="border-b border-white/5 bg-black/25 px-4 py-4">
+    <form onSubmit={onSubmit} className="border-b border-white/5 bg-[#0E130F] px-4 py-4">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{mode === "create" ? "Add resource" : "Edit resource"}</p>
@@ -3149,11 +3155,11 @@ function AppForm({
       </div>
 
       {error ? <div className="mt-3 rounded-md bg-negative/10 px-3 py-2 text-sm text-negative shadow-[0_0_0_1px_rgba(243,114,127,0.22)_inset]">{error}</div> : null}
-      <div className="mt-3 rounded-md border border-info/20 bg-info-soft px-3 py-2 text-xs text-foreground-secondary">
+      <div className="mt-3 rounded-xl border border-info/20 bg-info-soft px-3 py-2 text-xs text-foreground-secondary">
         Choose source first. Path, repo, stack, port, and readiness gate stay visible here.
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.94fr)_minmax(420px,1.06fr)] xl:items-start">
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.86fr)_minmax(460px,1.14fr)] xl:items-start">
         <div>
           <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
             <div>
@@ -3265,7 +3271,7 @@ function SourceStackCardGrid({ disabled, onSelect, selectedId }: { disabled?: bo
             aria-pressed={selected}
             disabled={disabled}
             onClick={() => onSelect(card.id)}
-            className={`group min-h-[104px] rounded-[18px] border p-2.5 text-left transition ${FOCUS_RING} ${selected ? "border-accent/70 bg-accent-soft shadow-[0_0_0_1px_rgba(39,216,111,0.18)_inset,0_16px_34px_rgba(0,0,0,0.28)]" : "border-[#2D352F]/80 bg-[#171C1A] hover:border-[#415246] hover:bg-[#1C241F]"}`}
+            className={`group min-h-[96px] rounded-[16px] border p-2.5 text-left transition ${FOCUS_RING} ${selected ? "border-accent/70 bg-accent-soft shadow-[0_0_0_1px_rgba(30,215,96,0.18)_inset]" : "border-[#2D352F]/80 bg-[#171C1A] hover:border-[#415246] hover:bg-[#1C241F]"}`}
           >
             <span className="flex items-start gap-3">
               <SourceStackIcon card={card} selected={selected} />
@@ -3274,7 +3280,7 @@ function SourceStackCardGrid({ disabled, onSelect, selectedId }: { disabled?: bo
                 <span className="mt-1 block text-[11px] leading-4 text-muted">{card.description}</span>
               </span>
             </span>
-            <span className="mt-2 block truncate rounded-full bg-black/30 px-2.5 py-1 font-mono text-[10px] text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset]">{card.detail}</span>
+            <span className="mt-2 block truncate rounded-lg bg-black/25 px-2.5 py-1 font-mono text-[10px] text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset]">{card.detail}</span>
           </button>
         );
       })}
@@ -3289,7 +3295,7 @@ function SelectedSourceFields({ form, healthStatusInvalid, nameMissing, onPatch,
   const healthFields = <><Field label="Health path" value={form.healthcheckPath} onChange={(value) => onPatch({ healthcheckPath: value })} disabled={saving} placeholder="/" /><Field label="Expected status" value={form.healthcheckStatus} onChange={(value) => onPatch({ healthcheckStatus: value })} type="number" error={healthStatusInvalid ? "Positive integer" : undefined} disabled={saving} placeholder="200" /></>;
 
   return (
-    <section className="mt-3 rounded-[20px] border border-accent/15 bg-[#121814] p-3 shadow-[0_18px_42px_rgba(0,0,0,0.2)] sm:p-4">
+    <section className="rounded-[20px] border border-accent/15 bg-[#121814] p-3 shadow-[0_18px_42px_rgba(0,0,0,0.16)] sm:p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <SourceStackIcon card={selectedCard} selected compact />
@@ -3299,7 +3305,7 @@ function SelectedSourceFields({ form, healthStatusInvalid, nameMissing, onPatch,
             <p className="mt-1 text-xs text-muted">{selectedCard.description}</p>
           </div>
         </div>
-        <span className="rounded-full bg-black/30 px-3 py-1 font-mono text-[10px] text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset]">{selectedCard.detail}</span>
+        <span className="rounded-lg bg-black/30 px-3 py-1 font-mono text-[10px] text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset]">{selectedCard.detail}</span>
       </div>
 
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
