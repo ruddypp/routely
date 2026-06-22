@@ -20,7 +20,7 @@ Routely must be proven by behavior, not by configuration existing on disk. A fea
 - Run a browser smoke or provide a screenshot/visual QA note for touched UI flows when practical.
 - Verify loading, empty, error, and failure states.
 - For visual checkpoints, verify the result does not preserve the old alpha layout with only renamed components.
-- For the Spotify-inspired checkpoint, verify the dashboard is dark, compact, chart-friendly, and has no large light stale-data panel above the fold.
+- For the Spotify-inspired baseline, verify the dashboard is dark, compact, chart-friendly, keeps the top-right GitHub CTA, has no tall Server Rail/banner, and has no large light stale-data panel above the fold.
 
 ### Backend changes
 

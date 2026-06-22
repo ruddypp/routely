@@ -24,15 +24,17 @@ Use Spotify as a style reference, not as a clone:
 - Charts and status widgets should feel embedded in the dark console.
 - Empty/error states should be small, specific, and actionable.
 
-## Current Visual Checkpoint
+## Current Visual Baseline
 
-The next frontend checkpoint is a corrective redesign. It must replace the current light command-board/dashboard look with the Spotify-inspired Routely console:
+The accepted frontend baseline after Slice 1B is a Spotify-inspired dark operations deck:
 
-- Dark shell and dark dashboard content.
-- Compact Server Rail, not a tall banner.
-- Monitoring cards and charts that fit the dark style.
-- Disk, CPU, memory, app status, activity, and traffic surfaces.
-- Honest empty states instead of fake metrics.
-- No active backup/restore UI.
+- Muted fixed sidebar with active green navigation.
+- Minimal deck header, not a tall Server Rail/banner.
+- `Connect GitHub` CTA in the top-right of the dashboard deck.
+- Runtime controls stacked near the top, full-width, and clearly separated from monitoring content.
+- Fewer larger cards instead of many tiny forced metric cards.
+- Vertical composition: Runtime controls → Operational summary + Activity → resource/traffic/fleet panels.
+- Dark chart panels with honest empty/auth states.
+- No active backup/restore UI and no light/cream stale-data panels.
 
-See `docs/frontend.md` and `docs/implementation-slices.md` Slice 1B.
+Future frontend work must preserve this baseline unless the user explicitly approves a new visual direction.

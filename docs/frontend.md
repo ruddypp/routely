@@ -56,36 +56,34 @@ Do not copy Spotify branding, logos, exact layouts, or proprietary assets. Route
 
 ### Signature Element
 
-Use a compact `Server Rail`, not a tall top banner. It should behave like Spotify's top player/status strip translated to server operations.
+Use a `Runtime Operations Deck`, not a tall Server Rail/banner. The deck is the dashboard's primary above-the-fold control surface: it combines a minimal title/header, top-right GitHub CTA, lifecycle controls, operational summary, and recent activity without crowding the rest of the dashboard.
 
-Server Rail content:
+Runtime Operations Deck content:
 
-- Runtime host name.
-- Session state.
-- Daemon state.
-- Docker state.
-- Compose state.
-- CPU/RAM/Disk quick chips.
-- Uptime.
-- Refresh action.
+- Minimal deck header with “Runtime operations” copy.
+- `Connect GitHub` CTA in the top-right.
+- Runtime controls for Start, Stop, and Refresh.
+- Compact production/session label.
+- Operational summary for session, running apps, attention, routes, CPU, RAM, and domains.
+- Recent operations/activity panel.
 
-Server Rail rules:
+Runtime Operations Deck rules:
 
-- Height should stay compact.
-- It should use dark/elevated surfaces.
-- Chips should be pill-shaped.
-- Warnings/errors should not explode into giant panels.
-- If data is unavailable, show a small warning chip and a short inline reason.
+- It should be dark, compact, and integrated into the dashboard content.
+- It should not become a tall global banner.
+- It should use fewer larger cards, not many tiny metric cards.
+- Warnings/errors should appear as compact chips or inline notices.
+- If data is unavailable, show the smallest honest state that still explains why.
 
 ## Visual Quality Bar
 
-The current dashboard redesign is not acceptable if it still looks like a generic light admin board, has a giant stale-data card, or uses a tall navy banner with disconnected white content panels.
+The accepted dashboard baseline is a dark Spotify-inspired operations deck. It is not acceptable for future checkpoints to regress to a generic light admin board, a giant stale-data card, or a tall banner with disconnected content panels.
 
 Required visual outcomes:
 
 - The first impression is dark Spotify-inspired Routely, not a light dashboard template.
-- Sidebar, Server Rail, and dashboard content share one dark visual system.
-- Server Rail is compact and integrated into the shell.
+- Muted fixed sidebar, dashboard deck, and chart panels share one dark visual system.
+- Runtime Operations Deck is compact, with GitHub CTA top-right and runtime controls stacked near the top.
 - Dashboard cards are polished charcoal surfaces, not white/cream blocks.
 - Charts are real components with dark-theme styling and accessible summaries.
 - Stale/unavailable data appears as compact inline warnings, not a huge empty warning column.
@@ -153,8 +151,8 @@ Purpose: show runtime host and app fleet health at a glance.
 
 Must show:
 
-- Compact dark Server Rail.
-- Hero/fleet panel that answers: “Is this runtime host healthy and are my apps running?”
+- Runtime Operations Deck with GitHub CTA top-right and Start/Stop/Refresh controls.
+- Operational summary that answers: “Is this runtime host healthy and are my apps running?”
 - App status chart: running, stopped, needs setup, failed, disabled.
 - Host resource charts: CPU and memory trends when samples exist; compact empty states otherwise.
 - Disk usage gauge with used/free summary.
@@ -167,10 +165,10 @@ Layout guidance:
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│ compact dark Server Rail                                     │
+│ dark runtime operations deck: header + GitHub + controls     │
 ├──────────────┬───────────────────────────────────────────────┤
-│ dark sidebar │ hero/fleet status       app status + disk     │
-│              │ host resource charts    traffic + activity    │
+│ muted sidebar│ operational summary     activity              │
+│              │ host resources + disk   app status + traffic  │
 │              │ app/service list strip  logs/incidents        │
 └──────────────┴───────────────────────────────────────────────┘
 ```
@@ -278,8 +276,8 @@ Must show:
 
 Split UI by feature, not by one giant dashboard client:
 
-- `dashboard-shell` — layout, sidebar, compact Server Rail, nav.
-- `dashboard-visuals` — dark dashboard hero, charts, app status, traffic, activity.
+- `dashboard-shell` — muted fixed sidebar, dashboard frame, nav, and shared shell surfaces.
+- `dashboard-visuals` — Runtime Operations Deck, dark charts, app status, traffic, and activity.
 - `server-status` — host metrics, Docker status, doctor cards.
 - `apps-list` — app cards/table and bulk controls.
 - `app-detail` — tabbed app workspace.

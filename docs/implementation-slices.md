@@ -94,30 +94,34 @@ Acceptance criteria:
 
 Owner: Frontend.
 
+Status: Accepted as the dashboard visual baseline in commit `779afaa`.
+
 Blocked by: Slice 1A.
 
 Why this exists:
 
-- Slice 1A introduced charts but still produced a light command-board layout that does not match the requested Spotify-inspired Routely UI.
-- The next pass must correct visual direction, not add more features.
+- Slice 1A introduced charts but still produced a light command-board layout that did not match the requested Spotify-inspired Routely UI.
+- Slice 1B corrected the dashboard into the dark operations-deck baseline future FE work must preserve.
 
-What to build:
+Accepted baseline:
 
-- Convert the dashboard shell/content to the Spotify-inspired dark console defined in `docs/frontend.md`.
-- Replace light/cream/white dashboard panels with layered charcoal panels.
-- Make Server Rail compact and integrated into the dark shell instead of a tall banner.
-- Rework stale/unavailable data into compact warning chips or inline empty states.
-- Keep existing chart components but restyle them for the dark palette.
-- Improve above-the-fold density so host/app status, charts, activity, and quick actions are readable without giant empty blocks.
-- Keep Backups/Restore hidden from active UI.
+- Muted fixed sidebar with active green navigation.
+- Minimal dashboard deck header, not a tall Server Rail/banner.
+- `Connect GitHub` CTA in the top-right of the control deck.
+- Runtime controls stacked near the top and spanning the deck width.
+- Operational summary and Activity sit beneath runtime controls.
+- Fewer larger cards replace many tiny metric cards.
+- Host resources, disk, app status, and traffic panels use dark chart styling.
+- Empty/auth states stay honest but visually subordinate.
+- Backups/Restore remain hidden from active UI.
 
-Acceptance criteria:
+Acceptance criteria for future changes that touch this area:
 
-- Screenshot clearly reads as a dark Spotify-inspired operational console.
-- No large white/cream stale-data panels remain on the dashboard home.
-- Server Rail height is compact and dashboard content begins high on the page.
+- Screenshot still clearly reads as a dark Spotify-inspired operational console.
+- No large white/cream stale-data panels appear on the dashboard home.
+- No tall Server Rail/banner returns.
 - At least three visual/chart components remain present and dark-theme styled.
-- Empty/unavailable states are honest but visually subordinate to operational content.
+- Empty/unavailable states are honest but do not dominate the layout.
 - Relevant web lint, tests, and build pass.
 - Final handoff includes screenshot path or image, files changed, checks, commit hash, and push status.
 
