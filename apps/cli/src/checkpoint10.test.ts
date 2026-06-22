@@ -74,7 +74,8 @@ describe("checkpoint 10 databases and backups", () => {
     expect(jobDto.storageType).toBe("local");
     expect(jobDto.restoreStatus).toBe("deferred");
     const runDto = backupRunToPublicDto(finished!);
-    expect(runDto.filePath).toBe("/tmp/postgres.sql");
+    expect(runDto).not.toHaveProperty("filePath");
+    expect(JSON.stringify(runDto)).not.toContain("/tmp/postgres.sql");
     expect(runDto.fileName).toBe("postgres.sql");
     expect(runDto.file.available).toBe(true);
     expect(runDto.file.servesFile).toBe(false);
