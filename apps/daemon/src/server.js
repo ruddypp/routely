@@ -1578,14 +1578,30 @@ function isPrivateAddress(address) {
     const parts = address.split(".").map(Number);
     return parts[0] === 10
       || parts[0] === 127
+      || (parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127)
       || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
       || (parts[0] === 192 && parts[1] === 168)
       || (parts[0] === 169 && parts[1] === 254)
-      || parts[0] === 0;
+      || (parts[0] === 192 && parts[1] === 0 && parts[2] === 0)
+      || (parts[0] === 192 && parts[1] === 0 && parts[2] === 2)
+      || (parts[0] === 198 && (parts[1] === 18 || parts[1] === 19))
+      || (parts[0] === 198 && parts[1] === 51 && parts[2] === 100)
+      || (parts[0] === 203 && parts[1] === 0 && parts[2] === 113)
+      || parts[0] === 0
+      || parts[0] >= 224;
   }
   if (net.isIPv6(address)) {
     const normalized = address.toLowerCase();
-    return normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe80:");
+    if (normalized.startsWith("::ffff:")) {
+      const mapped = normalized.slice("::ffff:".length);
+      return net.isIPv4(mapped) ? isPrivateAddress(mapped) : true;
+    }
+    return normalized === "::"
+      || normalized === "::1"
+      || normalized.startsWith("fc")
+      || normalized.startsWith("fd")
+      || normalized.startsWith("fe80:")
+      || normalized.startsWith("ff");
   }
   return true;
 }
@@ -1608,6 +1624,36 @@ async function safeOutboundUrl(rawUrl) {
     throw new Error("Notification URL must not resolve to a private, loopback, or link-local address.");
   }
   return url.toString();
+}
+
+function notificationRedirectLocation(response, currentUrl) {
+  if (![301, 302, 303, 307, 308].includes(response.status)) return null;
+  const location = response.headers.get("location");
+  if (!location) return null;
+  return new URL(location, currentUrl).toString();
+}
+
+function sanitizeExternalResponseSnippet(text) {
+  return String(text || "")
+    .replace(/[\u0000-\u001f\u007f]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 120);
+}
+
+async function fetchSafeOutboundJson(rawUrl, options = {}, redirectCount = 0) {
+  if (redirectCount > 3) {
+    throw new Error("Notification URL redirected too many times.");
+  }
+  const url = await safeOutboundUrl(rawUrl);
+  const response = await fetch(url, {
+    ...options,
+    redirect: "manual"
+  });
+  const redirectUrl = notificationRedirectLocation(response, url);
+  if (!redirectUrl) return response;
+  await safeOutboundUrl(redirectUrl);
+  return fetchSafeOutboundJson(redirectUrl, options, redirectCount + 1);
 }
 
 async function validateNotificationChannelTarget(input = {}) {
@@ -1643,17 +1689,18 @@ async function deliverNotification(channel, event, context = {}) {
       ? await safeOutboundUrl(`https://api.telegram.org/bot${channel.config.botToken}/sendMessage`)
       : await safeOutboundUrl(channel.config.url);
     const payload = buildNotificationPayload(channel, event, context);
-    const response = await fetch(url, {
+    const response = await fetchSafeOutboundJson(url, {
       method: "POST",
       headers: { "content-type": "application/json", "user-agent": "routely-notifications/0.1" },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(5000)
     });
     const text = await response.text().catch(() => "");
+    const responseSnippet = sanitizeExternalResponseSnippet(text);
     return updateNotificationAttempt(db, attempt.id, {
       status: response.ok ? "succeeded" : "failed",
       httpStatus: response.status,
-      message: response.ok ? "notification delivered" : (text.slice(0, 240) || `HTTP ${response.status}`),
+      message: response.ok ? "notification delivered" : (responseSnippet || `HTTP ${response.status}`),
       finishedAt: new Date().toISOString()
     });
   } catch (error) {
