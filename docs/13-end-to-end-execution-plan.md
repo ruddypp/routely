@@ -147,6 +147,7 @@ Acceptance:
 - Dashboard shows daemon/server readiness from real status.
 - Failure to bind ports or start the daemon returns actionable errors.
 - Local security posture is clear: private local binding by default and no raw secret/log leakage.
+- Non-loopback local daemon binding is blocked unless production auth is active or an explicit unsafe override is documented.
 
 Verification:
 
@@ -165,6 +166,7 @@ Acceptance:
 
 - Dashboard can create or edit a managed app with name, path/source, enablement, driver, command/Compose/Dockerfile metadata, ports, env metadata, dependencies, healthcheck, and optional domain metadata.
 - Stack presets explain supported paths and unsupported/deferred paths honestly.
+- Public-alpha create/edit choices expose only verified drivers and presets as selectable; compatibility-only or non-demo options stay read-only, hidden, or labeled `deferred for public alpha`.
 - Registry state is consistent across `routely.yml`, SQLite/runtime state, daemon DTOs, and dashboard APIs.
 
 Verification:
@@ -202,7 +204,9 @@ Acceptance:
 
 - Production init/doctor reports server readiness.
 - Private mutation operations require production auth/admin token.
+- Dashboard same-origin route handlers require caller auth for production/private mutations whenever a production or admin-token signal exists, and never proxy an admin token for unauthenticated callers.
 - Dashboard server status separates local, production-ready, production-blocked, and auth-missing states.
+- Public unauthenticated production health/status responses avoid absolute filesystem path and data-directory metadata.
 
 Verification:
 
@@ -221,6 +225,7 @@ Acceptance:
 
 - One managed app deploys on one VPS through the verified runtime path.
 - Domain verification, generated proxy route, HTTPS/TLS, latest successful deployment, deploy phases, and failure logs are represented separately.
+- All deploy entry points, including app inspector controls, use the same server, Docker, data-dir, auth, daemon, path, enablement, and driver blocker semantics.
 - UI avoids success copy/colors for generated, pending, failed, or unverified states.
 
 Verification:
@@ -261,9 +266,13 @@ Blocked by: Slice 5.
 Acceptance:
 
 - Env/secrets store only redacted public metadata after save.
+- URL/DSN/URI-shaped env values and common connection-string keys are treated as secret by default and never rendered raw in API DTOs, dashboard text, logs, screenshots, or exported config.
 - Database services are internal-only by default.
 - Backup jobs/runs expose status and local-file metadata without unsafe restore promises.
+- Backup DTOs and dashboard copy prefer file name, storage class, size, and status over absolute host paths except in authenticated diagnostics.
 - Metrics, health, logs, deploy history, and notifications show real data or honest unavailable/deferred states.
+- Notification targets revalidate redirects and final DNS/address resolution against private, loopback, and link-local restrictions before public docs claim outbound webhook safety.
+- Health and metrics retention is bounded or explicitly documented as alpha behavior.
 
 Verification:
 
@@ -281,6 +290,7 @@ Blocked by: Slices 1-7.
 Acceptance:
 
 - Public docs let a new solo operator run local, one-VPS, and GitHub demos without private chat context.
+- Public docs warn that registered local command apps run through the user's shell in the configured path with inherited environment, and that app logs may contain sensitive output.
 - QA and Security reports exist and are routed.
 - Known deferred scope is explicit and not shown as implemented.
 - README commands match verified behavior.
