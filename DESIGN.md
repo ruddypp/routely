@@ -44,6 +44,9 @@ Future frontend work must preserve this baseline unless the user explicitly appr
 The Apps area must feel like a beginner-friendly deployment console, not a registry table for experts.
 
 - Follow the Dokploy project mental model: `Project` → `Environment` → `Service`. Routely can start with a single `Default project` and one runtime-host environment, but the UI must still teach that apps, compose stacks, and databases are services inside a project.
+- Service concerns are owned by Apps, not by global sidebar modules. Deployments, Domains, GitHub source, Env / Secrets, Logs, Health, Metrics, Terminal, and Database services must appear as service workspace tabs/panels inside `Apps / Services`.
+- The global sidebar stays intentionally small: `Dashboard`, `Apps / Services`, `Server Status`, and `Notifications / Settings`. Do not re-add separate service sidebars unless the product model changes.
+- Apps layout follows Dokploy behavior: left side project/environment service list, right side selected service workspace/detail tabs. The Spotify styling can differ, but the behavior and ownership must stay project-first.
 - Empty Apps state is an onboarding surface titled around `Create your first service`.
 - The primary action is `Create service`, not a vague registry-level `Add app`.
 - `Create service` behaves like a compact Dokploy-style menu in the project header, not a permanently visible card grid.

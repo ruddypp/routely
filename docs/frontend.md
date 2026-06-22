@@ -128,13 +128,24 @@ Rules:
 Primary pages:
 
 1. `Dashboard`
-2. `Apps`
-3. `Application Setup Wizard`
-4. `App Detail`
-5. `Databases`
-6. `Activity`
-7. `Server`
-8. `Settings`
+2. `Apps / Services`
+3. `Server Status`
+4. `Notifications / Settings`
+
+Apps-owned service surfaces:
+
+- `Application Setup Wizard`
+- `Service Detail`
+- `Deployments`
+- `Domains`
+- `GitHub Source`
+- `Environment / Secrets`
+- `Logs`
+- `Health / Metrics`
+- `Database Services`
+- `Terminal`
+
+Hard IA rule: service operations must not be promoted into separate global sidebar modules. Routely follows Dokploy's ownership model where project/environment pages list services and each selected service owns its deployment, domain, env, log, monitoring, database, terminal, and settings panels.
 
 Global actions:
 
@@ -177,7 +188,7 @@ Empty state:
 
 - “No apps yet. Add your first app to make this machine a Routely server.”
 
-### Apps
+### Apps / Services
 
 Purpose: list every managed app and make common actions obvious. For a new user, this page is also the first deployment onboarding surface, not a technical registry/debug screen.
 
@@ -189,6 +200,8 @@ Dokploy research baseline:
 - First-level service choices are a compact header menu: `Application`, `Database`, `Compose`, and deferred `Template / import`.
 - `Application` is where GitHub repo, local folder, Dockerfile, Node/Next.js, static site, and custom source/stack choices live.
 - Do not show service-type cards and source/stack cards at the same time in the empty state; that creates a duplicate onboarding surface.
+- The Apps page layout is a project workspace: project/environment header, service list, and selected service inspector. The selected inspector owns tabs/panels for Overview, Runtime/Services, Environment, Logs, Health/Metrics, Deployments, Domains, Database services, Terminal, and Settings.
+- Global sidebar entries named Deployments, Domains, GitHub, Env / Secrets, Logs, Health, Metrics, and Databases are forbidden for this MVP. Those capabilities live in Apps/service detail only.
 
 Beginner-first rules:
 
@@ -297,7 +310,7 @@ State rules:
 - Field labels use beginner language first and technical details second, for example `App folder path` with helper text `Absolute path on the machine running routely`.
 - Verification errors must name the failing step and next fix, not only raw logs.
 
-### App Detail
+### Service Detail
 
 Tabs:
 
@@ -307,13 +320,13 @@ Tabs:
 - `Deployments` — setup verification and GitHub redeploy history.
 - `Domains` — hostname, DNS, proxy, HTTPS state.
 - `Environment` — env vars and secrets with masked values after save.
-- `Databases` — attached databases and create/attach flow.
+- `Databases` — project database services and attach flow when available.
 - `Terminal` — scoped terminal with warning and audit cue.
 - `Settings` — source, recipe, enablement, danger zone.
 
-### Databases
+### Database Services
 
-Purpose: manage database services without pretending backup/restore exists.
+Purpose: manage database services inside `Apps / Services` without pretending backup/restore exists.
 
 Must show:
 
@@ -326,6 +339,12 @@ Must show:
 - Create database action.
 
 Must not show backup/restore controls in the MVP.
+
+Placement rule:
+
+- Database service creation starts from `Apps / Services` → `Create service` → `Database`.
+- Database status and lifecycle appear inside the project/service workspace.
+- Do not create a global `Databases` sidebar page for MVP.
 
 ### Activity
 

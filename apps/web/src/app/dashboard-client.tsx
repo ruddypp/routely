@@ -13,14 +13,13 @@ import { Field as UiField, TextAreaField as UiTextAreaField } from "@/components
 import { Select as UiSelect } from "@/components/ui/select";
 import { SkeletonRows } from "@/components/ui/skeleton";
 import { DashboardShell } from "@/components/dashboard-shell/dashboard-shell";
-import { ModuleHeader } from "@/components/dashboard-shell/module-header";
 import type { DashboardModuleKey, ServerRailSignal } from "@/components/dashboard-shell/types";
 import { OperationsDashboard } from "@/components/dashboard-visuals/operations-dashboard";
 import { ROUTELY_CHART_COLORS } from "@/components/dashboard-visuals/palette";
 import type { ActivityItem, AppStatusDatum, DiskUsageValue, HostResourceSample } from "@/components/dashboard-visuals/types";
-import { appActionBlockReason, appEnablementBlockReason, appSetupBlockReason, appSupportsBulkStart, bulkStartSkipReason, bulkStartStateLabel, isAppRuntimeRunning, startAllBlockReason, startAllPlan, type AppEnablementAction, type AppLifecycleAction, type BulkStartPlan } from "@/lib/app-lifecycle";
+import { appActionBlockReason, appSetupBlockReason, appSupportsBulkStart, bulkStartStateLabel, isAppRuntimeRunning, startAllBlockReason, startAllPlan, type AppEnablementAction, type AppLifecycleAction, type BulkStartPlan } from "@/lib/app-lifecycle";
 import { APP_DRIVERS, APP_PRESETS, APP_TYPES, appDriverPatch, appFormFromDaemonApp, appFormPayload, appFormValidationError, blankAppForm, type AppFormState } from "@/lib/app-registry-form";
-import { databaseExposureLabel, deploymentLogsLabel, deploymentStateLabel, domainDnsLabel, domainProxyLabel, domainTargetLabel, domainTlsLabel, envVisibilityLabel, githubConnectionState, githubDeliveryLogPath, githubDeliveryState, githubLatestDelivery, githubRepositoryBranch, isDeploymentInProgress, latestDeployment, latestSuccessfulDeployment, logAvailabilityLabel, productionAuthState, safeEnvDisplay } from "@/lib/dashboard-operations";
+import { databaseExposureLabel, deploymentStateLabel, domainDnsLabel, domainProxyLabel, domainTargetLabel, domainTlsLabel, envVisibilityLabel, latestSuccessfulDeployment, logAvailabilityLabel, safeEnvDisplay } from "@/lib/dashboard-operations";
 
 type DaemonApp = {
   id: number;
@@ -519,28 +518,6 @@ function shortPath(path: string | null): string {
   return parts.length > 3 ? `.../${parts.slice(-3).join("/")}` : path;
 }
 
-function compactSource(app: DaemonApp): string {
-  if (app.source?.repo) return `${app.source.repo}:${app.source.branch || "main"}`;
-  if (app.image) return app.image;
-  return app.driver === "compose" ? app.composeService || app.image || "compose service" : app.command || app.dev || "no command";
-}
-
-function readinessFromStatus(status: string | null | undefined, ready: string[] = []): "ok" | "warn" | "error" {
-  if (!status) return "warn";
-  if (ready.includes(status) || ["running", "succeeded", "healthy", "ready", "verified", "active", "ok"].includes(status)) return "ok";
-  if (["failed", "crashed", "error", "unhealthy", "invalid"].includes(status)) return "error";
-  return "warn";
-}
-
-function domainStepTone(domain: DaemonDomain, route: DaemonProxyRoute | undefined, step: "root" | "hostname" | "dns" | "proxy" | "tls" | "target", hasRoot: boolean): "ok" | "warn" | "error" {
-  if (step === "root") return hasRoot ? "ok" : "warn";
-  if (step === "hostname") return domain.hostname ? "ok" : "warn";
-  if (step === "dns") return readinessFromStatus(domain.dnsStatus, ["verified"]);
-  if (step === "proxy") return route?.enabled || domain.proxyStatus === "generated" ? "ok" : domain.proxyStatus === "failed" || domain.status === "error" ? "error" : "warn";
-  if (step === "tls") return domain.tlsStatus === "active" || domain.tlsStatus === "verified" ? "ok" : domain.tlsStatus === "failed" || domain.tlsStatus === "error" ? "error" : "warn";
-  return domain.targetUrl || domain.targetPort ? "ok" : "warn";
-}
-
 function tlsTone(status: string | null | undefined): "ok" | "warn" | "error" {
   if (status === "active" || status === "verified") return "ok";
   if (status === "failed" || status === "error") return "error";
@@ -559,13 +536,6 @@ function deploymentSource(deployment: DaemonDeployment): string {
   const branch = deployment.branch ? `:${deployment.branch}` : "";
   const commit = deployment.commitSha ? ` @ ${deployment.commitSha.slice(0, 7)}` : "";
   return deployment.repo ? `${deployment.repo}${branch}${commit}` : deployment.sourceType || "runtime host source";
-}
-
-function appDeployMetadata(app: DaemonApp, latest: DaemonDeployment | undefined): string {
-  const image = latest?.imageTag || app.image || "image pending";
-  const container = latest?.containerName || "container pending";
-  const ports = latest?.hostPort ? `127.0.0.1:${latest.hostPort}->${latest.containerPort || "container"}` : app.port ? `runtime host :${app.port}` : "port pending";
-  return `${image} · ${container} · ${ports}`;
 }
 
 function envMetadata(app: DaemonApp): string {
@@ -669,14 +639,6 @@ function isEnablementAction(action: AppAction): action is AppEnablementAction {
   return action === "enable" || action === "disable";
 }
 
-function sourceTypeLabel(app: DaemonApp): string {
-  if (app.source?.type === "github" || app.source?.repo) return "GitHub";
-  if (app.driver === "compose") return "Docker Compose";
-  if (app.driver === "dockerfile") return "Dockerfile";
-  if (app.source?.type === "local" || app.path) return "Local folder";
-  return "not available";
-}
-
 function sourceDetail(app: DaemonApp): string {
   if (app.source?.repo) return [app.source.repo, app.source.branch || "main", app.source.subdirectory].filter(Boolean).join(" · ");
   if (app.path) return app.path;
@@ -691,14 +653,6 @@ function stackRecipeLabel(app: DaemonApp): string {
   if (["vite", "express"].includes(app.preset)) return `Node · ${app.preset}`;
   if (["postgres", "mysql", "mariadb", "redis", "mongodb"].includes(app.preset)) return `Database · ${app.preset}`;
   return app.preset && app.preset !== "custom" ? app.preset : "Custom / unknown";
-}
-
-function lifecycleSummary(app: DaemonApp): string {
-  if (!app.enabled) return "disabled from auto-start";
-  if (isAppRuntimeRunning(app)) return "running on this host";
-  const setupBlockReason = appSetupBlockReason(app);
-  if (setupBlockReason) return "setup must pass before start";
-  return "ready for manual start";
 }
 
 function sourceStackPatch(sourceId: SourceStackId, form: AppFormState): Partial<AppFormState> {
@@ -763,13 +717,6 @@ function primaryEndpoint(app: DaemonApp, domains: DaemonDomain[]): { href: strin
   return { href: null, label: "not available", tone: "endpoint missing" };
 }
 
-function visibleServiceCount(app: DaemonApp): string {
-  if (app.type === "database") return "1 database service";
-  if (app.driver === "compose" && app.composeService) return "1 visible service";
-  if (app.driver === "dockerfile" || app.driver === "command") return "1 app process";
-  return "not available";
-}
-
 function setupVerificationState(app: DaemonApp): { detail: string; label: string; status: string } {
   const setupBlockReason = appSetupBlockReason(app);
   const normalizedStatus = app.status.trim().toLowerCase().replace(/[\s_]+/g, "-");
@@ -813,16 +760,10 @@ export default function DashboardClient() {
   const [deployments, setDeployments] = useState<DaemonDeployment[]>([]);
   const [deploymentsError, setDeploymentsError] = useState<string | null>(null);
   const [domains, setDomains] = useState<DaemonDomain[]>([]);
-  const [domainsMeta, setDomainsMeta] = useState<{ rootDomain: string | null; serverPublicIp: string | null }>({ rootDomain: null, serverPublicIp: null });
-  const [domainsError, setDomainsError] = useState<string | null>(null);
   const [proxyRoutes, setProxyRoutes] = useState<DaemonProxyRoute[]>([]);
-  const [proxyError, setProxyError] = useState<string | null>(null);
   const [github, setGithub] = useState<DaemonGithubStatus | null>(null);
-  const [githubError, setGithubError] = useState<string | null>(null);
   const [hostMetrics, setHostMetrics] = useState<DaemonMetricSample[]>([]);
   const [hostMetricsError, setHostMetricsError] = useState<string | null>(null);
-  const [githubSaving, setGithubSaving] = useState(false);
-  const [githubForm, setGithubForm] = useState({ appId: "", fullName: "", branch: "main", autoDeploy: true });
   const [databases, setDatabases] = useState<DaemonDatabase[]>([]);
   const [databasesError, setDatabasesError] = useState<string | null>(null);
   const [databaseActionById, setDatabaseActionById] = useState<Record<number, string | null>>({});
@@ -834,15 +775,11 @@ export default function DashboardClient() {
   const [notificationSaving, setNotificationSaving] = useState(false);
   const [notificationActionById, setNotificationActionById] = useState<Record<number, string | null>>({});
   const [notificationForm, setNotificationForm] = useState({ type: "webhook", name: "deploy-alerts", url: "", botToken: "", chatId: "", events: "deploy_succeeded,deploy_failed" });
-  const [domainSaving, setDomainSaving] = useState(false);
-  const [domainActionByHostname, setDomainActionByHostname] = useState<Record<string, string | null>>({});
-  const [domainForm, setDomainForm] = useState({ appId: "", hostname: "" });
-  const [rootDomainInput, setRootDomainInput] = useState("");
   const [deploymentLogs, setDeploymentLogs] = useState<DeploymentLogsResponse | null>(null);
   const [deploymentLogsLoading, setDeploymentLogsLoading] = useState(false);
   const [deploymentLogsError, setDeploymentLogsError] = useState<string | null>(null);
   const [deployingByAppId, setDeployingByAppId] = useState<Record<number, boolean>>({});
-  const [deployError, setDeployError] = useState<string | null>(null);
+  const [appsInspectorMode, setAppsInspectorMode] = useState<"service" | "database">("service");
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -900,12 +837,8 @@ export default function DashboardClient() {
       setDeployments(deploymentsData.deployments || []);
       setDeploymentsError(deploymentsData.error || null);
       setDomains(domainsData.domains || []);
-      setDomainsMeta({ rootDomain: domainsData.rootDomain || null, serverPublicIp: domainsData.serverPublicIp || null });
-      setDomainsError(domainsData.error || null);
       setProxyRoutes(proxyData.routes || []);
-      setProxyError(proxyData.error || null);
       setGithub(githubData.github || null);
-      setGithubError(githubData.error || null);
       setHostMetrics(metricsData.metrics || []);
       setHostMetricsError(metricsData.error || null);
       setDatabases(databasesData.databases || []);
@@ -913,8 +846,6 @@ export default function DashboardClient() {
       setNotificationChannels(notificationsData.channels || []);
       setNotificationAttempts(notificationsData.attempts || []);
       setNotificationsError(notificationsData.error || null);
-      setRootDomainInput((current) => current || domainsData.rootDomain || "");
-      setGithubForm((current) => ({ ...current, appId: current.appId || String(appsData.apps?.find((app) => app.driver === "dockerfile")?.id || "") }));
       setLastUpdated(new Date().toISOString());
       setSelectedAppId((current) => current ?? appsData.apps?.[0]?.id ?? null);
     } catch {
@@ -924,9 +855,6 @@ export default function DashboardClient() {
       setServerError("Dashboard could not reach its API.");
       setAppsError("Dashboard could not reach its API.");
       setDeploymentsError("Dashboard could not reach its API.");
-      setDomainsError("Dashboard could not reach its API.");
-      setProxyError("Dashboard could not reach its API.");
-      setGithubError("Dashboard could not reach its API.");
       setHostMetricsError("Dashboard could not reach its API.");
       setDatabasesError("Dashboard could not reach its API.");
       setNotificationsError("Dashboard could not reach its API.");
@@ -957,23 +885,6 @@ export default function DashboardClient() {
         latest.set(deployment.appId, deployment);
       }
     }
-    return latest;
-  }, [deployments]);
-
-  const latestSuccessfulDeploymentByAppId = useMemo(() => {
-    const grouped = new Map<number, DaemonDeployment[]>();
-    for (const deployment of deployments) {
-      const items = grouped.get(deployment.appId) || [];
-      items.push(deployment);
-      grouped.set(deployment.appId, items);
-    }
-
-    const latest = new Map<number, DaemonDeployment>();
-    for (const [appId, appDeployments] of grouped) {
-      const successful = latestSuccessfulDeployment(appDeployments);
-      if (successful) latest.set(appId, successful);
-    }
-
     return latest;
   }, [deployments]);
 
@@ -1025,7 +936,7 @@ export default function DashboardClient() {
   }, []);
 
   const deployApp = useCallback(async (app: DaemonApp) => {
-    setDeployError(null);
+    setActionError(null);
     setDeployingByAppId((current) => ({ ...current, [app.id]: true }));
 
     try {
@@ -1044,128 +955,11 @@ export default function DashboardClient() {
       await loadDeploymentLogs(data.deployment);
       void poll();
     } catch (error) {
-      setDeployError(error instanceof Error ? error.message : `Could not deploy ${app.name}.`);
+      setActionError(error instanceof Error ? error.message : `Could not deploy ${app.name}.`);
     } finally {
       setDeployingByAppId((current) => ({ ...current, [app.id]: false }));
     }
   }, [loadDeploymentLogs, poll]);
-
-  const saveRootDomain = useCallback(async () => {
-    if (!rootDomainInput.trim()) return;
-    setDomainsError(null);
-    setDomainSaving(true);
-    try {
-      const response = await fetch("/api/domains/root", {
-        method: "POST",
-        cache: "no-store",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ domain: rootDomainInput.trim() })
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const data = (await response.json()) as { rootDomain: string };
-      setDomainsMeta((current) => ({ ...current, rootDomain: data.rootDomain }));
-      setRootDomainInput(data.rootDomain);
-      void poll();
-    } catch (error) {
-      setDomainsError(error instanceof Error ? error.message : "Could not save root domain.");
-    } finally {
-      setDomainSaving(false);
-    }
-  }, [poll, rootDomainInput]);
-
-  const addDomain = useCallback(async () => {
-    if (!domainForm.appId || !domainForm.hostname.trim()) {
-      setDomainsError("Choose an app and enter a hostname.");
-      return;
-    }
-    setDomainsError(null);
-    setDomainSaving(true);
-    try {
-      const response = await fetch("/api/domains", {
-        method: "POST",
-        cache: "no-store",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ appId: Number(domainForm.appId), hostname: domainForm.hostname.trim() })
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const data = (await response.json()) as { domain: DaemonDomain };
-      setDomains((current) => [...current.filter((item) => item.id !== data.domain.id), data.domain].sort((a, b) => a.hostname.localeCompare(b.hostname)));
-      setDomainForm({ appId: domainForm.appId, hostname: "" });
-      void poll();
-    } catch (error) {
-      setDomainsError(error instanceof Error ? error.message : "Could not add domain.");
-    } finally {
-      setDomainSaving(false);
-    }
-  }, [domainForm.appId, domainForm.hostname, poll]);
-
-  const verifyDomain = useCallback(async (domain: DaemonDomain) => {
-    setDomainsError(null);
-    setDomainActionByHostname((current) => ({ ...current, [domain.hostname]: "verify" }));
-    try {
-      const response = await fetch(`/api/domains/${encodeURIComponent(domain.hostname)}/verify`, {
-        method: "POST",
-        cache: "no-store"
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const data = (await response.json()) as { domain: DaemonDomain };
-      setDomains((current) => current.map((item) => (item.id === data.domain.id ? data.domain : item)));
-      void poll();
-    } catch (error) {
-      setDomainsError(error instanceof Error ? error.message : `Could not verify ${domain.hostname}.`);
-    } finally {
-      setDomainActionByHostname((current) => ({ ...current, [domain.hostname]: null }));
-    }
-  }, [poll]);
-
-  const removeDomain = useCallback(async (domain: DaemonDomain) => {
-    setDomainsError(null);
-    setDomainActionByHostname((current) => ({ ...current, [domain.hostname]: "remove" }));
-    try {
-      const response = await fetch(`/api/domains/${encodeURIComponent(domain.hostname)}`, {
-        method: "DELETE",
-        cache: "no-store"
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      setDomains((current) => current.filter((item) => item.id !== domain.id));
-      void poll();
-    } catch (error) {
-      setDomainsError(error instanceof Error ? error.message : `Could not remove ${domain.hostname}.`);
-    } finally {
-      setDomainActionByHostname((current) => ({ ...current, [domain.hostname]: null }));
-    }
-  }, [poll]);
-
-  const connectGithubRepository = useCallback(async () => {
-    if (!githubForm.appId || !githubForm.fullName.trim()) {
-      setGithubError("Choose an app and enter a repository as owner/name.");
-      return;
-    }
-    setGithubError(null);
-    setGithubSaving(true);
-    try {
-      const response = await fetch(`/api/apps/${encodeURIComponent(githubForm.appId)}/github`, {
-        method: "POST",
-        cache: "no-store",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          fullName: githubForm.fullName.trim(),
-          branch: githubForm.branch.trim() || "main",
-          autoDeployEnabled: githubForm.autoDeploy
-        })
-      });
-      if (!response.ok) throw new Error(await readError(response));
-      const data = (await response.json()) as { app: DaemonApp; repository: DaemonGithubRepository };
-      replaceApp(data.app);
-      setSelectedAppId(data.app.id);
-      setGithubForm((current) => ({ ...current, fullName: data.repository.fullName, branch: data.repository.selectedBranch || data.repository.defaultBranch || current.branch }));
-      void poll();
-    } catch (error) {
-      setGithubError(error instanceof Error ? error.message : "Could not connect GitHub repository.");
-    } finally {
-      setGithubSaving(false);
-    }
-  }, [githubForm.appId, githubForm.autoDeploy, githubForm.branch, githubForm.fullName, poll, replaceApp]);
 
   const createDatabase = useCallback(async () => {
     if (!databaseForm.name.trim()) {
@@ -1321,6 +1115,7 @@ export default function DashboardClient() {
   );
 
   function openCreateForm(sourceId?: SourceStackId) {
+    setAppsInspectorMode("service");
     setFormMode("create");
     setEditingAppId(null);
     setForm(sourceId ? { ...blankAppForm, ...sourceStackPatch(sourceId, blankAppForm) } : blankAppForm);
@@ -1328,6 +1123,7 @@ export default function DashboardClient() {
   }
 
   function openEditForm(app: DaemonApp) {
+    setAppsInspectorMode("service");
     setFormMode("edit");
     setEditingAppId(app.id);
     setForm(appFormFromDaemonApp(app));
@@ -1395,14 +1191,11 @@ export default function DashboardClient() {
   const serviceResources = apps.filter((app) => !(app.type === "app" || app.type === "worker" || app.type === "static"));
   const workspace = health?.health?.workspace || "runtime host workspace";
   const stoppedCount = Math.max(0, apps.length - runningCount);
-  const dockerfileApps = appResources.filter((app) => app.driver === "dockerfile");
-  const appModuleTabs: Record<"env" | "logs" | "health", InspectorTab> = { env: "env", logs: "logs", health: "health" };
-  const appOperationsTab = activeModule === "env" || activeModule === "logs" || activeModule === "health" ? appModuleTabs[activeModule] : undefined;
-  const showAppOperations = activeModule === "apps" ? false : Boolean(appOperationsTab);
   const moduleLoading = loading || refreshing;
   const bulkStartPlan = useMemo(() => startAllPlan(apps), [apps]);
   const startAllReason = startAllBlockReason(apps, connected, startAllBusy);
   const stopAllReason = stopAllBlockReason(apps, connected, stopAllBusy);
+  const showAppsInspector = appsInspectorMode === "database" || apps.length > 0;
 
   const runStartAll = useCallback(async () => {
     const blocked = startAllBlockReason(apps, connected, startAllBusy);
@@ -1543,7 +1336,10 @@ export default function DashboardClient() {
                 hostMetrics={hostMetrics}
                 hostMetricsError={hostMetricsError}
                 healthchecksUnavailable={appsError || deploymentsError}
-                onConnectGithub={() => setActiveModule("github")}
+                onConnectGithub={() => {
+                  openCreateForm("github");
+                  setActiveModule("apps");
+                }}
                 onRefresh={() => void poll(true)}
                 onStartAll={() => void runStartAll()}
                 onStopAll={() => void runStopAll()}
@@ -1556,14 +1352,6 @@ export default function DashboardClient() {
                 stopAllReason={stopAllReason}
               />
             ) : null}
-
-            {activeModule === "deployments" ? <DeploymentsModule apps={dockerfileApps} connected={connected} deployments={deployments} deployingByAppId={deployingByAppId} error={deployError || deploymentsError} latestByAppId={latestDeploymentByAppId} latestSuccessfulByAppId={latestSuccessfulDeploymentByAppId} server={serverStatus} onDeploy={(app) => void deployApp(app)} onLogs={(deployment) => void loadDeploymentLogs(deployment)} /> : null}
-
-            {activeModule === "domains" ? <DomainsModule apps={dockerfileApps} connected={connected} domains={domains} domainsError={domainsError || proxyError} domainsMeta={domainsMeta} domainActionByHostname={domainActionByHostname} domainForm={domainForm} domainSaving={domainSaving} proxyRoutes={proxyRoutes} rootDomainInput={rootDomainInput} onAddDomain={() => void addDomain()} onDomainFormChange={setDomainForm} onRemoveDomain={(domain) => void removeDomain(domain)} onRootDomainChange={setRootDomainInput} onSaveRootDomain={() => void saveRootDomain()} onVerifyDomain={(domain) => void verifyDomain(domain)} /> : null}
-
-            {activeModule === "github" ? <GithubModule apps={dockerfileApps} connected={connected} deployments={deployments} github={github} githubError={githubError} githubForm={githubForm} githubSaving={githubSaving} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onGithubConnect={() => void connectGithubRepository()} onGithubFormChange={setGithubForm} /> : null}
-
-            {activeModule === "databases" ? <DatabasesModule connected={connected} databaseActionById={databaseActionById} databaseForm={databaseForm} databaseSaving={databaseSaving} databases={databases} databasesError={databasesError} loading={moduleLoading} onCreateDatabase={() => void createDatabase()} onDatabaseAction={(database, action) => void runDatabaseAction(database, action)} onDatabaseFormChange={setDatabaseForm} /> : null}
 
             {activeModule === "settings" ? (
               <NotificationsPanel
@@ -1590,11 +1378,43 @@ export default function DashboardClient() {
               />
             ) : null}
 
-            {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} deployingByAppId={deployingByAppId} deploymentsByAppId={latestDeploymentByAppId} disabledCount={disabledCount} domainsByAppId={domainsByAppId} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} server={serverStatus} serviceResources={serviceResources} startAllBusy={startAllBusy} startAllPlan={bulkStartPlan} startAllReason={startAllReason} startAllResult={startAllResult} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onDeploy={(app) => void deployApp(app)} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onOpenDatabases={() => setActiveModule("databases")} onSelect={setSelectedAppId} onStartAll={() => void runStartAll()} /> : null}
-
-            {showAppOperations ? <AppOperationsModule activeTab={appOperationsTab} apps={apps} appResources={appResources} app={selectedApp} selectedAppId={selectedAppId} connected={connected} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} logs={logs} logsLoading={logsLoading} logsError={logsError} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} module={activeModule} server={serverStatus} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onLogs={(app) => void loadLogs(app)} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} /> : null}
-
-            {activeModule === "metrics" ? <MetricsModule app={selectedApp} apps={apps} appResources={appResources} connected={connected} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} github={github} hostMetrics={hostMetrics} hostMetricsError={hostMetricsError} logs={logs} logsError={logsError} logsLoading={logsLoading} server={serverStatus} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} selectedAppId={selectedAppId} /> : null}
+            {activeModule === "apps" ? (
+              <section className={`grid min-w-0 gap-3 xl:items-start ${showAppsInspector ? "xl:grid-cols-[minmax(0,0.92fr)_minmax(380px,1.08fr)]" : ""}`}>
+                <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} deployingByAppId={deployingByAppId} deploymentsByAppId={latestDeploymentByAppId} disabledCount={disabledCount} domainsByAppId={domainsByAppId} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} server={serverStatus} serviceResources={serviceResources} startAllBusy={startAllBusy} startAllPlan={bulkStartPlan} startAllReason={startAllReason} startAllResult={startAllResult} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onDeploy={(app) => void deployApp(app)} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onOpenDatabases={() => setAppsInspectorMode("database")} onSelect={(id) => { setAppsInspectorMode("service"); setSelectedAppId(id); }} onStartAll={() => void runStartAll()} />
+                {showAppsInspector ? <ProjectWorkspaceInspector
+                  actionByAppId={actionByAppId}
+                  connected={connected}
+                  currentApp={selectedApp}
+                  databaseActionById={databaseActionById}
+                  databaseForm={databaseForm}
+                  databaseSaving={databaseSaving}
+                  databases={databases}
+                  databasesError={databasesError}
+                  deploymentLogs={deploymentLogs}
+                  deploymentLogsError={deploymentLogsError}
+                  deploymentLogsLoading={deploymentLogsLoading}
+                  deployments={selectedDeployments}
+                  deployingByAppId={deployingByAppId}
+                  domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []}
+                  github={github}
+                  inspectorMode={appsInspectorMode}
+                  loading={moduleLoading}
+                  logs={logs}
+                  logsError={logsError}
+                  logsLoading={logsLoading}
+                  server={serverStatus}
+                  onAction={(action) => selectedApp ? void runAction(selectedApp, action) : undefined}
+                  onCreateDatabase={() => void createDatabase()}
+                  onDatabaseAction={(database, action) => void runDatabaseAction(database, action)}
+                  onDatabaseFormChange={setDatabaseForm}
+                  onDeploy={() => selectedApp ? void deployApp(selectedApp) : undefined}
+                  onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)}
+                  onEdit={() => selectedApp ? openEditForm(selectedApp) : undefined}
+                  onReload={() => selectedApp ? void loadLogs(selectedApp) : undefined}
+                  onShowServices={() => setAppsInspectorMode("service")}
+                /> : null}
+              </section>
+            ) : null}
     </DashboardShell>
   );
 }
@@ -1630,27 +1450,27 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
       {appsError ? <CompactWarning title="Registry unavailable" message={appsError} /> : null}
       {startAllResult ? <StartAllReport result={startAllResult} /> : null}
 
-      <ProjectServicesToolbar appCount={apps.length} readyCount={bulkPlan.stoppedStartableCount} startAllBusy={startAllBusy} startAllReason={startAllReason} onStartAll={onStartAll} />
+      {apps.length > 0 ? <ProjectServicesToolbar appCount={apps.length} readyCount={bulkPlan.stoppedStartableCount} startAllBusy={startAllBusy} startAllReason={startAllReason} onStartAll={onStartAll} /> : null}
 
       {formMode ? <AppForm mode={formMode} form={form} error={formError} saving={formSaving} onChange={onFormChange} onCancel={onFormCancel} onSubmit={onFormSubmit} /> : null}
 
-      <div className="bg-black/10">
+      {!formMode || apps.length > 0 ? <div className="bg-black/10">
         {loading ? <LoadingRows /> : apps.length === 0 ? <ProjectEmptyState /> : (
           <>
             <ResourceSection title="Application services" count={appResources.length} />
             <div className="grid gap-3 p-3 sm:p-4">
-              {appResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} server={server} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+              {appResources.map((app) => <ProjectServiceListItem key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} server={server} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
             </div>
             <ResourceSection title="Services & databases" count={serviceResources.length} />
             {serviceResources.length === 0 ? <ServiceEmpty /> : null}
             {serviceResources.length ? (
               <div className="grid gap-3 p-3 sm:p-4">
-                {serviceResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} server={server} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
+                {serviceResources.map((app) => <ProjectServiceListItem key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} server={server} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
               </div>
             ) : null}
           </>
         )}
-      </div>
+      </div> : null}
     </section>
   );
 }
@@ -1680,7 +1500,6 @@ function ProjectWorkspaceHeader({ appCount, attentionCount, connected, disabledC
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2 lg:justify-end">
-          <Button variant="secondary">Project Environment</Button>
           <Button onClick={onStartReady} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || "Start ready services in this project"} variant="secondary">Start ready</Button>
           <CreateServiceMenu connected={connected} onCreateApplication={() => onCreate("github")} onCreateCompose={() => onCreate("compose")} onCreateDatabase={onOpenDatabases} />
         </div>
@@ -1797,73 +1616,113 @@ function StartAllReport({ result }: { result: DaemonAppStartAllResponse }) {
   );
 }
 
-function AppOperationsModule({ activeTab, appResources, apps, app, connected, currentAction, deploying, deploymentLogs, deploymentLogsError, deploymentLogsLoading, deployments, domains, github, logs, logsError, logsLoading, module, onAction, onDeploy, onDeploymentLogs, onEdit, onLogs, onReload, onSelect, selectedAppId, server }: { activeTab?: InspectorTab; appResources: DaemonApp[]; apps: DaemonApp[]; app: DaemonApp | null; connected: boolean; currentAction?: AppAction | null; deploying: boolean; deploymentLogs: DeploymentLogsResponse | null; deploymentLogsError: string | null; deploymentLogsLoading: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; github: DaemonGithubStatus | null; logs: DaemonAppLogsResponse | null; logsError: string | null; logsLoading: boolean; module: ModuleKey; onAction?: (action: AppAction) => void; onDeploy?: () => void; onDeploymentLogs: (deployment: DaemonDeployment) => void; onEdit?: () => void; onLogs: (app: DaemonApp) => void; onReload?: () => void; onSelect: (id: number) => void; selectedAppId: number | null; server: DaemonServerStatus | null }) {
-  useEffect(() => {
-    if (module === "logs" && app && !logsLoading && logs?.app.id !== app.id) {
-      onLogs(app);
-    }
-  }, [app, logs?.app.id, logsLoading, module, onLogs]);
-
-  if (module === "apps") {
-    return <DetailPanel activeTab={activeTab} app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} server={server} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />;
+function ProjectWorkspaceInspector({ actionByAppId, connected, currentApp, databaseActionById, databaseForm, databaseSaving, databases, databasesError, deploymentLogs, deploymentLogsError, deploymentLogsLoading, deployments, deployingByAppId, domains, github, inspectorMode, loading, logs, logsError, logsLoading, onAction, onCreateDatabase, onDatabaseAction, onDatabaseFormChange, onDeploy, onDeploymentLogs, onEdit, onReload, onShowServices, server }: { actionByAppId: Record<number, AppAction | null>; connected: boolean; currentApp: DaemonApp | null; databaseActionById: Record<number, string | null>; databaseForm: { type: string; name: string }; databaseSaving: boolean; databases: DaemonDatabase[]; databasesError: string | null; deploymentLogs: DeploymentLogsResponse | null; deploymentLogsError: string | null; deploymentLogsLoading: boolean; deployments: DaemonDeployment[]; deployingByAppId: Record<number, boolean>; domains: DaemonDomain[]; github: DaemonGithubStatus | null; inspectorMode: "service" | "database"; loading: boolean; logs: DaemonAppLogsResponse | null; logsError: string | null; logsLoading: boolean; onAction?: (action: AppAction) => void; onCreateDatabase: () => void; onDatabaseAction: (database: DaemonDatabase, action: "start" | "stop") => void; onDatabaseFormChange: (form: { type: string; name: string }) => void; onDeploy?: () => void; onDeploymentLogs: (deployment: DaemonDeployment) => void; onEdit?: () => void; onReload?: () => void; onShowServices: () => void; server: DaemonServerStatus | null }) {
+  if (inspectorMode === "database") {
+    return (
+      <aside className={`min-w-0 overflow-hidden rounded-[26px] border border-[#2D352F]/70 bg-[#101412] ${PANEL_SHADOW}`}>
+        <div className="flex items-start justify-between gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.05] to-transparent px-4 py-4">
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Project service</p>
+            <h2 className="text-xl font-black">Database</h2>
+            <p className="mt-1 text-sm leading-6 text-muted">Create and operate data services inside this project, not from a separate sidebar.</p>
+          </div>
+          <Button variant="secondary" onClick={onShowServices}>Back to service</Button>
+        </div>
+        <ProjectDatabaseCreatePanel connected={connected} databaseForm={databaseForm} databaseSaving={databaseSaving} onCreateDatabase={onCreateDatabase} onDatabaseFormChange={onDatabaseFormChange} />
+        <ProjectDatabaseServices connected={connected} databaseActionById={databaseActionById} databases={databases} databasesError={databasesError} loading={loading} onDatabaseAction={onDatabaseAction} />
+      </aside>
+    );
   }
-  const candidates = [...(appResources.length ? appResources : apps)].sort((a, b) => {
-    if (module !== "health") return a.name.localeCompare(b.name);
-    const aProblem = a.status !== "running" || Boolean(a.needsRestart || a.needsRedeploy);
-    const bProblem = b.status !== "running" || Boolean(b.needsRestart || b.needsRedeploy);
-    return Number(bProblem) - Number(aProblem) || a.name.localeCompare(b.name);
-  });
 
   return (
-    <section className="grid min-w-0 gap-3 xl:grid-cols-[minmax(280px,0.72fr)_minmax(0,1.28fr)] xl:items-start">
-      <div className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-        <ModuleHeader module={module} stats={<><MetricPill label="resources" value={String(candidates.length)} accent />{module === "health" ? <MetricPill label="attention" value={String(candidates.filter((item) => item.status !== "running" || item.needsRestart || item.needsRedeploy).length)} /> : null}</>} />
-        <ResourceSection title="Choose app" count={candidates.length} />
-        {candidates.length === 0 ? <p className="px-4 py-5 text-sm text-muted">No app resources are registered yet. Add one from Apps to populate this module.</p> : null}
-        {candidates.map((item) => (
-          <button key={item.id} type="button" onClick={() => { onSelect(item.id); if (module === "logs") onLogs(item); }} className={`block w-full border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/[0.035] ${FOCUS_RING} ${selectedAppId === item.id ? "bg-white/[0.055] shadow-[3px_0_0_0_var(--accent)_inset]" : ""}`}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold">{item.name}</p>
-                <p className="mt-1 truncate font-mono text-[11px] text-muted">{item.driver} · {item.port ? `:${item.port}` : "no port"} · {pendingStateLabel(item)}</p>
-              </div>
-              <StatusBadge status={item.status} />
-            </div>
-          </button>
-        ))}
+    <div className="grid min-w-0 gap-3">
+      <DetailPanel
+        app={currentApp}
+        connected={connected}
+        currentAction={currentApp ? actionByAppId[currentApp.id] : null}
+        deploying={currentApp ? Boolean(deployingByAppId[currentApp.id]) : false}
+        deploymentLogs={deploymentLogs}
+        deploymentLogsError={deploymentLogsError}
+        deploymentLogsLoading={deploymentLogsLoading}
+        deployments={deployments}
+        domains={domains}
+        github={github}
+        logs={logs}
+        loading={logsLoading}
+        error={logsError}
+        server={server}
+        onAction={onAction}
+        onDeploy={onDeploy}
+        onDeploymentLogs={onDeploymentLogs}
+        onEdit={onEdit}
+        onReload={onReload}
+      />
+      <ProjectDatabaseServices connected={connected} compact databaseActionById={databaseActionById} databases={databases} databasesError={databasesError} loading={loading} onDatabaseAction={onDatabaseAction} />
+    </div>
+  );
+}
+
+function ProjectDatabaseCreatePanel({ connected, databaseForm, databaseSaving, onCreateDatabase, onDatabaseFormChange }: { connected: boolean; databaseForm: { type: string; name: string }; databaseSaving: boolean; onCreateDatabase: () => void; onDatabaseFormChange: (form: { type: string; name: string }) => void }) {
+  return (
+    <div className="border-b border-white/5 px-4 py-4">
+      <div className="mb-3 flex items-center gap-2">
+        <span className="grid h-9 w-9 place-items-center rounded-xl border border-accent/20 bg-accent/10 text-accent"><Database className="h-4 w-4" aria-hidden="true" /></span>
+        <div>
+          <p className="text-sm font-black">Create database service</p>
+          <p className="text-xs text-muted">Postgres, MySQL, MariaDB, Redis, or MongoDB as a Compose-backed service.</p>
+        </div>
       </div>
-      <DetailPanel activeTab={activeTab} app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} server={server} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />
+      <div className="grid gap-2 sm:grid-cols-[140px_minmax(0,1fr)_auto]">
+        <UiSelect value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} label="Type" options={["postgres", "mysql", "mariadb", "redis", "mongodb"]} />
+        <Field label="Name" value={databaseForm.name} onChange={(value) => onDatabaseFormChange({ ...databaseForm, name: value })} placeholder="postgres" disabled={!connected || databaseSaving} />
+        <div className="flex items-end"><PillButton strong onClick={onCreateDatabase} disabled={!connected || databaseSaving || !databaseForm.name.trim()}>{databaseSaving ? "Creating" : "Create"}</PillButton></div>
+      </div>
+    </div>
+  );
+}
+
+function ProjectDatabaseServices({ compact, connected, databaseActionById, databases, databasesError, loading, onDatabaseAction }: { compact?: boolean; connected: boolean; databaseActionById: Record<number, string | null>; databases: DaemonDatabase[]; databasesError: string | null; loading: boolean; onDatabaseAction: (database: DaemonDatabase, action: "start" | "stop") => void }) {
+  return (
+    <section className={`min-w-0 overflow-hidden ${compact ? "rounded-lg bg-surface" : ""}`}>
+      <ResourceSection title="Database services" count={databases.length} />
+      {databasesError ? <CompactWarning title="Database services unavailable" message={databasesError} /> : null}
+      {loading ? <LoadingRows /> : databases.length === 0 ? <ServiceEmpty title="No database services" detail="Use Create Service → Database when a project needs Postgres, MySQL, Redis, MongoDB, or MariaDB." /> : (
+        <div className="grid gap-3 p-3 sm:p-4">
+          {databases.map((database) => <ProjectDatabaseServiceRow key={database.id} busy={databaseActionById[database.id]} connected={connected} database={database} onAction={onDatabaseAction} />)}
+        </div>
+      )}
     </section>
   );
 }
 
-function MetricsModule({ app, apps, appResources, connected, currentAction, deploying, deploymentLogs, deploymentLogsError, deploymentLogsLoading, deployments, domains, github, hostMetrics, hostMetricsError, logs, logsError, logsLoading, onAction, onDeploy, onDeploymentLogs, onEdit, onReload, onSelect, selectedAppId, server }: { app: DaemonApp | null; apps: DaemonApp[]; appResources: DaemonApp[]; connected: boolean; currentAction?: AppAction | null; deploying: boolean; deploymentLogs: DeploymentLogsResponse | null; deploymentLogsError: string | null; deploymentLogsLoading: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; github: DaemonGithubStatus | null; hostMetrics: DaemonMetricSample[]; hostMetricsError: string | null; logs: DaemonAppLogsResponse | null; logsError: string | null; logsLoading: boolean; onAction?: (action: AppAction) => void; onDeploy?: () => void; onDeploymentLogs: (deployment: DaemonDeployment) => void; onEdit?: () => void; onReload?: () => void; onSelect: (id: number) => void; selectedAppId: number | null; server: DaemonServerStatus | null }) {
-  const latestHostMetric = hostMetrics[0] || null;
-  const candidates = [...(appResources.length ? appResources : apps)].sort((a, b) => a.name.localeCompare(b.name));
-
+function ProjectDatabaseServiceRow({ busy, connected, database, onAction }: { busy: string | null | undefined; connected: boolean; database: DaemonDatabase; onAction: (database: DaemonDatabase, action: "start" | "stop") => void }) {
+  const running = database.status === "running";
+  const exposure = databaseExposureLabel(database);
   return (
-    <section className="grid min-w-0 gap-3 xl:grid-cols-[minmax(300px,0.78fr)_minmax(0,1.22fr)] xl:items-start">
-      <div className={`overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-        <ModuleHeader module="metrics" stats={<><ReadinessCard label="Host samples" value={String(hostMetrics.length)} status={hostMetrics.length ? "ok" : "warn"} /><ReadinessCard label="CPU" value={latestHostMetric?.cpuPercent == null ? "-" : `${latestHostMetric.cpuPercent.toFixed(1)}%`} status="ok" /><ReadinessCard label="RAM" value={latestHostMetric ? formatBytes(latestHostMetric.memoryBytes) : "-"} status="ok" /></>} />
-        {hostMetricsError ? <Alert title="Metrics unavailable" message={hostMetricsError} /> : null}
-        <ResourceSection title="Host samples" count={hostMetrics.length} />
-        {hostMetrics.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No host metric samples are available yet. App metrics load from the selected app panel.</div> : null}
-        {hostMetrics.slice(0, 6).map((sample) => <MetricSampleRow key={sample.id} sample={sample} />)}
-        <ResourceSection title="App samples" count={candidates.length} />
-        {candidates.map((item) => (
-          <button key={item.id} type="button" onClick={() => onSelect(item.id)} className={`block w-full border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/[0.035] ${FOCUS_RING} ${selectedAppId === item.id ? "bg-white/[0.055] shadow-[3px_0_0_0_var(--accent)_inset]" : ""}`}>
-            <div className="flex items-center justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold">{item.name}</p>
-                <p className="mt-1 truncate font-mono text-[11px] text-muted">{item.driver} · {item.port ? `:${item.port}` : "no port"}</p>
-              </div>
-              <StatusBadge status={item.status} />
-            </div>
-          </button>
-        ))}
+    <article className="rounded-[18px] border border-[#2D352F]/70 bg-[#171C1A] p-3 shadow-[0_10px_28px_rgba(0,0,0,0.18)]">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-accent/20 bg-accent/10 font-mono text-[10px] font-black uppercase text-accent">{database.type.slice(0, 2)}</span>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-black">{database.name}</p>
+            <p className="mt-1 truncate font-mono text-[11px] text-muted">{database.type} · {database.image || "image pending"}</p>
+          </div>
+        </div>
+        <StatusBadge status={database.status} />
       </div>
-      <DetailPanel activeTab="health" app={app} connected={connected} deployments={deployments} domains={domains} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={deploying} logs={logs} loading={logsLoading} error={logsError} currentAction={currentAction} server={server} onDeploy={onDeploy} onEdit={onEdit} onDeploymentLogs={onDeploymentLogs} onReload={onReload} onAction={onAction} />
-    </section>
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted sm:grid-cols-3">
+        <Meta label="Scope" value={exposure.label} />
+        <Meta label="Compose" value={database.composeService || "pending"} mono />
+        <Meta label="Volume" value={database.volumeName || "pending"} mono />
+        <Meta label="Port" value={database.port ? `:${database.port}` : "internal"} mono />
+        <Meta label="App" value={database.appName || "project service"} />
+        <Meta label="Env keys" value={database.envKeys.length ? database.envKeys.join(", ") : "none"} mono wide />
+      </dl>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        <PillButton onClick={() => onAction(database, "start")} disabled={!connected || Boolean(busy) || running}>{busy === "start" ? "Starting" : "Start"}</PillButton>
+        <PillButton onClick={() => onAction(database, "stop")} disabled={!connected || Boolean(busy) || !running}>{busy === "stop" ? "Stopping" : "Stop"}</PillButton>
+      </div>
+    </article>
   );
 }
 
@@ -1881,344 +1740,6 @@ function MetricSampleRow({ sample }: { sample: DaemonMetricSample }) {
         <span>Net <strong className="text-foreground">{formatBytes(sample.networkRxBytes)} / {formatBytes(sample.networkTxBytes)}</strong></span>
       </div>
       {sample.message ? <p className="mt-2 truncate text-[11px] text-muted">{sample.message}</p> : null}
-    </div>
-  );
-}
-
-function DeploymentsModule({ apps, connected, deployments, deployingByAppId, error, latestByAppId, latestSuccessfulByAppId, onDeploy, onLogs, server }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; deployingByAppId: Record<number, boolean>; error: string | null; latestByAppId: Map<number, DaemonDeployment>; latestSuccessfulByAppId: Map<number, DaemonDeployment>; onDeploy: (app: DaemonApp) => void; onLogs: (deployment: DaemonDeployment) => void; server: DaemonServerStatus | null }) {
-  const dockerReady = serverCheck(server, "docker")?.status === "ok";
-  const dataReady = Boolean(server?.dataDir);
-  const auth = productionAuthState(server, [error]);
-  const serverReady = Boolean(server?.readiness?.ok);
-  const failed = deployments.filter((item) => item.status === "failed");
-  const inProgress = deployments.filter(isDeploymentInProgress);
-  return (
-    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="deployments" stats={<><ReadinessCard label="Docker" value={dockerReady ? "ready" : "check"} status={dockerReady ? "ok" : "warn"} /><ReadinessCard label="Server" value={serverReady ? "ready" : "doctor"} status={serverReady ? "ok" : "warn"} /><ReadinessCard label="Data dir" value={dataReady ? "ready" : "pending"} status={dataReady ? "ok" : "warn"} /><ReadinessCard label="Auth" value={auth.label} status={auth.tone} /><ReadinessCard label="Active" value={String(inProgress.length)} status={inProgress.length ? "warn" : "ok"} /><ReadinessCard label="Failed" value={String(failed.length)} status={failed.length ? "error" : "ok"} /></>} />
-      {error ? <Alert title="Deployment action failed" message={error} /> : null}
-      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.95fr)_minmax(340px,1.05fr)]">
-        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
-          <ResourceSection title="Dockerfile deploy bridge" count={apps.length} />
-          {apps.length === 0 ? <div className="px-4 py-5 text-sm text-muted">No app uses the verified Dockerfile bridge yet. Compose production parity is deferred until the backend path exists.</div> : null}
-          {apps.map((app) => {
-            const latest = latestByAppId.get(app.id);
-            const latestSuccessful = latestSuccessfulByAppId.get(app.id);
-            const deploying = Boolean(deployingByAppId[app.id]);
-            const disabledReason = deployBlockReason(app, connected, server);
-            return (
-              <div key={app.id} className="border-b border-white/5 px-4 py-3">
-                <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
-                  <div className="min-w-0">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <p className="truncate text-sm font-bold">{app.name}</p>
-                      {latest ? <StatusBadge status={latest.status} /> : <span className="rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">never deployed</span>}
-                      {disabledReason ? <span className="rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">{disabledReason}</span> : null}
-                    </div>
-                    <div className="mt-2 grid gap-2 text-[11px] text-muted sm:grid-cols-2">
-                      <Meta label="Source" value={latest ? deploymentSource(latest) : compactSource(app)} mono />
-                      <Meta label="Image / container / ports" value={appDeployMetadata(app, latest)} mono />
-                      <Meta label="Current state" value={deploymentStateLabel(latest)} />
-                      <Meta label="Latest successful" value={latestSuccessful ? `#${latestSuccessful.id} · ${latestSuccessful.hostPort ? `:${latestSuccessful.hostPort}` : "no host port"}` : "none yet"} />
-                      <Meta label="Logs" value={deploymentLogsLabel(latest)} />
-                      <Meta label="Updated" value={latest ? timeAgo(latest.updatedAt) : timeAgo(app.updatedAt)} />
-                    </div>
-                    {latest?.errorMessage ? <p className="mt-2 rounded-md bg-negative/10 px-3 py-2 text-xs text-negative">{latest.errorMessage}</p> : null}
-                  </div>
-                  <div className="flex flex-wrap gap-2 md:justify-end">
-                    {latest ? <PillButton onClick={() => onLogs(latest)}>Logs</PillButton> : null}
-                    <PillButton strong onClick={() => onDeploy(app)} disabled={Boolean(disabledReason) || deploying}>{deploying ? "Deploying" : "Deploy"}</PillButton>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-          <DeferredCapabilityList items={["Compose production deploy parity deferred", "Preview deployments deferred", "Rollback/cancel controls deferred"]} />
-        </div>
-        <div className="min-w-0"><ResourceSection title="Deployment history" count={deployments.length} />{deployments.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Deployment history appears after the first Dockerfile deploy.</div> : deployments.map((deployment) => <DeploymentSummaryRow key={deployment.id} deployment={deployment} onLogs={() => onLogs(deployment)} />)}</div>
-      </div>
-    </section>
-  );
-}
-
-function DomainsModule({ apps, connected, domains, domainsError, domainsMeta, domainActionByHostname, domainForm, domainSaving, onAddDomain, onDomainFormChange, onRemoveDomain, onRootDomainChange, onSaveRootDomain, onVerifyDomain, proxyRoutes, rootDomainInput }: { apps: DaemonApp[]; connected: boolean; domains: DaemonDomain[]; domainsError: string | null; domainsMeta: { rootDomain: string | null; serverPublicIp: string | null }; domainActionByHostname: Record<string, string | null>; domainForm: { appId: string; hostname: string }; domainSaving: boolean; onAddDomain: () => void; onDomainFormChange: (form: { appId: string; hostname: string }) => void; onRemoveDomain: (domain: DaemonDomain) => void; onRootDomainChange: (value: string) => void; onSaveRootDomain: () => void; onVerifyDomain: (domain: DaemonDomain) => void; proxyRoutes: DaemonProxyRoute[]; rootDomainInput: string }) {
-  const generatedRoutes = domains.filter((domain) => domain.proxyStatus === "generated" || proxyRoutes.some((route) => route.domainId === domain.id && route.enabled)).length;
-  const verifiedTls = domains.filter((domain) => ["active", "verified"].includes(domain.tlsStatus)).length;
-
-  return (
-    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="domains" stats={<><ReadinessCard label="Root" value={domainsMeta.rootDomain || "unset"} status={domainsMeta.rootDomain ? "ok" : "warn"} /><ReadinessCard label="Hosts" value={String(domains.length)} status={domains.length ? "ok" : "warn"} /><ReadinessCard label="Routes" value={`${generatedRoutes}/${domains.length}`} status={generatedRoutes ? "ok" : "warn"} /><ReadinessCard label="TLS" value={`${verifiedTls}/${domains.length}`} status={verifiedTls === domains.length && domains.length ? "ok" : "warn"} /></>} />
-      {domainsError ? <Alert title="Domain or proxy action failed" message={domainsError} /> : null}
-      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.85fr)_minmax(340px,1.15fr)]">
-        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
-          <ResourceSection title="Root domain" count={domainsMeta.rootDomain ? 1 : 0} />
-          <div className="border-b border-white/5 px-4 py-3">
-            <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto]">
-              <Field label="Root domain" value={rootDomainInput} onChange={onRootDomainChange} placeholder="example.com" disabled={!connected || domainSaving} />
-              <div className="flex items-end"><PillButton onClick={onSaveRootDomain} disabled={!connected || domainSaving || !rootDomainInput.trim()} strong>Save root</PillButton></div>
-            </div>
-            <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Server IP" value={domainsMeta.serverPublicIp || "set ROUTELY_SERVER_PUBLIC_IP"} mono /><Meta label="Wildcard" value={domainsMeta.rootDomain ? `*.${domainsMeta.rootDomain}` : "set root domain"} mono /></div>
-          </div>
-          <ResourceSection title="Add hostname" count={apps.length} />
-          <div className="px-4 py-3">
-            <div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_auto]">
-              <UiSelect value={domainForm.appId} onChange={(event) => onDomainFormChange({ ...domainForm, appId: event.target.value })} disabled={!connected || domainSaving} label="App"><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</UiSelect>
-              <Field label="Hostname" value={domainForm.hostname} onChange={(value) => onDomainFormChange({ ...domainForm, hostname: value })} placeholder={domainsMeta.rootDomain ? `web.${domainsMeta.rootDomain}` : "web.example.com"} disabled={!connected || domainSaving} />
-              <div className="flex items-end"><PillButton onClick={onAddDomain} disabled={!connected || domainSaving || !domainForm.appId || !domainForm.hostname.trim()} strong>Add</PillButton></div>
-            </div>
-            <p className="mt-3 text-xs text-muted">Generated proxy config is route metadata only; TLS stays pending until the daemon reports verified certificate state.</p>
-          </div>
-        </div>
-        <div className="min-w-0">
-          <ResourceSection title="Hostnames" count={domains.length} />
-          {domains.length === 0 ? <div className="px-4 py-5 text-sm text-muted">Add a hostname after a Dockerfile app has a successful deployment. DNS verification creates proxy route state; generated routes are not certificate success.</div> : domains.map((domain) => {
-            const action = domainActionByHostname[domain.hostname];
-            const route = proxyRoutes.find((item) => item.domainId === domain.id);
-            const targetUrl = domain.targetUrl || route?.targetUrl || null;
-            const targetDomain = { ...domain, targetUrl };
-            const steps = [
-              { label: "Root", value: domainsMeta.rootDomain || "unset", tone: domainStepTone(domain, route, "root", Boolean(domainsMeta.rootDomain)) },
-              { label: "DNS", value: domainDnsLabel(domain.dnsStatus), tone: domainStepTone(domain, route, "dns", Boolean(domainsMeta.rootDomain)) },
-              { label: "Proxy", value: domainProxyLabel(targetDomain, Boolean(route?.enabled)), tone: domainStepTone(domain, route, "proxy", Boolean(domainsMeta.rootDomain)) },
-              { label: "TLS", value: domainTlsLabel(domain.tlsStatus), tone: domainStepTone(domain, route, "tls", Boolean(domainsMeta.rootDomain)) },
-              { label: "Target", value: domainTargetLabel(targetDomain), tone: domainStepTone(targetDomain, route, "target", Boolean(domainsMeta.rootDomain)) },
-              { label: "Deploy", value: domain.targetDeploymentId ? `#${domain.targetDeploymentId}` : route?.deploymentId ? `#${route.deploymentId}` : "latest success pending", tone: domain.targetDeploymentId || route?.deploymentId ? "ok" as const : "warn" as const }
-            ];
-
-            return (
-              <div key={domain.id} className="border-b border-white/5 px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-mono text-sm font-bold">{domain.hostname}</p>
-                    <p className="mt-1 text-[11px] text-muted">{domain.appName || `app ${domain.appId}`} · {targetUrl || (domain.targetPort ? `http://127.0.0.1:${domain.targetPort}` : "route pending")}</p>
-                  </div>
-                  <StatusBadge status={domain.status} />
-                </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-3">{steps.map((step) => <ReadinessCard key={step.label} label={step.label} value={step.value} status={step.tone} />)}</div>
-                {domain.verificationMessage ? <p className="mt-2 text-xs text-muted">{domain.verificationMessage}</p> : null}
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <PillButton onClick={() => onVerifyDomain(domain)} disabled={!connected || Boolean(action)}>{action === "verify" ? "Checking" : "Verify DNS"}</PillButton>
-                  <ActionLink href={["active", "verified"].includes(domain.tlsStatus) ? `https://${domain.hostname.replace(/^\*\./, "")}` : null}>Open HTTPS</ActionLink>
-                  <PillButton onClick={() => onRemoveDomain(domain)} disabled={!connected || Boolean(action)}>{action === "remove" ? "Removing" : "Remove"}</PillButton>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function GithubModule({ apps, connected, deployments, github, githubError, githubForm, githubSaving, onDeploymentLogs, onGithubConnect, onGithubFormChange }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; github: DaemonGithubStatus | null; githubError: string | null; githubForm: { appId: string; fullName: string; branch: string; autoDeploy: boolean }; githubSaving: boolean; onDeploymentLogs: (deployment: DaemonDeployment) => void; onGithubConnect: () => void; onGithubFormChange: (form: { appId: string; fullName: string; branch: string; autoDeploy: boolean }) => void }) {
-  const connectedRepos = github?.repositories.filter((repo) => repo.connectedAppId != null).length || 0;
-  const connection = githubConnectionState(github);
-  const deliveries = [...(github?.deliveries || [])].sort((a, b) => timeValue(b.receivedAt || b.updatedAt) - timeValue(a.receivedAt || a.updatedAt));
-  const deliveryByDeploymentId = new Map(deliveries.filter((delivery) => delivery.deploymentId != null).map((delivery) => [delivery.deploymentId as number, delivery]));
-  const githubDeployments = deployments
-    .filter((deployment) => deployment.sourceType === "github" || Boolean(deployment.repo) || deliveryByDeploymentId.has(deployment.id))
-    .sort((a, b) => timeValue(b.finishedAt || b.updatedAt || b.createdAt) - timeValue(a.finishedAt || a.updatedAt || a.createdAt));
-  const deploymentsById = new Map(githubDeployments.map((deployment) => [deployment.id, deployment]));
-  const latestDelivery = githubLatestDelivery(deliveries);
-  const latestDeploy = latestDeployment(githubDeployments);
-  const latestSuccess = latestSuccessfulDeployment(githubDeployments);
-  const latestDeliveryDeployment = latestDelivery?.deploymentId ? deploymentsById.get(latestDelivery.deploymentId) || null : null;
-  const latestDeliveryState = githubDeliveryState(latestDelivery, latestDeliveryDeployment);
-  const ignoredDeliveries = deliveries.filter((delivery) => githubDeliveryState(delivery, delivery.deploymentId ? deploymentsById.get(delivery.deploymentId) : null).label.startsWith("ignored event"));
-  const failingDeliveries = deliveries.filter((delivery) => githubDeliveryState(delivery, delivery.deploymentId ? deploymentsById.get(delivery.deploymentId) : null).tone === "error");
-  return (
-    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="github" stats={<><ReadinessCard label="Connection" value={connection.label} status={connection.tone} /><ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} /><ReadinessCard label="Repos" value={`${connectedRepos}/${github?.repositories.length || 0}`} status={connectedRepos ? "ok" : "warn"} /><ReadinessCard label="Latest" value={latestDeploy ? `#${latestDeploy.id}` : "none"} status={latestDeploy ? readinessFromStatus(latestDeploy.status) : "warn"} /><ReadinessCard label="Ignored" value={String(ignoredDeliveries.length)} status={ignoredDeliveries.length ? "warn" : "ok"} /><ReadinessCard label="Failing" value={String(failingDeliveries.length)} status={failingDeliveries.length ? "error" : "ok"} /></>} />
-      {githubError ? <Alert title="GitHub action failed" message={githubError} /> : null}
-      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.82fr)_minmax(340px,1.18fr)]">
-        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
-          <ResourceSection title="Configuration" count={github ? 1 : 0} />
-          <div className="border-b border-white/5 px-4 py-3">
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              <ReadinessCard label="App ID" value={github?.appId || "unset"} status={github?.configured ? "ok" : "warn"} />
-              <ReadinessCard label="Client ID" value={github?.clientId ? "set" : "unset"} status={github?.clientId ? "ok" : "warn"} />
-              <ReadinessCard label="Webhook" value={github?.webhookSecretConfigured ? "signed" : "missing"} status={github?.webhookSecretConfigured ? "ok" : "error"} />
-              <ReadinessCard label="Private key" value={github?.privateKeyConfigured ? "ready" : "missing"} status={github?.privateKeyConfigured ? "ok" : "warn"} />
-            </div>
-            {connection.detail ? <p className={`mt-3 text-xs ${connection.tone === "error" ? "text-negative" : "text-muted"}`}>{connection.detail}</p> : null}
-            <p className="mt-2 text-xs text-muted">Webhook payloads, branch names, commit SHAs, and messages are rendered as text-only metadata. This alpha does not browse repository contents or write commit statuses.</p>
-          </div>
-          <ResourceSection title="Connect repository" count={apps.length} />
-          <div className="px-4 py-3">
-            <div className="grid gap-2 sm:grid-cols-[minmax(120px,0.8fr)_minmax(0,1.2fr)_110px_auto]">
-              <UiSelect value={githubForm.appId} onChange={(event) => onGithubFormChange({ ...githubForm, appId: event.target.value })} disabled={!connected || githubSaving} label="App"><option value="">Choose app</option>{apps.map((app) => <option key={app.id} value={app.id}>{app.name}</option>)}</UiSelect>
-              <Field label="Repository" value={githubForm.fullName} onChange={(value) => onGithubFormChange({ ...githubForm, fullName: value })} placeholder="owner/repo" disabled={!connected || githubSaving} />
-              <Field label="Branch" value={githubForm.branch} onChange={(value) => onGithubFormChange({ ...githubForm, branch: value })} placeholder="main" disabled={!connected || githubSaving} />
-              <div className="flex items-end"><PillButton onClick={onGithubConnect} disabled={!connected || githubSaving || !githubForm.appId || !githubForm.fullName.trim()} strong>{githubSaving ? "Saving" : "Connect"}</PillButton></div>
-            </div>
-            <label className="mt-3 flex items-center justify-between gap-3 rounded-md bg-black/20 px-3 py-2 text-xs">
-              <span><span className="font-bold">Auto deploy on push</span><span className="block text-muted">Only matching branch push events queue deployments.</span></span>
-              <input type="checkbox" checked={githubForm.autoDeploy} onChange={(event) => onGithubFormChange({ ...githubForm, autoDeploy: event.target.checked })} disabled={githubSaving} className="h-4 w-4 accent-[var(--accent)]" />
-            </label>
-          </div>
-          <DeferredCapabilityList items={["OAuth install callback deferred", "Live repo browsing deferred", "Commit status updates deferred", "Preview deployments deferred", "RBAC deferred", "Multi-server deploys deferred"]} />
-        </div>
-        <div className="min-w-0">
-          <ResourceSection title="Repositories" count={github?.repositories.length || 0} />
-          {github?.repositories.length ? github.repositories.map((repo) => {
-            const repoDeployments = githubDeployments.filter((deployment) => deployment.repo === repo.fullName || (repo.connectedAppId != null && deployment.appId === repo.connectedAppId));
-            const latestRepoDeploy = repoDeployments[0] || null;
-            const latestRepoDelivery = githubLatestDelivery(deliveries, repo) || deliveries.find((delivery) => repo.connectedAppId != null && delivery.appId === repo.connectedAppId) || null;
-            const latestRepoDeliveryDeployment = latestRepoDelivery?.deploymentId ? deploymentsById.get(latestRepoDelivery.deploymentId) : latestRepoDeploy;
-            const deliveryState = githubDeliveryState(latestRepoDelivery, latestRepoDeliveryDeployment);
-            return (
-              <div key={repo.id} className="border-b border-white/5 px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-mono text-sm font-bold">{repo.fullName}</p>
-                    <p className="mt-1 text-[11px] text-muted">{repo.connectedAppName || "not connected"} · {githubRepositoryBranch(repo)} · {repo.private ? "private" : "public"}</p>
-                  </div>
-                  <StatusBadge status={repo.autoDeployEnabled ? "running" : "stopped"} />
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                  <ReadinessCard label="Auto deploy" value={repo.autoDeployEnabled ? "on" : "off"} status={repo.autoDeployEnabled ? "ok" : "warn"} />
-                  <ReadinessCard label="Branch" value={githubRepositoryBranch(repo)} status={repo.selectedBranch || repo.defaultBranch ? "ok" : "warn"} />
-                  <ReadinessCard label="Latest delivery" value={deliveryState.label} status={deliveryState.tone} />
-                  <ReadinessCard label="Latest deploy" value={latestRepoDeploy ? `#${latestRepoDeploy.id}` : "none"} status={latestRepoDeploy ? readinessFromStatus(latestRepoDeploy.status) : "warn"} />
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
-                  <Meta label="Install" value={repo.installationId ? String(repo.installationId) : "manual"} mono />
-                  <Meta label="Synced" value={timeAgo(repo.lastSyncedAt)} />
-                  <Meta label="Commit" value={latestRepoDeploy?.commitSha?.slice(0, 12) || latestRepoDelivery?.commitSha?.slice(0, 12) || "none"} mono />
-                  <Meta label="Logs path" value={latestRepoDeploy ? githubDeliveryLogPath(latestRepoDelivery, latestRepoDeploy) : "deploy pending"} mono />
-                </div>
-              </div>
-            );
-          }) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Connect a repository to store source metadata and enable signed push-to-deploy.</div>}
-          <ResourceSection title="Recent deliveries" count={github?.deliveries.length || 0} />
-          {deliveries.length ? deliveries.slice(0, 12).map((delivery) => {
-            const deployment = delivery.deploymentId ? deploymentsById.get(delivery.deploymentId) || null : null;
-            const deliveryState = githubDeliveryState(delivery, deployment);
-            return (
-              <div key={delivery.deliveryId} className="border-b border-white/5 px-4 py-3">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-bold">{delivery.repo || delivery.event}</p>
-                    <p className="mt-1 truncate font-mono text-[11px] text-muted">{delivery.event}{delivery.action ? `:${delivery.action}` : ""} · {delivery.branch || "-"} · {delivery.commitSha?.slice(0, 12) || "no commit"} · {timeAgo(delivery.receivedAt)}</p>
-                  </div>
-                  <StatusBadge status={delivery.status} />
-                </div>
-                <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
-                  <Meta label="Diagnosis" value={deliveryState.label} />
-                  <Meta label="Signature" value={delivery.signatureValid ? "valid" : "invalid"} />
-                  <Meta label="App" value={delivery.appName || "unmatched"} />
-                  <Meta label="Deploy" value={delivery.deploymentId ? `#${delivery.deploymentId}` : "none"} />
-                  <Meta label="Phase" value={deployment ? deploymentStateLabel(deployment) : "not queued"} />
-                  <Meta label="Logs path" value={githubDeliveryLogPath(delivery, deployment)} mono />
-                  <Meta label="Processed" value={timeAgo(delivery.processedAt)} />
-                  <Meta label="Delivery ID" value={delivery.deliveryId} mono />
-                </div>
-                {deliveryState.detail || delivery.message ? <p className={`mt-2 text-xs ${deliveryState.tone === "error" ? "text-negative" : "text-muted"}`}>{deliveryState.detail || delivery.message}</p> : null}
-                {deployment ? <div className="mt-3"><PillButton onClick={() => onDeploymentLogs(deployment)}>Open logs</PillButton></div> : null}
-              </div>
-            );
-          }) : <div className="border-b border-white/5 px-4 py-5 text-sm text-muted">Signed push deliveries appear here after GitHub sends webhooks.</div>}
-          <ResourceSection title="GitHub deploy history" count={githubDeployments.length} />
-          <div className="grid grid-cols-2 gap-2 border-b border-white/5 px-4 py-3 sm:grid-cols-3">
-            <ReadinessCard label="Latest deploy" value={latestDeploy ? `#${latestDeploy.id}` : "none"} status={latestDeploy ? readinessFromStatus(latestDeploy.status) : "warn"} />
-            <ReadinessCard label="Latest success" value={latestSuccess ? `#${latestSuccess.id}` : "none"} status={latestSuccess ? "ok" : "warn"} />
-            <ReadinessCard label="Latest delivery" value={latestDeliveryState.label} status={latestDeliveryState.tone} />
-          </div>
-          {githubDeployments.length ? githubDeployments.slice(0, 12).map((deployment) => (
-            <div key={deployment.id} className="border-b border-white/5 px-4 py-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-bold">Deployment #{deployment.id}</p>
-                  <p className="mt-1 truncate font-mono text-[11px] text-muted">{deploymentSource(deployment)}</p>
-                </div>
-                <StatusBadge status={deployment.status} />
-              </div>
-              <div className="mt-2 grid grid-cols-2 gap-2 text-[11px] sm:grid-cols-4">
-                <Meta label="State" value={deploymentStateLabel(deployment)} />
-                <Meta label="Commit" value={deployment.commitSha?.slice(0, 12) || "none"} mono />
-                <Meta label="Branch" value={deployment.branch || "none"} mono />
-                <Meta label="Logs path" value={githubDeliveryLogPath(null, deployment)} mono />
-                <Meta label="Started" value={timeAgo(deployment.startedAt || deployment.createdAt)} />
-                <Meta label="Finished" value={timeAgo(deployment.finishedAt)} />
-              </div>
-              {deployment.errorMessage ? <p className="mt-2 rounded-md bg-negative/10 px-3 py-2 text-xs text-negative">{deployment.errorMessage}</p> : null}
-              <div className="mt-3"><PillButton onClick={() => onDeploymentLogs(deployment)}>Open logs</PillButton></div>
-            </div>
-          )) : <div className="px-4 py-5 text-sm text-muted">GitHub-triggered deployments appear here after a signed matching-branch push queues a deploy.</div>}
-        </div>
-      </div>
-    </section>
-  );
-}
-
-function DatabasesModule({ connected, databaseActionById, databaseForm, databaseSaving, databases, databasesError, loading, onCreateDatabase, onDatabaseAction, onDatabaseFormChange }: { connected: boolean; databaseActionById: Record<number, string | null>; databaseForm: { type: string; name: string }; databaseSaving: boolean; databases: DaemonDatabase[]; databasesError: string | null; loading: boolean; onCreateDatabase: () => void; onDatabaseAction: (database: DaemonDatabase, action: "start" | "stop") => void; onDatabaseFormChange: (form: { type: string; name: string }) => void }) {
-  const running = databases.filter((database) => database.status === "running").length;
-  const publicDatabases = databases.filter((database) => !database.internal).length;
-  return (
-    <section className={`min-w-0 overflow-hidden rounded-lg bg-surface ${PANEL_SHADOW}`}>
-      <ModuleHeader module="databases" stats={<><ReadinessCard label="Records" value={loading ? "loading" : String(databases.length)} status={databases.length ? "ok" : "warn"} /><ReadinessCard label="Running" value={String(running)} status={running ? "ok" : "warn"} /><ReadinessCard label="Network" value={publicDatabases ? `${publicDatabases} public` : "internal"} status={publicDatabases ? "error" : "ok"} /></>} />
-      {databasesError ? <Alert title="Database action failed" message={databasesError} /> : null}
-      <div className="grid gap-0 xl:grid-cols-[minmax(0,0.72fr)_minmax(340px,1.28fr)]">
-        <div className="min-w-0 border-b border-white/5 xl:border-b-0 xl:border-r">
-          <ResourceSection title="Create database" count={5} />
-          <div className="px-4 py-3"><div className="grid gap-2 sm:grid-cols-[130px_minmax(0,1fr)_auto]"><UiSelect value={databaseForm.type} onChange={(event) => onDatabaseFormChange({ ...databaseForm, type: event.target.value, name: databaseForm.name || event.target.value })} disabled={!connected || databaseSaving} label="Type" options={["postgres", "mysql", "mariadb", "redis", "mongodb"]} /><Field label="Name" value={databaseForm.name} onChange={(value) => onDatabaseFormChange({ ...databaseForm, name: value })} placeholder="postgres" disabled={!connected || databaseSaving} /><div className="flex items-end"><PillButton strong onClick={onCreateDatabase} disabled={!connected || databaseSaving || !databaseForm.name.trim()}>{databaseSaving ? "Creating" : "Create"}</PillButton></div></div><div className="mt-3 grid gap-2 text-xs sm:grid-cols-2"><Meta label="Runtime" value="Docker Compose service" /><Meta label="Secrets" value="env key names only" /></div></div>
-          <DeferredCapabilityList items={["Restore automation deferred", "External database exposure deferred", "Raw env values hidden"]} />
-        </div>
-        <div className="min-w-0"><ResourceSection title="Database ledger" count={databases.length} />{loading ? <LoadingRows /> : databases.length === 0 ? <DataEmpty title="No database services" detail="Create a supported internal Compose database when an app needs production state." /> : databases.map((database) => <DatabaseLedgerRow key={database.id} busy={databaseActionById[database.id]} connected={connected} database={database} onAction={onDatabaseAction} />)}</div>
-      </div>
-    </section>
-  );
-}
-
-function DatabaseLedgerRow({ busy, connected, database, onAction }: { busy: string | null | undefined; connected: boolean; database: DaemonDatabase; onAction: (database: DaemonDatabase, action: "start" | "stop") => void }) {
-  const running = database.status === "running";
-  const exposure = databaseExposureLabel(database);
-  return (
-    <article className="grid gap-3 border-b border-white/5 px-4 py-3 transition hover:bg-white/[0.025] xl:grid-cols-[minmax(180px,0.8fr)_minmax(280px,1.2fr)_minmax(220px,0.9fr)_auto] xl:items-center">
-      <div className="min-w-0">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md bg-black/30 font-mono text-[10px] font-black uppercase text-accent shadow-[0_0_0_1px_var(--border)_inset]">{database.type.slice(0, 2)}</span>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-bold">{database.name}</p>
-            <p className="truncate font-mono text-[11px] text-muted">{database.type} · {database.image || "image pending"}</p>
-          </div>
-        </div>
-      </div>
-      <div className="grid min-w-0 grid-cols-2 gap-2 text-xs sm:grid-cols-4 xl:grid-cols-2">
-        <Meta label="State" value={exposure.label === "internal-only" ? "internal database" : "public requested"} />
-        <Meta label="Scope" value={exposure.label} />
-        <Meta label="Service" value={database.composeService || "compose pending"} mono />
-        <Meta label="Volume" value={database.volumeName || "volume pending"} mono />
-        <Meta label="Port" value={database.port ? `:${database.port}` : "none"} mono />
-      </div>
-      <div className="grid min-w-0 grid-cols-2 gap-2 text-xs sm:grid-cols-3 xl:grid-cols-2">
-        <div className="min-w-0"><p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">Status</p><div className="mt-1"><StatusBadge status={database.status} /></div></div>
-        <Meta label="App" value={database.appName || "service only"} />
-        <Meta label="Env keys" value={database.envKeys.length ? database.envKeys.join(", ") : "none"} mono wide />
-      </div>
-      <div className="flex flex-wrap gap-1.5 xl:flex-nowrap xl:justify-end">
-        <PillButton onClick={() => onAction(database, "start")} disabled={!connected || Boolean(busy) || running}>{busy === "start" ? "Starting" : "Start"}</PillButton>
-        <PillButton onClick={() => onAction(database, "stop")} disabled={!connected || Boolean(busy) || !running}>{busy === "stop" ? "Stopping" : "Stop"}</PillButton>
-      </div>
-    </article>
-  );
-}
-
-function DeferredCapabilityList({ items }: { items: string[] }) {
-  return (
-    <div className="border-t border-white/5 bg-black/20 px-4 py-3">
-      <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Deferred capabilities</p>
-      <div className="flex flex-wrap gap-2">
-        {items.map((item) => <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/65">{item}</span>)}
-      </div>
-    </div>
-  );
-}
-
-function DataEmpty({ detail, title }: { detail: string; title: string }) {
-  return (
-    <div className="border-b border-white/5 px-4 py-5">
-      <p className="text-sm font-bold">{title}</p>
-      <p className="mt-1 max-w-xl text-sm text-muted">{detail}</p>
     </div>
   );
 }
@@ -2540,123 +2061,52 @@ function CheckRow({ check }: { check: DaemonServerCheck }) {
   );
 }
 
-function AppRow({
-  active,
-  app,
-  connected,
-  currentAction,
-  deploying,
-  domains,
-  latestDeployment,
-  server,
-  onAction,
-  onDeploy,
-  onEdit,
-  onLogs,
-  onSelect
-}: {
-  active: boolean;
-  app: DaemonApp;
-  connected: boolean;
-  currentAction?: AppAction | null;
-  deploying: boolean;
-  domains: DaemonDomain[];
-  latestDeployment: DaemonDeployment | null;
-  server: DaemonServerStatus | null;
-  onAction: (action: AppAction) => void;
-  onDeploy: () => void;
-  onEdit: () => void;
-  onLogs: () => void;
-  onSelect: () => void;
-}) {
+function ProjectServiceListItem({ active, app, connected, currentAction, deploying, domains, latestDeployment, onAction, onDeploy, onEdit, onLogs, onSelect, server }: { active: boolean; app: DaemonApp; connected: boolean; currentAction?: AppAction | null; deploying: boolean; domains: DaemonDomain[]; latestDeployment: DaemonDeployment | null; onAction: (action: AppAction) => void; onDeploy: () => void; onEdit: () => void; onLogs: () => void; onSelect: () => void; server: DaemonServerStatus | null }) {
   const busy = Boolean(currentAction);
   const running = app.status === "running" || app.status === "starting";
   const endpoint = primaryEndpoint(app, domains);
   const setup = setupVerificationState(app);
-  const attentionMessage = appAttentionMessage(app);
   const deployReason = deployBlockReason(app, connected, server);
-  const bulkStartReason = bulkStartSkipReason(app);
   const startReason = appActionBlockReason(app, "start", connected, busy);
   const stopReason = appActionBlockReason(app, "stop", connected, busy);
-  const restartReason = appActionBlockReason(app, "restart", connected, busy);
-  const enablementAction: AppEnablementAction = app.enabled ? "disable" : "enable";
-  const enablementReason = appEnablementBlockReason(app, enablementAction, connected, busy);
+  const attentionMessage = appAttentionMessage(app);
 
   return (
-    <article className={`grid min-w-0 gap-4 rounded-[18px] border border-[#2D352F]/70 bg-[#171C1A] p-3 transition hover:border-[#3A453D] hover:bg-[#1B221D] sm:p-4 xl:grid-cols-[minmax(250px,0.78fr)_minmax(0,1.22fr)] ${active ? "shadow-[3px_0_0_0_var(--accent)_inset,0_18px_38px_rgba(0,0,0,0.28)]" : "shadow-[0_10px_28px_rgba(0,0,0,0.18)]"}`}>
-      <div className="min-w-0">
-        <button type="button" onClick={onSelect} className={`w-full min-w-0 rounded-xl text-left ${FOCUS_RING}`}>
-          <span className="flex items-center gap-3">
-            <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-full text-xs font-black ${running ? "bg-accent text-black shadow-[0_0_22px_rgba(30,215,96,0.2)]" : "bg-surface-raised text-muted"}`}>
-            {appInitials(app.name)}
-            </span>
-            <span className="min-w-0 flex-1">
-              <span className="block truncate text-base font-black leading-tight">{app.name}</span>
-              <span className="mt-1 block truncate font-mono text-[11px] text-muted">{resourceLabel(app)} · {stackRecipeLabel(app)}</span>
+    <article className={`rounded-[18px] border border-[#2D352F]/70 bg-[#171C1A] p-3 transition hover:border-[#3A453D] hover:bg-[#1B221D] ${active ? "shadow-[3px_0_0_0_var(--accent)_inset,0_18px_38px_rgba(0,0,0,0.28)]" : "shadow-[0_10px_28px_rgba(0,0,0,0.18)]"}`}>
+      <button type="button" onClick={onSelect} className={`block w-full rounded-xl text-left ${FOCUS_RING}`}>
+        <span className="flex items-start justify-between gap-3">
+          <span className="flex min-w-0 items-center gap-3">
+            <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-black ${running ? "bg-accent text-black shadow-[0_0_22px_rgba(30,215,96,0.2)]" : "bg-surface-raised text-muted"}`}>{appInitials(app.name)}</span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-black leading-tight">{app.name}</span>
+              <span className="mt-1 block truncate font-mono text-[11px] text-muted">{resourceLabel(app)} · {sourceDetail(app)}</span>
             </span>
           </span>
-        </button>
-
-        <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5">
           <StatusBadge status={app.status} />
-          <Badge status={setup.status} title={setup.detail} variant="status">{setup.label}</Badge>
-          <Badge variant={app.enabled ? "success" : "neutral"}>{app.enabled ? "auto-start enabled" : "auto-start disabled"}</Badge>
-          <Badge variant={sourceTypeLabel(app) === "not available" ? "neutral" : "info"}>{sourceTypeLabel(app)}</Badge>
-          {bulkStartReason ? <span title={bulkStartReason} className="max-w-full truncate rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">{bulkStartStateLabel(app)}</span> : null}
-        </div>
+        </span>
+      </button>
 
-        {attentionMessage ? (
-          <div className="mt-3 rounded-[14px] border border-warning/20 bg-warning/10 px-3 py-2 text-xs text-warning">
-            {attentionMessage}
-          </div>
-        ) : null}
+      <dl className="mt-3 grid grid-cols-2 gap-2 text-[11px] text-muted">
+        <Meta label="Stack" value={stackRecipeLabel(app)} />
+        <Meta label="Endpoint" value={endpoint.label} mono />
+        <Meta label="Path / source" value={shortPath(app.path) || sourceDetail(app)} mono wide />
+        <Meta label="Last run" value={lastRunOrDeployLabel(latestDeployment)} />
+      </dl>
+
+      <div className="mt-3 flex min-w-0 flex-wrap items-center gap-1.5">
+        <Badge status={setup.status} title={setup.detail} variant="status">{setup.label}</Badge>
+        <Badge variant={app.enabled ? "success" : "neutral"}>{app.enabled ? "auto-start" : "disabled"}</Badge>
+        {attentionMessage ? <span title={attentionMessage} className="max-w-full truncate rounded-full bg-warning/15 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">needs attention</span> : null}
       </div>
 
-      <div className="grid min-w-0 gap-3">
-        <dl className="grid min-w-0 grid-cols-2 gap-3 text-[11px] text-muted md:grid-cols-3 xl:grid-cols-4">
-          <Meta label="Readiness" value={setup.label} />
-          <Meta label="URL / domain" value={endpoint.label} mono wide />
-          <Meta label="Source" value={sourceDetail(app)} mono wide />
-          <Meta label="Stack / recipe" value={stackRecipeLabel(app)} />
-          <Meta label="Port" value={app.port ? `:${app.port}` : "not exposed"} mono />
-          <Meta label="Services" value={visibleServiceCount(app)} />
-          <Meta label="Lifecycle" value={lifecycleSummary(app)} />
-          <Meta label="Last run/deploy" value={lastRunOrDeployLabel(latestDeployment)} />
-          <Meta label="Enabled" value={app.enabled ? "enabled" : "disabled"} />
-          <Meta label="Endpoint state" value={endpoint.tone} />
-        </dl>
-
-        <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 sm:gap-2 xl:justify-end">
-          <RoundAction label="Start" onClick={() => onAction("start")} disabled={Boolean(startReason)} reason={startReason} active={currentAction === "start"} />
-          <RoundAction label="Stop" onClick={() => onAction("stop")} disabled={Boolean(stopReason)} reason={stopReason} active={currentAction === "stop"} />
-          <RoundAction label="Restart" onClick={() => onAction("restart")} disabled={Boolean(restartReason)} reason={restartReason} active={currentAction === "restart"} />
-          <RoundAction label={app.enabled ? "Disable" : "Enable"} onClick={() => onAction(enablementAction)} disabled={Boolean(enablementReason)} reason={enablementReason} active={currentAction === enablementAction} />
-          <ActionLink href={endpoint.href}>Open</ActionLink>
-          <PillButton onClick={onLogs} disabled={!connected}>Logs</PillButton>
-          <PillButton onClick={onDeploy} disabled={Boolean(deployReason) || deploying}>{deploying ? "Deploying" : "Deploy"}</PillButton>
-          <PillButton onClick={onEdit} disabled={!connected}>Edit</PillButton>
-        </div>
-      </div>
-      <div className="hidden">
-        <StatusBadge status={app.status} />
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        <PillButton onClick={() => onAction("start")} disabled={Boolean(startReason)}>{currentAction === "start" ? "Starting" : "Start"}</PillButton>
+        <PillButton onClick={() => onAction("stop")} disabled={Boolean(stopReason)}>{currentAction === "stop" ? "Stopping" : "Stop"}</PillButton>
+        <PillButton onClick={onLogs} disabled={!connected}>Logs</PillButton>
+        <PillButton onClick={onDeploy} disabled={Boolean(deployReason) || deploying}>{deploying ? "Deploying" : "Deploy"}</PillButton>
+        <PillButton onClick={onEdit} disabled={!connected}>Edit</PillButton>
       </div>
     </article>
-  );
-}
-
-function DeploymentSummaryRow({ deployment, onLogs }: { deployment: DaemonDeployment; onLogs: () => void }) {
-  return (
-    <button type="button" onClick={onLogs} className={`block w-full border-b border-white/5 px-4 py-3 text-left transition hover:bg-white/[0.035] ${FOCUS_RING}`}>
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="truncate text-sm font-bold">#{deployment.id} {deployment.appName || `app ${deployment.appId}`}</p>
-          <p className="mt-1 truncate font-mono text-[11px] text-muted">{deploymentSource(deployment)}</p>
-          <p className="mt-1 truncate text-[11px] text-muted">{deploymentStateLabel(deployment)} · {deployment.containerName || "container pending"} · {deployment.hostPort ? `:${deployment.hostPort}->${deployment.containerPort || "?"}` : "port pending"} · {deploymentLogsLabel(deployment)} · {deployment.startedAt ? timeAgo(deployment.startedAt) : timeAgo(deployment.createdAt)}</p>
-          {deployment.errorMessage ? <p className="mt-2 text-xs text-negative">{deployment.errorMessage}</p> : null}
-        </div>
-        <StatusBadge status={deployment.status} />
-      </div>
-    </button>
   );
 }
 
@@ -3497,15 +2947,6 @@ function TerminalSurface({ children, className, maxHeight = "max-h-[360px]", min
   );
 }
 
-function MetricPill({ accent, label, value }: { accent?: boolean; label: string; value: string }) {
-  return (
-    <div aria-label={`${value} ${label}`} className={`rounded-full bg-surface-raised px-3 py-1.5 text-xs ${INSET_RING}`}>
-      <span className={accent ? "font-bold text-accent" : "font-bold text-foreground"}>{value}</span>
-      <span className="ml-1 text-muted"> {label}</span>
-    </div>
-  );
-}
-
 function ResourceSection({ count, title }: { count: number; title: string }) {
   return (
     <div className="flex items-center justify-between border-b border-white/5 bg-black/20 px-4 py-2">
@@ -3515,10 +2956,31 @@ function ResourceSection({ count, title }: { count: number; title: string }) {
   );
 }
 
-function ServiceEmpty() {
+function ServiceEmpty({ detail = "No services registered.", title }: { detail?: string; title?: string }) {
   return (
     <div className="border-b border-white/5 px-4 py-4 text-sm text-muted">
-      No services registered.
+      {title ? <p className="font-bold text-foreground">{title}</p> : null}
+      <p className={title ? "mt-1" : ""}>{detail}</p>
+    </div>
+  );
+}
+
+function DeferredCapabilityList({ items }: { items: string[] }) {
+  return (
+    <div className="border-t border-white/5 bg-black/20 px-4 py-3">
+      <p className="mb-2 text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Deferred capabilities</p>
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/65">{item}</span>)}
+      </div>
+    </div>
+  );
+}
+
+function DataEmpty({ detail, title }: { detail: string; title: string }) {
+  return (
+    <div className="border-b border-white/5 px-4 py-5">
+      <p className="text-sm font-bold">{title}</p>
+      <p className="mt-1 text-sm text-muted">{detail}</p>
     </div>
   );
 }

@@ -287,6 +287,8 @@ What to fix:
 
 - Redesign the Apps/Services empty state into a `Create your first service` onboarding surface.
 - Redesign Apps/Services around the Dokploy-style mental model: `Default project` -> runtime-host environment -> services.
+- Collapse service-specific sidebar modules into Apps/Services. Deployments, Domains, GitHub source, Env / Secrets, Logs, Health, Metrics, and Databases are not global navigation items in the MVP.
+- Add a selected-service inspector inside Apps/Services so service operations live beside the project service list.
 - Add a first-level `Create service` header menu with Application, Database, Compose, and deferred Template / import.
 - Add Application source/stack logo tiles with GitHub repo, Local folder, Docker Compose, Dockerfile, Node/Next.js, Static site, and Custom.
 - Do not render service-type cards and Application source cards together in the empty state.
@@ -303,6 +305,7 @@ Acceptance criteria:
 - GitHub flow visibly asks for repository, branch, and optional project subdirectory.
 - Stack/source cards include recognizable icons/images and short, plain explanations.
 - Existing apps expose source detail, stack/recipe, readiness, lifecycle state, local/public URL, and safe actions without hover-only disclosure.
+- Selecting an app opens service workspace tabs/panels inside Apps/Services; users do not leave Apps to see logs, deployments, domains, env, health, or database service state.
 - Failed or unavailable backend state is honest but visually secondary.
 - No fake healthy/running/traffic/readiness data is introduced.
 - Final handoff includes screenshot path, changed files, dependencies, checks, commit hash, and SSH push status.
@@ -347,21 +350,21 @@ Acceptance criteria:
 - Metrics errors degrade gracefully.
 - No fake traffic success is shown without backend data.
 
-## Slice 12 — App Detail Operations Workspace
+## Slice 12 — Service Detail Operations Workspace
 
 Owner: Frontend.
 
-Blocked by: Slice 9, Slice 10, Slice 11.
+Blocked by: Slice 9A, Slice 10, Slice 11.
 
 What to build:
 
-- App detail shell and tabs: Overview, Services, Logs, Deployments, Domains, Environment, Databases, Terminal, Settings.
+- Service detail shell inside Apps/Services with tabs: Overview, Services/Runtime, Logs, Deployments, Domains, Environment, Databases, Terminal, Settings.
 - Wire available backend data progressively.
 - Disabled/deferred tabs must explain what is unavailable.
 
 Acceptance criteria:
 
-- App detail page is navigable and responsive.
+- Service detail workspace is navigable and responsive inside the Apps/Services project page.
 - Overview, Services, Logs, and Settings are functional for MVP apps.
 - Deferred backup/restore controls are not present.
 
@@ -416,7 +419,7 @@ What to build:
 - Database recipes for Postgres, MySQL, MariaDB, Redis, MongoDB.
 - Create/start/stop/status/logs.
 - Attach database to app via internal network and generated env values.
-- Global Databases page and app Databases tab.
+- Database service creation and status inside Apps/Services; no global Databases sidebar/page for MVP.
 
 Acceptance criteria:
 

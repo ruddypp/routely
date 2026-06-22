@@ -22,7 +22,7 @@ export type DashboardModule = {
 };
 
 export type DashboardNavGroup = {
-  label: "Operate" | "Release" | "Observe" | "Data" | "Server";
+  label: "Operate" | "Server";
   modules: DashboardModule[];
 };
 
@@ -32,29 +32,6 @@ export const DASHBOARD_NAV_GROUPS: DashboardNavGroup[] = [
     modules: [
       { key: "overview", label: "Dashboard", summary: "Runtime host health", signal: true },
       { key: "apps", label: "Apps / Services", summary: "Project services", signal: true }
-    ]
-  },
-  {
-    label: "Release",
-    modules: [
-      { key: "deployments", label: "Deployments", summary: "Dockerfile bridge" },
-      { key: "domains", label: "Domains", summary: "DNS / proxy / TLS", signal: true },
-      { key: "github", label: "GitHub", summary: "Signed push deploy" },
-      { key: "env", label: "Env / Secrets", summary: "Redacted metadata" }
-    ]
-  },
-  {
-    label: "Observe",
-    modules: [
-      { key: "logs", label: "Logs", summary: "Session logs" },
-      { key: "health", label: "Health", summary: "Checks / failures" },
-      { key: "metrics", label: "Metrics", summary: "Host + app samples" }
-    ]
-  },
-  {
-    label: "Data",
-    modules: [
-      { key: "databases", label: "Databases", summary: "Compose data services", signal: true }
     ]
   },
   {
