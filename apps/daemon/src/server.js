@@ -1846,15 +1846,25 @@ function pruneBackupRuns(job) {
 
 app.get("/health", async (request) => {
   const server = publicServerStatus();
+  const authorized = isAuthorized(request);
+  const healthServer = authorized
+    ? server
+    : {
+        mode: server.mode,
+        production: server.production,
+        initializedAt: server.initializedAt,
+        auth: server.auth,
+        readiness: null,
+        disabledProductionActions: server.disabledProductionActions
+      };
   return {
     ok: true,
     service: "routely-daemon",
     version: "0.1.0",
-    workspace: workspaceRoot,
-    database: databasePath,
     startedAt,
-    server,
-    apps: server.production && !isAuthorized(request) ? [] : listApps(db).map(appToPublicDto)
+    diagnosticsAvailable: authorized,
+    server: healthServer,
+    apps: server.production && !authorized ? [] : listApps(db).map(appToPublicDto)
   };
 });
 

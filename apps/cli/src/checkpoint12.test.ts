@@ -5,7 +5,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { hashAdminToken, runServerDoctorChecks } from "@routely/core";
 import { signGithubWebhookPayload } from "@routely/github";
 import { createDeployment, getAppByName, initializeRoutely, listProxyRoutes, saveServerFoundationState, updateDeployment } from "@routely/db";
@@ -14,6 +14,8 @@ const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const daemonPath = resolve(repoRoot, "apps/daemon/src/server.js");
 const children: ChildProcessWithoutNullStreams[] = [];
 const servers: Server[] = [];
+
+vi.setConfig({ testTimeout: 20_000, hookTimeout: 20_000 });
 
 afterEach(async () => {
   for (const child of children.splice(0)) {
@@ -622,6 +624,7 @@ describe("QA regression fixes", () => {
   it("returns failed backup run metadata without serving sensitive backup files", async () => {
     const workspace = await createWorkspace();
     const { baseUrl } = await startDaemon(workspace);
+    const localDir = join(workspace, "sensitive-backup-dir");
 
     const created = await jsonRequest(baseUrl, "/databases", {
       method: "POST",
@@ -631,9 +634,12 @@ describe("QA regression fixes", () => {
 
     const enabled = await jsonRequest(baseUrl, "/backups", {
       method: "POST",
-      body: JSON.stringify({ database: "qa-postgres", enabled: true, schedule: null, retentionDays: 7 })
+      body: JSON.stringify({ database: "qa-postgres", enabled: true, schedule: null, retentionDays: 7, localDir })
     });
     expect(enabled.response.status).toBe(201);
+    expect(enabled.body.job.localDir).toBeUndefined();
+    expect(enabled.body.job.storage.localDir).toBeUndefined();
+    expect(JSON.stringify(enabled.body.job)).not.toContain(localDir);
 
     const run = await jsonRequest(baseUrl, `/backups/${enabled.body.job.id}/run`, {
       method: "POST",
@@ -648,14 +654,32 @@ describe("QA regression fixes", () => {
       storageType: "local",
       storageStatus: "metadata-only",
       restoreStatus: "deferred",
-      downloadUrl: null,
-      filePath: null
+      downloadUrl: null
     });
+    expect(run.body.run.filePath).toBeUndefined();
     expect(run.body.run.file).toMatchObject({
       available: false,
       servesFile: false,
       downloadUrl: null
     });
+    expect(run.body.run.file.path).toBeUndefined();
+  });
+
+  it("keeps unauthenticated production health free of filesystem paths", async () => {
+    const workspace = await createWorkspace();
+    const { baseUrl } = await startDaemon(workspace, {
+      ROUTELY_SERVER_MODE: "production",
+      ROUTELY_ADMIN_TOKEN: randomUUID()
+    });
+
+    const health = await jsonRequest(baseUrl, "/health");
+
+    expect(health.response.status).toBe(200);
+    expect(health.body.workspace).toBeUndefined();
+    expect(health.body.database).toBeUndefined();
+    expect(health.body.diagnosticsAvailable).toBe(false);
+    expect(health.body.apps).toEqual([]);
+    expect(JSON.stringify(health.body)).not.toContain(workspace);
   });
 
   it("rejects unsafe notification targets before saving channels", async () => {

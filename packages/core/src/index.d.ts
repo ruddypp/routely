@@ -481,10 +481,9 @@ export interface RoutelyBackupJobDto {
   storageType: "local";
   storageStatus: "metadata-only";
   restoreStatus: "deferred";
-  localDir: string | null;
   storage: {
     type: "local";
-    localDir: string | null;
+    class: "local-metadata";
     external: false;
     servesFiles: false;
   };
@@ -514,11 +513,9 @@ export interface RoutelyBackupRunDto {
   storageStatus: "metadata-only";
   restoreStatus: "deferred";
   downloadUrl: null;
-  filePath: string | null;
   fileName: string | null;
   file: {
     available: boolean;
-    path: string | null;
     name: string | null;
     sizeBytes: number | null;
     servesFile: false;

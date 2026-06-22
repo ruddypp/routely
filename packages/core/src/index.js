@@ -637,7 +637,6 @@ export function databaseToPublicDto(row) {
 
 export function backupJobToPublicDto(row) {
   const retentionDays = Number(row.retention_days || 7);
-  const localDir = row.local_dir || null;
   return {
     id: row.id,
     databaseId: row.database_id,
@@ -650,10 +649,9 @@ export function backupJobToPublicDto(row) {
     storageType: "local",
     storageStatus: "metadata-only",
     restoreStatus: "deferred",
-    localDir,
     storage: {
       type: "local",
-      localDir,
+      class: "local-metadata",
       external: false,
       servesFiles: false
     },
@@ -676,7 +674,7 @@ export function backupRunToPublicDto(row) {
   const filePath = row.file_path || null;
   const sizeBytes = row.size_bytes == null ? null : Number(row.size_bytes);
   const fileName = filePath ? filePath.split(/[\\/]/).filter(Boolean).at(-1) || null : null;
-  const fileAvailable = row.status === "succeeded" && Boolean(filePath);
+  const fileAvailable = row.status === "succeeded" && Boolean(fileName);
   return {
     id: row.id,
     backupJobId: row.backup_job_id,
@@ -689,11 +687,9 @@ export function backupRunToPublicDto(row) {
     storageStatus: "metadata-only",
     restoreStatus: "deferred",
     downloadUrl: null,
-    filePath,
     fileName,
     file: {
       available: fileAvailable,
-      path: filePath,
       name: fileName,
       sizeBytes,
       servesFile: false,
