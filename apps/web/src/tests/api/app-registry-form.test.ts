@@ -48,6 +48,7 @@ describe("app registry form payload", () => {
       domains: "db.internal.test",
       sourceRepo: "owner/api",
       sourceBranch: "main",
+      sourceSubdirectory: "apps/api",
       sourceAutoDeployConfigured: true,
       sourceAutoDeployEnabled: false,
       sourceAutoDeployBranches: "main, release",
@@ -78,6 +79,7 @@ describe("app registry form payload", () => {
         type: "github",
         repo: "owner/api",
         branch: "main",
+        subdirectory: "apps/api",
         auto_deploy: { enabled: false, branches: ["main", "release"] }
       },
       image: "postgres:16",
@@ -93,7 +95,7 @@ describe("app registry form payload", () => {
       ...baseApp,
       env: {},
       envKeys: ["DATABASE_URL", "NODE_ENV"],
-      source: { type: "github", repo: "owner/api", branch: "main", auto_deploy: { enabled: true, branches: ["main"] } }
+      source: { type: "github", repo: "owner/api", branch: "main", subdirectory: "apps/api", auto_deploy: { enabled: true, branches: ["main"] } }
     });
     const payload = appFormPayload(form);
 
@@ -104,6 +106,7 @@ describe("app registry form payload", () => {
       type: "github",
       repo: "owner/api",
       branch: "main",
+      subdirectory: "apps/api",
       auto_deploy: { enabled: true, branches: ["main"] }
     });
   });
@@ -111,6 +114,7 @@ describe("app registry form payload", () => {
   it("returns actionable validation errors for unsupported incomplete driver metadata", () => {
     expect(appFormValidationError({ ...blankAppForm, name: "api", driver: "command" })).toBe("Command driver needs a command, dev, or start command.");
     expect(appFormValidationError({ ...blankAppForm, name: "api", driver: "compose" })).toBe("Compose driver needs a Compose service name.");
-    expect(appFormValidationError({ ...blankAppForm, name: "api", command: "npm run dev", sourceBranch: "main" })).toBe("Source repo is required when source branch or auto-deploy metadata is set.");
+    expect(appFormValidationError({ ...blankAppForm, name: "api", command: "npm run dev", sourceBranch: "main" })).toBe("Source repo is required when GitHub metadata is set.");
+    expect(appFormValidationError({ ...blankAppForm, name: "api", command: "npm run dev", sourceSubdirectory: "apps/api" })).toBe("Source repo is required when GitHub metadata is set.");
   });
 });

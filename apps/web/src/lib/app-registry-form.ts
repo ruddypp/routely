@@ -15,7 +15,7 @@ export type AppFormSource = {
   dependsOn?: string[];
   healthcheck?: { path: string | null; expected_status: number | null } | null;
   domains?: string[];
-  source?: { type: string | null; repo: string | null; branch: string | null; auto_deploy?: { enabled: boolean; branches: string[] } } | null;
+  source?: { type: string | null; repo: string | null; branch: string | null; subdirectory?: string | null; auto_deploy?: { enabled: boolean; branches: string[] } } | null;
   image?: string | null;
   internal?: boolean;
   volumes?: string[];
@@ -45,6 +45,7 @@ export type AppFormState = {
   domains: string;
   sourceRepo: string;
   sourceBranch: string;
+  sourceSubdirectory: string;
   sourceAutoDeployConfigured: boolean;
   sourceAutoDeployEnabled: boolean;
   sourceAutoDeployBranches: string;
@@ -82,6 +83,7 @@ export const blankAppForm: AppFormState = {
   domains: "",
   sourceRepo: "",
   sourceBranch: "",
+  sourceSubdirectory: "",
   sourceAutoDeployConfigured: false,
   sourceAutoDeployEnabled: true,
   sourceAutoDeployBranches: "",
@@ -119,6 +121,7 @@ export function appFormFromDaemonApp(app: AppFormSource): AppFormState {
     domains: (app.domains || []).join(", "),
     sourceRepo: app.source?.repo || "",
     sourceBranch: app.source?.branch || "",
+    sourceSubdirectory: app.source?.subdirectory || "",
     sourceAutoDeployConfigured: Boolean(autoDeploy),
     sourceAutoDeployEnabled: autoDeploy?.enabled ?? true,
     sourceAutoDeployBranches: (autoDeploy?.branches || []).join(", "),
@@ -140,8 +143,8 @@ export function appFormValidationError(form: AppFormState): string | null {
   if (form.driver === "compose" && !form.composeService.trim()) {
     return "Compose driver needs a Compose service name.";
   }
-  if ((form.sourceBranch.trim() || form.sourceAutoDeployConfigured) && !form.sourceRepo.trim()) {
-    return "Source repo is required when source branch or auto-deploy metadata is set.";
+  if ((form.sourceBranch.trim() || form.sourceSubdirectory.trim() || form.sourceAutoDeployConfigured) && !form.sourceRepo.trim()) {
+    return "Source repo is required when GitHub metadata is set.";
   }
   return null;
 }
@@ -237,12 +240,13 @@ export function appFormPayload(form: AppFormState): AppFormPayload {
 }
 
 function sourcePayload(form: AppFormState) {
-  if (!form.sourceRepo.trim() && !form.sourceBranch.trim()) return null;
+  if (!form.sourceRepo.trim() && !form.sourceBranch.trim() && !form.sourceSubdirectory.trim()) return null;
 
   const source: Record<string, unknown> = {
     type: "github",
     repo: form.sourceRepo.trim() || null,
-    branch: form.sourceBranch.trim() || null
+    branch: form.sourceBranch.trim() || null,
+    subdirectory: form.sourceSubdirectory.trim() || null
   };
 
   if (form.sourceAutoDeployConfigured) {

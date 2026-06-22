@@ -438,6 +438,11 @@ function normalizeSource(value, autoDeployInput) {
     branch: stringOrNull(hasSource ? value.branch : null)
   };
 
+  const subdirectory = stringOrNull(hasSource ? value.subdirectory : null);
+  if (subdirectory) {
+    source.subdirectory = subdirectory;
+  }
+
   if (autoDeploy && typeof autoDeploy === "object" && !Array.isArray(autoDeploy)) {
     source.auto_deploy = {
       enabled: autoDeploy.enabled == null ? true : Boolean(autoDeploy.enabled),

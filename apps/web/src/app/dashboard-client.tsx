@@ -5,7 +5,6 @@ import type { FormEvent, ReactNode } from "react";
 import { Alert as UiAlert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { EmptyState as UiEmptyState } from "@/components/ui/empty-state";
 import { Field as UiField, TextAreaField as UiTextAreaField } from "@/components/ui/field";
 import { Select as UiSelect } from "@/components/ui/select";
 import { SkeletonRows } from "@/components/ui/skeleton";
@@ -38,7 +37,7 @@ type DaemonApp = {
   dependsOn?: string[];
   healthcheck?: { path: string | null; expected_status: number | null } | null;
   domains?: string[];
-  source?: { type: string | null; repo: string | null; branch: string | null; auto_deploy?: { enabled: boolean; branches: string[] } } | null;
+  source?: { type: string | null; repo: string | null; branch: string | null; subdirectory?: string | null; auto_deploy?: { enabled: boolean; branches: string[] } } | null;
   image?: string | null;
   internal?: boolean;
   volumes?: string[];
@@ -433,6 +432,18 @@ const PANEL_SHADOW = "shadow-[var(--panel-shadow)]";
 const INSET_RING = "shadow-[var(--inset-border)]";
 const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent";
 
+type SourceStackId = "github" | "local" | "compose" | "dockerfile" | "node-next" | "static" | "custom";
+
+const SOURCE_STACK_CARDS: Array<{ description: string; detail: string; icon: string; id: SourceStackId; title: string }> = [
+  { id: "github", icon: "GH", title: "GitHub repo", description: "Deploy from a repository, branch, and optional project subdirectory.", detail: "owner/repo · branch · subdirectory" },
+  { id: "local", icon: "/", title: "Local folder", description: "Use an absolute path on the runtime host, the machine running routely.", detail: "/home/me/projects/my-app" },
+  { id: "compose", icon: "YML", title: "Docker Compose", description: "Point Routely at an existing compose.yml and expose one service.", detail: "compose file · service" },
+  { id: "dockerfile", icon: "DF", title: "Dockerfile", description: "Build one service from a Dockerfile and publish a container port.", detail: "context path · Dockerfile · port" },
+  { id: "node-next", icon: "JS", title: "Node / Next.js", description: "Start with common install, build, start commands, and an app port.", detail: "package scripts · port" },
+  { id: "static", icon: "WWW", title: "Static site", description: "Serve built assets or a public output folder from this host.", detail: "output directory · domain" },
+  { id: "custom", icon: "•••", title: "Custom", description: "Manual recipe for stacks Routely cannot detect yet.", detail: "commands · ports · health" }
+];
+
 function StatusBadge({ status }: { status: string }) {
   return <Badge status={status} variant="status">{status}</Badge>;
 }
@@ -654,14 +665,80 @@ function isEnablementAction(action: AppAction): action is AppEnablementAction {
 
 function sourceTypeLabel(app: DaemonApp): string {
   if (app.source?.type === "github" || app.source?.repo) return "GitHub";
+  if (app.driver === "compose") return "Docker Compose";
+  if (app.driver === "dockerfile") return "Dockerfile";
   if (app.source?.type === "local" || app.path) return "Local folder";
   return "not available";
 }
 
 function sourceDetail(app: DaemonApp): string {
-  if (app.source?.repo) return `${app.source.repo}:${app.source.branch || "main"}`;
-  if (app.path) return shortPath(app.path);
+  if (app.source?.repo) return [app.source.repo, app.source.branch || "main", app.source.subdirectory].filter(Boolean).join(" · ");
+  if (app.path) return app.path;
+  if (app.composeFile) return app.composeFile;
   return app.image || app.command || app.dev || "not available";
+}
+
+function stackRecipeLabel(app: DaemonApp): string {
+  if (app.driver === "compose") return app.composeService ? `Docker Compose · ${app.composeService}` : "Docker Compose";
+  if (app.driver === "dockerfile") return "Dockerfile";
+  if (app.preset === "nextjs") return "Node / Next.js";
+  if (["vite", "express"].includes(app.preset)) return `Node · ${app.preset}`;
+  if (["postgres", "mysql", "mariadb", "redis", "mongodb"].includes(app.preset)) return `Database · ${app.preset}`;
+  return app.preset && app.preset !== "custom" ? app.preset : "Custom / unknown";
+}
+
+function lifecycleSummary(app: DaemonApp): string {
+  if (!app.enabled) return "disabled from auto-start";
+  if (isAppRuntimeRunning(app)) return "running on this host";
+  const setupBlockReason = appSetupBlockReason(app);
+  if (setupBlockReason) return "setup must pass before start";
+  return "ready for manual start";
+}
+
+function sourceStackPatch(sourceId: SourceStackId, form: AppFormState): Partial<AppFormState> {
+  const clearGithubSource = { sourceRepo: "", sourceBranch: "", sourceSubdirectory: "", sourceAutoDeployConfigured: false };
+
+  if (sourceId === "github") {
+    return {
+      type: "app",
+      driver: form.driver === "compose" ? "dockerfile" : form.driver,
+      sourceBranch: form.sourceBranch || "main",
+      sourceAutoDeployConfigured: true,
+      sourceAutoDeployBranches: form.sourceAutoDeployBranches || "main"
+    };
+  }
+
+  if (sourceId === "local") {
+    return { ...clearGithubSource, type: "app", preset: "custom", driver: "command" };
+  }
+
+  if (sourceId === "compose") {
+    return { ...clearGithubSource, ...appDriverPatch("compose"), type: form.type === "database" ? "database" : "app", preset: form.preset === "custom" ? "custom" : form.preset };
+  }
+
+  if (sourceId === "dockerfile") {
+    return { ...clearGithubSource, ...appDriverPatch("dockerfile"), type: "app", preset: "custom" };
+  }
+
+  if (sourceId === "node-next") {
+    return { ...clearGithubSource, type: "app", preset: "nextjs", driver: "command", install: form.install || "npm install", build: form.build || "npm run build", start: form.start || "npm run start", command: form.command || form.dev || "npm run dev", dev: form.dev || form.command || "npm run dev" };
+  }
+
+  if (sourceId === "static") {
+    return { ...clearGithubSource, type: "app", preset: "custom", driver: "command", command: form.command || "npx serve .", dev: form.dev || "npx serve ." };
+  }
+
+  return { ...clearGithubSource, type: "app", preset: "custom", driver: "command" };
+}
+
+function selectedSourceStackId(form: AppFormState): SourceStackId | null {
+  if (form.sourceRepo.trim() || form.sourceBranch.trim() || form.sourceSubdirectory.trim() || form.sourceAutoDeployConfigured) return "github";
+  if (form.driver === "compose") return "compose";
+  if (form.driver === "dockerfile") return "dockerfile";
+  if (form.preset === "nextjs") return "node-next";
+  if (form.command.includes("serve") || form.dev.includes("serve")) return "static";
+  if (form.path.trim()) return "local";
+  return null;
 }
 
 function primaryEndpoint(app: DaemonApp, domains: DaemonDomain[]): { href: string | null; label: string; tone: string } {
@@ -683,6 +760,7 @@ function primaryEndpoint(app: DaemonApp, domains: DaemonDomain[]): { href: strin
 function visibleServiceCount(app: DaemonApp): string {
   if (app.type === "database") return "1 database service";
   if (app.driver === "compose" && app.composeService) return "1 visible service";
+  if (app.driver === "dockerfile" || app.driver === "command") return "1 app process";
   return "not available";
 }
 
@@ -1236,10 +1314,10 @@ export default function DashboardClient() {
     [loadLogs, poll, replaceApp]
   );
 
-  function openCreateForm() {
+  function openCreateForm(sourceId?: SourceStackId) {
     setFormMode("create");
     setEditingAppId(null);
-    setForm(blankAppForm);
+    setForm(sourceId ? { ...blankAppForm, ...sourceStackPatch(sourceId, blankAppForm) } : blankAppForm);
     setFormError(null);
   }
 
@@ -1313,6 +1391,8 @@ export default function DashboardClient() {
   const stoppedCount = Math.max(0, apps.length - runningCount);
   const dockerfileApps = appResources.filter((app) => app.driver === "dockerfile");
   const appModuleTabs: Record<"env" | "logs" | "health", InspectorTab> = { env: "env", logs: "logs", health: "health" };
+  const appOperationsTab = activeModule === "env" || activeModule === "logs" || activeModule === "health" ? appModuleTabs[activeModule] : undefined;
+  const showAppOperations = activeModule === "apps" ? apps.length > 0 : Boolean(appOperationsTab);
   const moduleLoading = loading || refreshing;
   const bulkStartPlan = useMemo(() => startAllPlan(apps), [apps]);
   const startAllReason = startAllBlockReason(apps, connected, startAllBusy);
@@ -1506,36 +1586,36 @@ export default function DashboardClient() {
 
             {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} deployingByAppId={deployingByAppId} deploymentsByAppId={latestDeploymentByAppId} disabledCount={disabledCount} domainsByAppId={domainsByAppId} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} server={serverStatus} serviceResources={serviceResources} startAllBusy={startAllBusy} startAllPlan={bulkStartPlan} startAllReason={startAllReason} startAllResult={startAllResult} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onDeploy={(app) => void deployApp(app)} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onSelect={setSelectedAppId} onStartAll={() => void runStartAll()} /> : null}
 
-            {activeModule === "apps" || activeModule === "env" || activeModule === "logs" || activeModule === "health" ? <AppOperationsModule activeTab={activeModule === "apps" ? undefined : appModuleTabs[activeModule]} apps={apps} appResources={appResources} app={selectedApp} selectedAppId={selectedAppId} connected={connected} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} logs={logs} logsLoading={logsLoading} logsError={logsError} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} module={activeModule} server={serverStatus} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onLogs={(app) => void loadLogs(app)} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} /> : null}
+            {showAppOperations ? <AppOperationsModule activeTab={appOperationsTab} apps={apps} appResources={appResources} app={selectedApp} selectedAppId={selectedAppId} connected={connected} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} logs={logs} logsLoading={logsLoading} logsError={logsError} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} module={activeModule} server={serverStatus} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onLogs={(app) => void loadLogs(app)} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} /> : null}
 
             {activeModule === "metrics" ? <MetricsModule app={selectedApp} apps={apps} appResources={appResources} connected={connected} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} github={github} hostMetrics={hostMetrics} hostMetricsError={hostMetricsError} logs={logs} logsError={logsError} logsLoading={logsLoading} server={serverStatus} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} selectedAppId={selectedAppId} /> : null}
     </DashboardShell>
   );
 }
 
-function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, deployingByAppId, deploymentsByAppId, disabledCount, domainsByAppId, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onDeploy, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onSelect, onStartAll, runningCount, selectedAppId, server, serviceResources, startAllBusy, startAllPlan: bulkPlan, startAllReason, startAllResult, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; deployingByAppId: Record<number, boolean>; deploymentsByAppId: Map<number, DaemonDeployment>; disabledCount: number; domainsByAppId: Map<number, DaemonDomain[]>; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: () => void; onDeploy: (app: DaemonApp) => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onSelect: (id: number) => void; onStartAll: () => void; runningCount: number; selectedAppId: number | null; server: DaemonServerStatus | null; serviceResources: DaemonApp[]; startAllBusy: boolean; startAllPlan: BulkStartPlan; startAllReason: string | null; startAllResult: DaemonAppStartAllResponse | null; stoppedCount: number }) {
+function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, deployingByAppId, deploymentsByAppId, disabledCount, domainsByAppId, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onDeploy, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onSelect, onStartAll, runningCount, selectedAppId, server, serviceResources, startAllBusy, startAllPlan: bulkPlan, startAllReason, startAllResult, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; deployingByAppId: Record<number, boolean>; deploymentsByAppId: Map<number, DaemonDeployment>; disabledCount: number; domainsByAppId: Map<number, DaemonDomain[]>; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: (sourceId?: SourceStackId) => void; onDeploy: (app: DaemonApp) => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onSelect: (id: number) => void; onStartAll: () => void; runningCount: number; selectedAppId: number | null; server: DaemonServerStatus | null; serviceResources: DaemonApp[]; startAllBusy: boolean; startAllPlan: BulkStartPlan; startAllReason: string | null; startAllResult: DaemonAppStartAllResponse | null; stoppedCount: number }) {
   const attentionCount = apps.filter((app) => Boolean(appAttentionMessage(app))).length;
 
   return (
     <section className={`min-w-0 overflow-hidden rounded-[22px] border border-[#2D352F]/70 bg-[#101412] ${PANEL_SHADOW}`}>
       <ModuleHeader module="apps" stats={<><MetricPill label="running" value={`${runningCount}/${apps.length}`} accent /><MetricPill label="attention" value={String(attentionCount)} /><MetricPill label="services" value={String(serviceResources.length)} /><MetricPill label="stopped" value={String(stoppedCount)} /><MetricPill label="disabled" value={String(disabledCount)} /></>} actions={<><Button onClick={onStartAll} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || "Start stopped enabled command and Compose resources that passed setup gates"} variant="primary">Start All</Button><PillButton onClick={onCreate} strong disabled={!connected}>Add app</PillButton></>} />
 
-      {!connected && health ? <Alert title="Daemon offline" message={health.error || "Start Routely from the CLI to bring the server session online."} /> : null}
-      {actionError ? <Alert title="Action failed" message={actionError} /> : null}
-      {appsError ? <Alert title="Registry unavailable" message={appsError} /> : null}
+      {!connected && health ? <CompactWarning title="Daemon offline" message={health.error || "Start Routely from the CLI to bring the server session online."} /> : null}
+      {actionError ? <CompactWarning title="Action failed" message={actionError} /> : null}
+      {appsError ? <CompactWarning title="Registry unavailable" message={appsError} /> : null}
       {startAllResult ? <StartAllReport result={startAllResult} /> : null}
 
       <div className="border-b border-white/5 bg-black/20 px-4 py-3">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Start All scope</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Start all ready apps on this server</p>
         <p className="mt-1 text-sm text-muted">
-          Starts {bulkPlan.stoppedStartableCount} stopped enabled command/Compose resources through <code className="font-mono text-foreground">/api/apps/start-all</code>. Disabled resources stay visible and skipped; Start All is disabled while enabled resources are failed or need setup verification.
+          Routely can start {bulkPlan.stoppedStartableCount} stopped app{bulkPlan.stoppedStartableCount === 1 ? "" : "s"} that are enabled and already passed setup checks. Apps that still need setup, are disabled, or failed readiness stay off.
         </p>
       </div>
 
       {formMode ? <AppForm mode={formMode} form={form} error={formError} saving={formSaving} onChange={onFormChange} onCancel={onFormCancel} onSubmit={onFormSubmit} /> : null}
 
       <div className="bg-black/10">
-        {loading ? <LoadingRows /> : apps.length === 0 ? <EmptyState connected={connected} onAdd={onCreate} /> : (
+        {loading ? <LoadingRows /> : apps.length === 0 ? <FirstAppEmptyState connected={connected} onAdd={onCreate} /> : (
           <>
             <ResourceSection title="Apps" count={appResources.length} />
             <div className="grid gap-3 p-3 sm:p-4">
@@ -2364,7 +2444,7 @@ function AppRow({
             </span>
             <span className="min-w-0 flex-1">
               <span className="block truncate text-base font-black leading-tight">{app.name}</span>
-              <span className="mt-1 block truncate font-mono text-[11px] text-muted">{resourceLabel(app)} · {app.driver}/{app.preset}</span>
+              <span className="mt-1 block truncate font-mono text-[11px] text-muted">{resourceLabel(app)} · {stackRecipeLabel(app)}</span>
             </span>
           </span>
         </button>
@@ -2387,12 +2467,14 @@ function AppRow({
       <div className="grid min-w-0 gap-3">
         <dl className="grid min-w-0 grid-cols-2 gap-3 text-[11px] text-muted md:grid-cols-3 xl:grid-cols-4">
           <Meta label="Readiness" value={setup.label} />
-          <Meta label="Endpoint" value={endpoint.label} mono wide />
-          <Meta label="Source detail" value={sourceDetail(app)} mono />
+          <Meta label="URL / domain" value={endpoint.label} mono wide />
+          <Meta label="Source" value={sourceDetail(app)} mono wide />
+          <Meta label="Stack / recipe" value={stackRecipeLabel(app)} />
+          <Meta label="Port" value={app.port ? `:${app.port}` : "not exposed"} mono />
           <Meta label="Services" value={visibleServiceCount(app)} />
+          <Meta label="Lifecycle" value={lifecycleSummary(app)} />
           <Meta label="Last run/deploy" value={lastRunOrDeployLabel(latestDeployment)} />
           <Meta label="Enabled" value={app.enabled ? "enabled" : "disabled"} />
-          <Meta label="Updated" value={timeAgo(app.updatedAt)} />
           <Meta label="Endpoint state" value={endpoint.tone} />
         </dl>
 
@@ -2890,18 +2972,26 @@ function AppForm({
   saving: boolean;
 }) {
   const update = (patch: Partial<AppFormState>) => onChange({ ...form, ...patch });
+  const inferredSourceStack = selectedSourceStackId(form);
+  const [sourceChoice, setSourceChoice] = useState<SourceStackId | null>(null);
+  const selectedSource = sourceChoice || inferredSourceStack;
   const commandFieldsEnabled = form.driver === "command";
   const composeFieldsEnabled = form.driver === "compose";
-  const sourceIntentConfigured = form.sourceRepo.trim() || form.sourceBranch.trim() || form.sourceAutoDeployConfigured;
+  const sourceIntentConfigured = form.sourceRepo.trim() || form.sourceBranch.trim() || form.sourceSubdirectory.trim() || form.sourceAutoDeployConfigured;
   const portInvalid = form.port.trim() !== "" && (!Number.isInteger(Number(form.port)) || Number(form.port) <= 0);
   const healthStatusInvalid = form.healthcheckStatus.trim() !== "" && (!Number.isInteger(Number(form.healthcheckStatus)) || Number(form.healthcheckStatus) <= 0);
   const nameMissing = form.name.trim() === "";
-  const sourceMissing = Boolean((form.sourceBranch.trim() || form.sourceAutoDeployConfigured) && !form.sourceRepo.trim());
+  const sourceMissing = Boolean((form.sourceBranch.trim() || form.sourceSubdirectory.trim() || form.sourceAutoDeployConfigured) && !form.sourceRepo.trim());
   const envHelper = form.envLocked
     ? "Stored env keys are preserved by this form; edit values in Env/Secrets."
     : "Portable non-secret KEY=value metadata. Store secrets in Env/Secrets.";
   const commandHelper = commandFieldsEnabled ? "Saved for command-driver resources." : "Deferred for this driver; not saved.";
   const composeHelper = composeFieldsEnabled ? "Saved for Compose-backed apps and services." : "Only saved for compose-driver resources.";
+
+  function chooseSource(sourceId: SourceStackId) {
+    setSourceChoice(sourceId);
+    update(sourceStackPatch(sourceId, form));
+  }
 
   return (
     <form onSubmit={onSubmit} className="border-b border-white/5 bg-black/25 px-4 py-4">
@@ -2918,15 +3008,30 @@ function AppForm({
 
       {error ? <div className="mt-3 rounded-md bg-negative/10 px-3 py-2 text-sm text-negative shadow-[0_0_0_1px_rgba(243,114,127,0.22)_inset]">{error}</div> : null}
       <div className="mt-3 rounded-md border border-info/20 bg-info-soft px-3 py-2 text-xs text-foreground-secondary">
-        Driver-scoped fields are saved only when their driver supports them. Domains and GitHub source are registry intent; live DNS/proxy and repository connection stay in their dedicated modules.
+        Choose what you already have first. Routely stores the source, stack recipe, port, and readiness gates here; live DNS/proxy and repository connection stay in their dedicated modules.
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mt-4">
+        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Source and stack</p>
+            <p className="mt-1 text-sm text-muted">Pick the card that matches your app. The fields below will focus on that path.</p>
+          </div>
+        </div>
+        <SourceStackCardGrid disabled={saving} onSelect={chooseSource} selectedId={selectedSource} />
+      </div>
+
+      {selectedSource ? <SelectedSourceFields form={form} healthStatusInvalid={healthStatusInvalid} nameMissing={nameMissing} onPatch={update} portInvalid={portInvalid} saving={saving} showErrors={Boolean(error)} sourceId={selectedSource} sourceMissing={sourceMissing} /> : null}
+
+      <details className="mt-4 rounded-[18px] border border-white/10 bg-black/25 px-3 py-3" open={mode === "edit"}>
+        <summary className="cursor-pointer text-xs font-bold uppercase tracking-[0.14em] text-muted marker:text-accent">Advanced registry details</summary>
+        <p className="mt-2 text-xs text-muted">Use these only when the source card needs extra metadata. Driver-scoped fields are saved only when their driver supports them.</p>
+      <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
         <Field label="Name" value={form.name} onChange={(value) => update({ name: value })} required error={nameMissing && error ? "Required" : undefined} disabled={saving} />
         <SelectField label="Type" value={form.type} values={APP_TYPES} onChange={(value) => update({ type: value })} disabled={saving} />
         <SelectField label="Preset" value={form.preset} values={APP_PRESETS} onChange={(value) => update({ preset: value })} disabled={saving} />
         <SelectField label="Driver" value={form.driver} values={APP_DRIVERS} onChange={(value) => update(appDriverPatch(value))} disabled={saving} />
-        <Field label="Path" value={form.path} onChange={(value) => update({ path: value })} mono wide disabled={saving} placeholder="/path/to/app" />
+        <Field label="Runtime host path" value={form.path} onChange={(value) => update({ path: value })} mono wide disabled={saving} helper="Absolute path on the machine running routely, for example /home/me/projects/app." placeholder="/home/me/projects/app" />
         <Field label="Command" value={form.command} onChange={(value) => update({ command: value, dev: value || form.dev })} mono wide disabled={saving || !commandFieldsEnabled} helper={commandHelper} placeholder="npm run dev" />
         <Field label="Install" value={form.install} onChange={(value) => update({ install: value })} mono disabled={saving || !commandFieldsEnabled} helper={commandHelper} placeholder="npm install" />
         <Field label="Dev" value={form.dev} onChange={(value) => update({ dev: value, command: form.command || value })} mono disabled={saving || !commandFieldsEnabled} helper={commandHelper} placeholder="npm run dev" />
@@ -2942,6 +3047,7 @@ function AppForm({
         <Field label="Domains" value={form.domains} onChange={(value) => update({ domains: value })} disabled={saving} helper="Registry intent only; Domains module verifies DNS/proxy." placeholder="local.test" />
         <Field label="Source repo" value={form.sourceRepo} onChange={(value) => update({ sourceRepo: value })} error={sourceMissing ? "Required" : undefined} disabled={saving} helper="GitHub metadata; connect webhooks in GitHub module." placeholder="owner/repo" />
         <Field label="Source branch" value={form.sourceBranch} onChange={(value) => update({ sourceBranch: value })} disabled={saving} placeholder="main" />
+        <Field label="Project subdirectory" value={form.sourceSubdirectory} onChange={(value) => update({ sourceSubdirectory: value })} disabled={saving} helper="Optional path inside the repo, for example apps/web." placeholder="apps/web" />
         <label className={`flex items-center justify-between rounded-md bg-surface-raised px-3 py-2 ${INSET_RING} ${saving ? "opacity-60" : ""}`}>
           <span>
             <span className="block text-xs font-bold">Auto-deploy metadata</span>
@@ -2974,7 +3080,141 @@ function AppForm({
           <input checked={form.internal} onChange={(event) => update({ internal: event.target.checked })} disabled={saving || !composeFieldsEnabled} type="checkbox" className="h-4 w-4 accent-[var(--accent)]" />
         </label>
       </div>
+      </details>
     </form>
+  );
+}
+
+function SourceStackCardGrid({ disabled, onSelect, selectedId }: { disabled?: boolean; onSelect: (sourceId: SourceStackId) => void; selectedId: SourceStackId | null }) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+      {SOURCE_STACK_CARDS.map((card) => {
+        const selected = selectedId === card.id;
+        return (
+          <button
+            key={card.id}
+            type="button"
+            aria-pressed={selected}
+            disabled={disabled}
+            onClick={() => onSelect(card.id)}
+            className={`group min-h-[132px] rounded-[18px] border p-3 text-left transition ${FOCUS_RING} ${selected ? "border-accent/70 bg-accent-soft shadow-[0_0_0_1px_rgba(39,216,111,0.18)_inset,0_16px_34px_rgba(0,0,0,0.28)]" : "border-[#2D352F]/80 bg-[#171C1A] hover:border-[#415246] hover:bg-[#1C241F]"}`}
+          >
+            <span className="flex items-start gap-3">
+              <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border font-mono text-[11px] font-black ${selected ? "border-accent/30 bg-accent text-black" : "border-white/10 bg-black/30 text-accent"}`} role="img" aria-label={`${card.title} icon`}>
+                {card.icon}
+              </span>
+              <span className="min-w-0">
+                <span className="block text-sm font-black text-foreground">{card.title}</span>
+                <span className="mt-1 block text-xs leading-5 text-muted">{card.description}</span>
+              </span>
+            </span>
+            <span className="mt-3 block truncate rounded-full bg-black/30 px-2.5 py-1 font-mono text-[10px] text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset]">{card.detail}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function SelectedSourceFields({ form, healthStatusInvalid, nameMissing, onPatch, portInvalid, saving, showErrors, sourceId, sourceMissing }: { form: AppFormState; healthStatusInvalid: boolean; nameMissing: boolean; onPatch: (patch: Partial<AppFormState>) => void; portInvalid: boolean; saving: boolean; showErrors: boolean; sourceId: SourceStackId; sourceMissing: boolean }) {
+  const selectedCard = SOURCE_STACK_CARDS.find((card) => card.id === sourceId) || SOURCE_STACK_CARDS[0];
+  const nameField = <Field label="App name" value={form.name} onChange={(value) => onPatch({ name: value })} required error={nameMissing && showErrors ? "Required" : undefined} disabled={saving} placeholder="my-app" />;
+  const portField = <Field label="App port" value={form.port} onChange={(value) => onPatch({ port: value })} type="number" error={portInvalid ? "Positive integer" : undefined} disabled={saving} helper="Only enter a port the app actually listens on." placeholder="3000" />;
+  const healthFields = <><Field label="Health path" value={form.healthcheckPath} onChange={(value) => onPatch({ healthcheckPath: value })} disabled={saving} placeholder="/" /><Field label="Expected status" value={form.healthcheckStatus} onChange={(value) => onPatch({ healthcheckStatus: value })} type="number" error={healthStatusInvalid ? "Positive integer" : undefined} disabled={saving} placeholder="200" /></>;
+
+  return (
+    <section className="mt-4 rounded-[20px] border border-accent/15 bg-[#121814] p-3 shadow-[0_18px_42px_rgba(0,0,0,0.2)] sm:p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-accent font-mono text-[10px] font-black text-black" role="img" aria-label={`${selectedCard.title} icon`}>{selectedCard.icon}</span>
+          <div className="min-w-0">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-accent">Start here</p>
+            <h3 className="truncate text-base font-black">{selectedCard.title}</h3>
+            <p className="mt-1 text-xs text-muted">{selectedCard.description}</p>
+          </div>
+        </div>
+        <span className="rounded-full bg-black/30 px-3 py-1 font-mono text-[10px] text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset]">{selectedCard.detail}</span>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {sourceId === "github" ? (
+          <>
+            {nameField}
+            <Field label="GitHub repository" value={form.sourceRepo} onChange={(value) => onPatch({ sourceRepo: value })} error={sourceMissing ? "Required" : undefined} disabled={saving} helper="Use owner/repo, for example acme/web." placeholder="owner/repo" />
+            <Field label="Branch" value={form.sourceBranch} onChange={(value) => onPatch({ sourceBranch: value })} disabled={saving} placeholder="main" />
+            <Field label="Project subdirectory" value={form.sourceSubdirectory} onChange={(value) => onPatch({ sourceSubdirectory: value })} disabled={saving} helper="Optional path inside the repo; leave blank for repo root." placeholder="apps/web" />
+            <SelectField label="Stack recipe" value={form.preset} values={APP_PRESETS} onChange={(value) => onPatch({ preset: value })} disabled={saving} />
+            <SelectField label="Runtime driver" value={form.driver} values={APP_DRIVERS} onChange={(value) => onPatch(appDriverPatch(value))} disabled={saving} />
+            {portField}
+          </>
+        ) : null}
+
+        {sourceId === "local" ? (
+          <>
+            {nameField}
+            <Field label="Absolute path on runtime host" value={form.path} onChange={(value) => onPatch({ path: value })} mono wide disabled={saving} helper="The runtime host is this machine running routely. Example: /home/me/projects/my-app." placeholder="/home/me/projects/my-app" />
+            <Field label="Start command" value={form.command} onChange={(value) => onPatch({ command: value, dev: value || form.dev })} mono wide disabled={saving} helper="Use the command you would run from that folder." placeholder="npm run dev" />
+            {portField}
+            {healthFields}
+          </>
+        ) : null}
+
+        {sourceId === "compose" ? (
+          <>
+            {nameField}
+            <Field label="Compose file on runtime host" value={form.composeFile} onChange={(value) => onPatch({ composeFile: value })} mono wide disabled={saving} helper="Use an absolute path when possible, for example /srv/app/compose.yml." placeholder="/srv/app/compose.yml" />
+            <Field label="Project directory" value={form.path} onChange={(value) => onPatch({ path: value })} mono wide disabled={saving} helper="Absolute folder that owns the compose project." placeholder="/srv/app" />
+            <Field label="Service to expose" value={form.composeService} onChange={(value) => onPatch({ composeService: value })} mono disabled={saving} placeholder="web" />
+            <Field label="Image" value={form.image} onChange={(value) => onPatch({ image: value })} mono disabled={saving} helper="Optional when compose file already defines it." placeholder="ghcr.io/acme/web:latest" />
+            {portField}
+          </>
+        ) : null}
+
+        {sourceId === "dockerfile" ? (
+          <>
+            {nameField}
+            <Field label="Context path on runtime host" value={form.path} onChange={(value) => onPatch({ path: value })} mono wide disabled={saving} helper="Absolute folder containing the Dockerfile." placeholder="/home/me/projects/my-app" />
+            {portField}
+            {healthFields}
+          </>
+        ) : null}
+
+        {sourceId === "node-next" ? (
+          <>
+            {nameField}
+            <Field label="App folder on runtime host" value={form.path} onChange={(value) => onPatch({ path: value })} mono wide disabled={saving} helper="Absolute path to the package.json folder." placeholder="/home/me/projects/my-next-app" />
+            <Field label="Install command" value={form.install} onChange={(value) => onPatch({ install: value })} mono disabled={saving} placeholder="npm install" />
+            <Field label="Build command" value={form.build} onChange={(value) => onPatch({ build: value })} mono disabled={saving} placeholder="npm run build" />
+            <Field label="Start command" value={form.start} onChange={(value) => onPatch({ start: value, command: form.command || value })} mono disabled={saving} placeholder="npm run start" />
+            {portField}
+          </>
+        ) : null}
+
+        {sourceId === "static" ? (
+          <>
+            {nameField}
+            <Field label="Output folder on runtime host" value={form.path} onChange={(value) => onPatch({ path: value })} mono wide disabled={saving} helper="Absolute folder containing built static files." placeholder="/home/me/projects/site/dist" />
+            <Field label="Build command" value={form.build} onChange={(value) => onPatch({ build: value })} mono disabled={saving} helper="Optional if files are already built." placeholder="npm run build" />
+            <Field label="Serve command" value={form.command} onChange={(value) => onPatch({ command: value, dev: value || form.dev })} mono wide disabled={saving} placeholder="npx serve ." />
+            <Field label="Domain" value={form.domains} onChange={(value) => onPatch({ domains: value })} disabled={saving} helper="Optional; DNS/proxy verification happens in Domains." placeholder="site.example.com" />
+            {portField}
+          </>
+        ) : null}
+
+        {sourceId === "custom" ? (
+          <>
+            {nameField}
+            <SelectField label="Type" value={form.type} values={APP_TYPES} onChange={(value) => onPatch({ type: value })} disabled={saving} />
+            <SelectField label="Preset" value={form.preset} values={APP_PRESETS} onChange={(value) => onPatch({ preset: value })} disabled={saving} />
+            <SelectField label="Driver" value={form.driver} values={APP_DRIVERS} onChange={(value) => onPatch(appDriverPatch(value))} disabled={saving} />
+            <Field label="Path or context" value={form.path} onChange={(value) => onPatch({ path: value })} mono wide disabled={saving} helper="Use an absolute runtime-host path for local files." placeholder="/srv/app" />
+            <Field label="Command" value={form.command} onChange={(value) => onPatch({ command: value, dev: value || form.dev })} mono wide disabled={saving || form.driver !== "command"} placeholder="npm run dev" />
+            <Field label="Compose service" value={form.composeService} onChange={(value) => onPatch({ composeService: value })} mono disabled={saving || form.driver !== "compose"} placeholder="web" />
+            {portField}
+          </>
+        ) : null}
+      </div>
+    </section>
   );
 }
 
@@ -3128,17 +3368,58 @@ function Alert({ message, title }: { message: string; title: string }) {
   );
 }
 
+function CompactWarning({ message, title }: { message: string; title: string }) {
+  return (
+    <div className="border-b border-warning/15 bg-warning/10 px-4 py-2 text-xs text-warning">
+      <span className="font-bold">{title}:</span> <span className="text-warning/85">{message}</span>
+    </div>
+  );
+}
+
 function LoadingRows() {
   return <SkeletonRows />;
 }
 
-function EmptyState({ connected, onAdd }: { connected: boolean; onAdd: () => void }) {
+function FirstAppEmptyState({ connected, onAdd }: { connected: boolean; onAdd: (sourceId?: SourceStackId) => void }) {
   return (
-    <UiEmptyState
-      action={<PillButton onClick={onAdd} strong disabled={!connected}>Add app</PillButton>}
-      icon="R"
-      message="Add a local folder or GitHub-backed app. Routely should run setup verification before an app becomes ready or joins auto-start."
-      title="No apps yet"
-    />
+    <div className="p-3 sm:p-4">
+      <div className="overflow-hidden rounded-[24px] border border-[#2D352F]/80 bg-[#111612] shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
+        <div className="grid gap-4 border-b border-white/5 bg-[radial-gradient(circle_at_top_left,rgba(39,216,111,0.16),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.055),transparent_42%)] px-4 py-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(320px,1.05fr)] lg:items-center">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-accent">First deployment</p>
+            <h2 className="mt-2 text-2xl font-black leading-tight sm:text-3xl">Deploy your first app</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
+              Pick where your app lives, confirm the stack Routely should run, then verify setup before it can start on this runtime host.
+            </p>
+            <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-muted">
+              <span className="rounded-full bg-black/30 px-3 py-1 shadow-[0_0_0_1px_rgba(255,255,255,0.06)_inset]">1 · Source</span>
+              <span className="rounded-full bg-black/30 px-3 py-1 shadow-[0_0_0_1px_rgba(255,255,255,0.06)_inset]">2 · Stack</span>
+              <span className="rounded-full bg-black/30 px-3 py-1 shadow-[0_0_0_1px_rgba(255,255,255,0.06)_inset]">3 · Verify</span>
+            </div>
+          </div>
+          <div className="rounded-[20px] border border-white/10 bg-black/25 p-3">
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">What Routely will ask</p>
+            <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
+              <Meta label="Where is my source?" value="GitHub repo or absolute host path" />
+              <Meta label="What stack?" value="Card recipe, then real setup verification" />
+              <Meta label="What URL opens?" value="Domain when verified, local URL when exposed" />
+              <Meta label="What next?" value="Fix setup, then Start or Enable" />
+            </dl>
+          </div>
+        </div>
+
+        <div className="px-4 py-4">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-bold">Choose the source or stack you already have</p>
+              <p className="mt-1 text-xs text-muted">Cards open Add App with the right beginner fields first. No readiness is assumed until the backend verifies it.</p>
+            </div>
+            <PillButton onClick={() => onAdd()} strong disabled={!connected}>Add app</PillButton>
+          </div>
+          <SourceStackCardGrid disabled={!connected} onSelect={(sourceId) => onAdd(sourceId)} selectedId={null} />
+          {!connected ? <p className="mt-3 rounded-full bg-warning/10 px-3 py-2 text-xs text-warning">Start the Routely server session to save an app. The deployment path stays visible so setup still makes sense.</p> : null}
+        </div>
+      </div>
+    </div>
   );
 }
