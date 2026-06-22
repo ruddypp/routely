@@ -9,9 +9,9 @@ import { EmptyState as UiEmptyState } from "@/components/ui/empty-state";
 import { Field as UiField, TextAreaField as UiTextAreaField } from "@/components/ui/field";
 import { Select as UiSelect } from "@/components/ui/select";
 import { SkeletonRows } from "@/components/ui/skeleton";
-import { DashboardShell } from "@/components/dashboard/shell";
-import { ModuleHeader } from "@/components/dashboard/module-header";
-import type { DashboardModuleKey } from "@/components/dashboard/types";
+import { DashboardShell } from "@/components/dashboard-shell/dashboard-shell";
+import { ModuleHeader } from "@/components/dashboard-shell/module-header";
+import type { DashboardModuleKey, ServerRailSignal } from "@/components/dashboard-shell/types";
 import { appActionBlockReason, appSupportsBulkStart, bulkStartSkipReason, bulkStartStateLabel, isAppRuntimeRunning, startAllBlockReason, startAllPlan, type BulkStartPlan } from "@/lib/app-lifecycle";
 import { APP_DRIVERS, APP_PRESETS, APP_TYPES, appDriverPatch, appFormFromDaemonApp, appFormPayload, appFormValidationError, blankAppForm, type AppFormState } from "@/lib/app-registry-form";
 import { backupRestoreLabel, backupRunFileState, backupStorageLabel, databaseExposureLabel, deploymentLogsLabel, deploymentStateLabel, domainDnsLabel, domainProxyLabel, domainTargetLabel, domainTlsLabel, envVisibilityLabel, githubConnectionState, githubDeliveryLogPath, githubDeliveryState, githubLatestDelivery, githubRepositoryBranch, isDeploymentInProgress, latestDeployment, latestSuccessfulDeployment, logAvailabilityLabel, productionAuthState, safeEnvDisplay } from "@/lib/dashboard-operations";
@@ -635,6 +635,36 @@ function formatBytes(value: number | null): string {
   return `${amount >= 10 || index === 0 ? amount.toFixed(0) : amount.toFixed(1)}${units[index]}`;
 }
 
+function serverCheckRailSignal(label: string, check: DaemonServerCheck | undefined, okValue = "ok"): ServerRailSignal {
+  return {
+    label,
+    value: check ? (check.status === "ok" ? okValue : check.status) : "pending",
+    detail: check?.message || undefined,
+    tone: check ? check.status : "muted"
+  };
+}
+
+function metricRailSignal(label: string, value: string | null, detail?: string): ServerRailSignal {
+  return {
+    label,
+    value: value || "pending",
+    detail,
+    tone: value ? "ok" : "muted"
+  };
+}
+
+function formatPercent(value: number | null): string | null {
+  return value == null ? null : `${value.toFixed(1)}%`;
+}
+
+function formatUsedTotal(used: number | null, total: number | null): { value: string | null; detail?: string } {
+  if (used == null) return { value: null };
+  return {
+    value: formatBytes(used),
+    detail: total == null ? undefined : `of ${formatBytes(total)}`
+  };
+}
+
 function redactedTarget(target: string | null, type: string): string {
   if (!target) return "[redacted]";
   if (target.includes("***") || target.includes("...") || target.startsWith("[")) return target;
@@ -708,7 +738,7 @@ export default function DashboardClient() {
   const [notificationsError, setNotificationsError] = useState<string | null>(null);
   const [notificationSaving, setNotificationSaving] = useState(false);
   const [notificationActionById, setNotificationActionById] = useState<Record<number, string | null>>({});
-  const [notificationForm, setNotificationForm] = useState({ type: "webhook", name: "deploy-alerts", url: "", botToken: "", chatId: "", events: "deploy_succeeded,deploy_failed,backup_failed" });
+  const [notificationForm, setNotificationForm] = useState({ type: "webhook", name: "deploy-alerts", url: "", botToken: "", chatId: "", events: "deploy_succeeded,deploy_failed" });
   const [domainSaving, setDomainSaving] = useState(false);
   const [domainActionByHostname, setDomainActionByHostname] = useState<Record<string, string | null>>({});
   const [domainForm, setDomainForm] = useState({ appId: "", hostname: "" });
@@ -1391,17 +1421,31 @@ export default function DashboardClient() {
     }
   }, [apps, connected, poll, startAllBusy]);
 
+  const latestHostMetric = hostMetrics[0] || null;
+  const memoryRail = formatUsedTotal(latestHostMetric?.memoryBytes ?? null, latestHostMetric?.memoryLimitBytes ?? null);
+  const diskRail = formatUsedTotal(latestHostMetric?.diskUsedBytes ?? null, latestHostMetric?.diskTotalBytes ?? null);
+  const metricDetail = latestHostMetric?.sampledAt ? `sampled ${timeAgo(latestHostMetric.sampledAt)}` : undefined;
+  const metricUnavailable = hostMetricsError ? { value: "unavailable", detail: hostMetricsError, tone: "warn" as const } : null;
+  const dockerCheck = serverCheck(serverStatus, "docker");
+  const composeCheck = serverCheck(serverStatus, "docker-compose");
+
   return (
     <DashboardShell
       activeModule={activeModule}
       onSelect={setActiveModule}
       status={{
+        compose: serverCheckRailSignal("compose", composeCheck),
         connected,
+        cpu: metricUnavailable ? { label: "CPU", ...metricUnavailable } : metricRailSignal("CPU", formatPercent(latestHostMetric?.cpuPercent ?? null), metricDetail),
         daemonUrl: health?.daemonUrl || "-",
+        disk: metricUnavailable ? { label: "disk", ...metricUnavailable } : metricRailSignal("disk", diskRail.value, diskRail.detail || metricDetail),
+        docker: serverCheckRailSignal("docker", dockerCheck),
         loading,
+        memory: metricUnavailable ? { label: "RAM", ...metricUnavailable } : metricRailSignal("RAM", memoryRail.value, memoryRail.detail || metricDetail),
         mode: serverStatus?.mode || "local",
         refreshing,
         updated: timeAgo(lastUpdated),
+        uptime: health?.health?.startedAt ? timeAgo(health.health.startedAt) : "pending",
         workspace,
         onRefresh: () => void poll(true)
       }}
@@ -1409,14 +1453,12 @@ export default function DashboardClient() {
             {activeModule === "overview" ? (
               <OverviewPanel
                 apps={apps}
-                backupJobs={backupJobs}
-                backupRuns={backupRuns}
                 connected={connected}
                 deployments={deployments}
                 domains={domains}
                 domainsMeta={domainsMeta}
                 github={github}
-                healthchecksUnavailable={appsError || deploymentsError || backupsError}
+                healthchecksUnavailable={appsError || deploymentsError}
                 onSelect={setActiveModule}
                 proxyRoutes={proxyRoutes}
                 server={serverStatus}
@@ -2023,10 +2065,9 @@ function DataEmpty({ detail, title }: { detail: string; title: string }) {
   );
 }
 
-function OverviewPanel({ apps, backupJobs, backupRuns, connected, deployments, domains, domainsMeta, github, healthchecksUnavailable, onSelect, proxyRoutes, server, workspace }: { apps: DaemonApp[]; backupJobs: DaemonBackupJob[]; backupRuns: DaemonBackupRun[]; connected: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; domainsMeta: { rootDomain: string | null; serverPublicIp: string | null }; github: DaemonGithubStatus | null; healthchecksUnavailable: string | null | undefined; onSelect: (module: ModuleKey) => void; proxyRoutes: DaemonProxyRoute[]; server: DaemonServerStatus | null; workspace: string }) {
+function OverviewPanel({ apps, connected, deployments, domains, domainsMeta, github, healthchecksUnavailable, onSelect, proxyRoutes, server, workspace }: { apps: DaemonApp[]; connected: boolean; deployments: DaemonDeployment[]; domains: DaemonDomain[]; domainsMeta: { rootDomain: string | null; serverPublicIp: string | null }; github: DaemonGithubStatus | null; healthchecksUnavailable: string | null | undefined; onSelect: (module: ModuleKey) => void; proxyRoutes: DaemonProxyRoute[]; server: DaemonServerStatus | null; workspace: string }) {
   const failedDeploys = deployments.filter((deployment) => deployment.status === "failed").slice(0, 3);
   const recentDeploys = deployments.slice(0, 5);
-  const backupFailures = backupRuns.filter((run) => run.status === "failed").slice(0, 3);
   const domainAttention = domains.filter((domain) => domain.dnsStatus !== "verified" || domain.tlsStatus !== "active").slice(0, 4);
   const pendingApps = apps.filter((app) => app.needsRedeploy || app.needsRestart);
   const running = apps.filter((app) => app.status === "running").length;
@@ -2037,12 +2078,10 @@ function OverviewPanel({ apps, backupJobs, backupRuns, connected, deployments, d
   const verifiedDomains = domains.filter((domain) => domain.dnsStatus === "verified" || domain.status === "ready").length;
   const enabledRoutes = proxyRoutes.filter((route) => route.enabled).length;
   const githubConnected = Boolean(github?.repositories.some((repo) => repo.connectedAppId));
-  const latestBackup = backupRuns[0] || null;
   const urgent = [
     ...failedDeploys.map((deployment) => ({ key: `deploy-${deployment.id}`, title: deployment.appName || `deployment ${deployment.id}`, detail: deployment.errorMessage || deployment.phase, tone: "error" as const, module: "deployments" as ModuleKey })),
     ...domainAttention.map((domain) => ({ key: `domain-${domain.id}`, title: domain.hostname, detail: `${domain.dnsStatus} DNS · ${httpsSummary([domain])}`, tone: tlsTone(domain.tlsStatus), module: "domains" as ModuleKey })),
-    ...pendingApps.slice(0, 5).map((app) => ({ key: `pending-${app.id}`, title: app.name, detail: pendingStateLabel(app), tone: "warn" as const, module: "apps" as ModuleKey })),
-    ...backupFailures.map((run) => ({ key: `backup-${run.id}`, title: run.databaseName || `backup ${run.id}`, detail: run.message || "Backup failed", tone: "error" as const, module: "backups" as ModuleKey }))
+    ...pendingApps.slice(0, 5).map((app) => ({ key: `pending-${app.id}`, title: app.name, detail: pendingStateLabel(app), tone: "warn" as const, module: "apps" as ModuleKey }))
   ].slice(0, 7);
 
   return (
@@ -2050,12 +2089,12 @@ function OverviewPanel({ apps, backupJobs, backupRuns, connected, deployments, d
       <div className="grid gap-4 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 xl:grid-cols-[minmax(0,1fr)_minmax(360px,0.9fr)] xl:items-start">
         <div className="min-w-0">
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Solo operator console</p>
-          <h1 className="text-xl font-bold leading-tight">Local-to-one-VPS operations</h1>
+          <h1 className="text-xl font-bold leading-tight">Runtime host operations</h1>
           <div className="mt-3 grid gap-2 text-xs sm:grid-cols-2">
             <Meta label="Daemon" value={connected ? "connected" : "offline"} />
             <Meta label="Mode" value={server?.mode || "local"} />
             <Meta label="Workspace" value={workspace} mono wide />
-            <Meta label="Data dir" value={server?.dataDir || "local workspace state"} mono wide />
+            <Meta label="Data dir" value={server?.dataDir || "runtime host state"} mono wide />
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
@@ -2071,21 +2110,18 @@ function OverviewPanel({ apps, backupJobs, backupRuns, connected, deployments, d
           <OverviewStatusCard title="Resources" action="Apps" onAction={() => onSelect("apps")} items={[`running ${running}`, `stopped ${stopped}`, `crashed ${crashed}`, `disabled ${disabled}`]} tone={crashed ? "error" : pendingApps.length ? "warn" : "ok"} />
           <OverviewStatusCard title="Latest deploy" action="Deploy" onAction={() => onSelect("deployments")} items={latestDeploy ? [latestDeploy.appName || `app ${latestDeploy.appId}`, deploymentStateLabel(latestDeploy), timeAgo(latestDeploy.updatedAt)] : ["no deployments", "Dockerfile bridge only"]} tone={latestDeploy ? statusTone(latestDeploy.status) : "warn"} />
           <OverviewStatusCard title="Domains & proxy" action="Domains" onAction={() => onSelect("domains")} items={[domainsMeta.rootDomain || "root unset", `${verifiedDomains}/${domains.length} DNS ready`, `${enabledRoutes} generated routes`]} tone={domains.length && verifiedDomains === domains.length ? "ok" : domains.length ? "warn" : "warn"} />
-          <OverviewStatusCard title="GitHub & backups" action="Release" onAction={() => onSelect(githubConnected ? "backups" : "github")} items={[github?.configured ? "GitHub app configured" : "GitHub app missing", githubConnected ? "repo connected" : "no repo connected", latestBackup ? `${latestBackup.status} backup · ${timeAgo(latestBackup.updatedAt)}` : `${backupJobs.length} backup jobs`]} tone={backupFailures.length ? "error" : githubConnected || backupJobs.length ? "ok" : "warn"} />
+          <OverviewStatusCard title="GitHub deploys" action="GitHub" onAction={() => onSelect("github")} items={[github?.configured ? "GitHub app configured" : "GitHub app missing", githubConnected ? "repo connected" : "no repo connected", latestDeploy ? `latest deploy ${deploymentStateLabel(latestDeploy)}` : "no deploy history"]} tone={githubConnected ? "ok" : "warn"} />
         </div>
         <OverviewList title="Urgent next actions" empty="No loaded blockers from current data." action="Review" onAction={() => onSelect(urgent[0]?.module || "apps")}>
           {urgent.map((item) => <TimelineRow key={item.key} title={item.title} detail={item.detail} tone={item.tone} />)}
         </OverviewList>
       </div>
-      <div className="grid gap-3 border-t border-white/5 bg-black/10 px-4 py-4 lg:grid-cols-3">
+      <div className="grid gap-3 border-t border-white/5 bg-black/10 px-4 py-4 lg:grid-cols-2">
         <OverviewList title="Recent deployments" empty="No deployments yet." action="Deployments" onAction={() => onSelect("deployments")}>
           {recentDeploys.slice(0, 3).map((deployment) => <TimelineRow key={deployment.id} title={`#${deployment.id} ${deployment.appName || "app"}`} detail={`${deploymentStateLabel(deployment)} · ${timeAgo(deployment.updatedAt)}`} tone={deployment.status === "failed" ? "error" : deployment.status === "succeeded" ? "ok" : "warn"} />)}
         </OverviewList>
         <OverviewList title="Domain readiness" empty="No domains configured." action="Domains" onAction={() => onSelect("domains")}>
           {domains.slice(0, 4).map((domain) => <TimelineRow key={domain.id} title={domain.hostname} detail={`${domainDnsLabel(domain.dnsStatus)} · ${domainTlsLabel(domain.tlsStatus)}`} tone={domain.dnsStatus !== "verified" ? "warn" : tlsTone(domain.tlsStatus)} />)}
-        </OverviewList>
-        <OverviewList title="Backup state" empty="No backup jobs yet." action="Backups" onAction={() => onSelect("backups")}>
-          {backupJobs.slice(0, 4).map((job) => <TimelineRow key={job.id} title={job.databaseName || `database ${job.databaseId}`} detail={`${job.enabled ? "enabled" : "disabled"} · ${job.lastRunStatus || "never run"}`} tone={job.lastRunStatus === "failed" ? "error" : job.enabled ? "ok" : "warn"} />)}
         </OverviewList>
       </div>
     </section>
@@ -2159,9 +2195,9 @@ function NotificationsPanel({ attempts, channels, connected, error, form, loadin
         </div>
         <div className="min-w-0">
           <ResourceSection title="Channels" count={channels.length} />
-          {loading ? <LoadingRows /> : channels.length === 0 ? <DataEmpty title="No notification channels" detail="Add a channel to receive deploy and backup failure events. Targets remain redacted after save." /> : channels.map((channel) => <NotificationChannelRow key={channel.id} action={notificationActionById[channel.id]} attempts={attempts.filter((attempt) => attempt.channelId === channel.id).slice(0, 3)} channel={channel} connected={connected} onTest={onTest} onToggle={onToggle} />)}
+          {loading ? <LoadingRows /> : channels.length === 0 ? <DataEmpty title="No notification channels" detail="Add a channel to receive deploy failure events. Targets remain redacted after save." /> : channels.map((channel) => <NotificationChannelRow key={channel.id} action={notificationActionById[channel.id]} attempts={attempts.filter((attempt) => attempt.channelId === channel.id).slice(0, 3)} channel={channel} connected={connected} onTest={onTest} onToggle={onToggle} />)}
           <ResourceSection title="Recent delivery attempts" count={attempts.length} />
-          {loading ? <LoadingRows /> : attempts.length === 0 ? <DataEmpty title="No deliveries yet" detail="Test sends and subscribed deploy or backup events will appear here." /> : attempts.slice(0, 10).map((attempt) => <NotificationAttemptRow key={attempt.id} attempt={attempt} />)}
+          {loading ? <LoadingRows /> : attempts.length === 0 ? <DataEmpty title="No deliveries yet" detail="Test sends and subscribed deploy events will appear here." /> : attempts.slice(0, 10).map((attempt) => <NotificationAttemptRow key={attempt.id} attempt={attempt} />)}
         </div>
       </div>
     </section>
@@ -2243,11 +2279,11 @@ function ServerFoundationPanel({ connected, error, server }: { connected: boolea
       <div className="grid gap-3 border-b border-white/5 bg-gradient-to-b from-white/[0.04] to-transparent px-4 py-4 lg:grid-cols-[1.1fr_1.4fr] lg:items-center">
         <div className="min-w-0">
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Server status</p>
-          <h2 className="text-lg font-bold leading-tight sm:text-xl">One-VPS readiness</h2>
+          <h2 className="text-lg font-bold leading-tight sm:text-xl">Runtime host readiness</h2>
           <p className="mt-1 max-w-2xl text-sm text-muted">
             {server?.production
-              ? "Production mode is enabled for a single server. Deployments, domains, GitHub, backups, and notifications depend on the readiness checks below."
-              : "Local mode is active. Run server init and server doctor before using the one-VPS deploy, domain, GitHub, backup, or notification workflows."}
+              ? "Production mode is enabled for this runtime host. Deployments, domains, GitHub, and notifications depend on the readiness checks below."
+              : "This runtime host is in development mode. Run server init and server doctor before exposing deploy, domain, GitHub, or notification workflows."}
           </p>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -2280,9 +2316,9 @@ function ServerFoundationPanel({ connected, error, server }: { connected: boolea
       <div className="border-t border-white/5 bg-black/20 px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Disabled / deferred actions</span>
-          {(server?.disabledProductionActions || ["deployments", "domains", "https", "github", "backups"]).map((item) => (
+          {(server?.disabledProductionActions || ["deployments", "domains", "https", "github"]).map((item) => (
             <span key={item} className="rounded-full bg-surface-raised px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.1em] text-muted/60">
-              {item} disabled until ready
+              {item === "backups" ? "backup/restore deferred in MVP" : `${item} disabled until ready`}
             </span>
           ))}
         </div>

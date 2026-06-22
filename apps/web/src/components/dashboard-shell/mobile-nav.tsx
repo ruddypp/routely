@@ -12,7 +12,7 @@ export function MobileNav({ activeModule, connected, onSelect }: { activeModule:
                 key={module.key}
                 type="button"
                 onClick={() => onSelect(module.key)}
-                className={`flex h-8 max-w-[96px] items-center gap-1.5 rounded px-2 text-[11px] font-bold transition active:translate-y-px ${
+                className={`flex h-8 max-w-[110px] items-center gap-1.5 rounded px-2 text-[11px] font-bold transition active:translate-y-px ${
                   activeModule === module.key ? "bg-surface-raised text-foreground shadow-[var(--inset-border)]" : "text-muted"
                 }`}
               >

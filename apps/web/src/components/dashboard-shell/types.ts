@@ -23,7 +23,7 @@ export type DashboardModule = {
 };
 
 export type DashboardNavGroup = {
-  label: "Operate" | "Release" | "Observe" | "Data" | "Node";
+  label: "Operate" | "Release" | "Observe" | "Data" | "Server";
   modules: DashboardModule[];
 };
 
@@ -31,8 +31,8 @@ export const DASHBOARD_NAV_GROUPS: DashboardNavGroup[] = [
   {
     label: "Operate",
     modules: [
-      { key: "overview", label: "Overview", summary: "Local → one VPS", signal: true },
-      { key: "apps", label: "Apps / Services", summary: "Registry + Start", signal: true }
+      { key: "overview", label: "Dashboard", summary: "Runtime host health", signal: true },
+      { key: "apps", label: "Apps / Services", summary: "Managed apps", signal: true }
     ]
   },
   {
@@ -47,7 +47,7 @@ export const DASHBOARD_NAV_GROUPS: DashboardNavGroup[] = [
   {
     label: "Observe",
     modules: [
-      { key: "logs", label: "Logs", summary: "Local + deploy output" },
+      { key: "logs", label: "Logs", summary: "Session logs" },
       { key: "health", label: "Health", summary: "Checks / failures" },
       { key: "metrics", label: "Metrics", summary: "Host + app samples" }
     ]
@@ -55,32 +55,50 @@ export const DASHBOARD_NAV_GROUPS: DashboardNavGroup[] = [
   {
     label: "Data",
     modules: [
-      { key: "databases", label: "Databases", summary: "Compose data services", signal: true },
-      { key: "backups", label: "Backups", summary: "Jobs and run history", signal: true }
+      { key: "databases", label: "Databases", summary: "Compose data services", signal: true }
     ]
   },
   {
-    label: "Node",
+    label: "Server",
     modules: [
-      { key: "server", label: "Server Status", summary: "One-VPS readiness", signal: true },
+      { key: "server", label: "Server Status", summary: "Runtime host readiness", signal: true },
       { key: "settings", label: "Notifications / Settings", summary: "Alerts + deferred", signal: true }
     ]
   }
 ];
 
+const HIDDEN_MODULES: DashboardModule[] = [
+  { key: "backups", label: "Backups", summary: "Deferred in this MVP" }
+];
+
 export const DASHBOARD_MODULES = DASHBOARD_NAV_GROUPS.flatMap((group) => group.modules);
 
 export function getDashboardModule(key: DashboardModuleKey): DashboardModule {
-  return DASHBOARD_MODULES.find((module) => module.key === key) || DASHBOARD_MODULES[0];
+  return [...DASHBOARD_MODULES, ...HIDDEN_MODULES].find((module) => module.key === key) || DASHBOARD_MODULES[0];
 }
+
+export type ServerRailTone = "ok" | "warn" | "error" | "muted";
+
+export type ServerRailSignal = {
+  label: string;
+  value: string;
+  detail?: string;
+  tone: ServerRailTone;
+};
 
 export type ShellStatus = {
   connected: boolean;
   daemonUrl: string;
+  docker: ServerRailSignal;
+  compose: ServerRailSignal;
+  cpu: ServerRailSignal;
+  memory: ServerRailSignal;
+  disk: ServerRailSignal;
   loading: boolean;
   mode: string;
   refreshing: boolean;
   updated: string;
+  uptime: string;
   workspace: string;
   onRefresh: () => void;
 };

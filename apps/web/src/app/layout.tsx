@@ -3,7 +3,7 @@ import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Routely Dashboard",
-  description: "Local Routely app orchestrator dashboard",
+  description: "Routely runtime host operations dashboard",
 };
 
 export const viewport = {
