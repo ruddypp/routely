@@ -31,7 +31,7 @@ export const DASHBOARD_NAV_GROUPS: DashboardNavGroup[] = [
     label: "Operate",
     modules: [
       { key: "overview", label: "Dashboard", summary: "Runtime host health", signal: true },
-      { key: "apps", label: "Apps / Services", summary: "Managed apps", signal: true }
+      { key: "apps", label: "Apps / Services", summary: "Project services", signal: true }
     ]
   },
   {

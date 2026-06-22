@@ -256,7 +256,7 @@ Acceptance criteria:
 - Failing app remains draft/needs-fix/failed with logs and message.
 - Verification result is available to the dashboard.
 
-## Slice 9 — Add App Wizard UI
+## Slice 9 — Application Setup Wizard UI
 
 Owner: Frontend.
 
@@ -275,18 +275,20 @@ Acceptance criteria:
 - Failed verification cannot be marked ready.
 - Wizard copy is beginner-friendly and actionable.
 
-## Slice 9A — Beginner Apps And Add App Correction
+## Slice 9A — Beginner Project Services Correction
 
 Owner: Frontend.
 
-Status: Immediate corrective slice after FE-02. The previous Apps/Services polish kept the dark surface direction but did not make first deployment obvious for beginners.
+Status: Immediate corrective slice after FE-02. The previous Apps/Services polish kept the dark surface direction but did not follow Dokploy's project model and did not make first deployment obvious for beginners.
 
 Blocked by: Slice 1B and the current Apps page implementation.
 
 What to fix:
 
-- Redesign the Apps/Services empty state into a `Deploy your first app` onboarding surface.
-- Add Dokploy-inspired source/stack cards with icons: GitHub repo, Local folder, Docker Compose, Dockerfile, Node/Next.js, Static site, and Custom.
+- Redesign the Apps/Services empty state into a `Create your first service` onboarding surface.
+- Redesign Apps/Services around the Dokploy-style mental model: `Default project` -> runtime-host environment -> services.
+- Add first-level `Create service` cards with icons: Application, Compose, Database, and deferred Template / import.
+- Add Application source/stack cards with icons: GitHub repo, Local folder, Docker Compose, Dockerfile, Node/Next.js, Static site, and Custom.
 - Keep API/auth/registry errors as compact inline warnings so the user can still understand the add-app path.
 - Remove confusing empty inspector states such as a large `No app selected` panel when there are zero apps.
 - Show source path/repository, branch, detected stack/recipe, port, and URL/domain clearly on app cards and wizard context.
@@ -295,7 +297,7 @@ What to fix:
 
 Acceptance criteria:
 
-- A first-time user can tell exactly where to click to add an app within five seconds of opening `Apps`.
+- A first-time user can tell exactly where to click to create an Application, Compose stack, or Database service within five seconds of opening `Apps`.
 - Local folder flow visibly asks for an absolute path on the runtime host and explains that the host is the machine running `routely`.
 - GitHub flow visibly asks for repository, branch, and optional project subdirectory.
 - Stack/source cards include recognizable icons/images and short, plain explanations.
@@ -340,7 +342,7 @@ What to build:
 Acceptance criteria:
 
 - Dashboard shows host and app state at a glance.
-- Empty state guides user to Add App.
+- Empty state guides user to Create service.
 - Metrics errors degrade gracefully.
 - No fake traffic success is shown without backend data.
 

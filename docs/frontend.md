@@ -129,7 +129,7 @@ Primary pages:
 
 1. `Dashboard`
 2. `Apps`
-3. `Add App Wizard`
+3. `Application Setup Wizard`
 4. `App Detail`
 5. `Databases`
 6. `Activity`
@@ -138,8 +138,8 @@ Primary pages:
 
 Global actions:
 
-- `Add app`
-- `Start all`
+- `Create service`
+- `Start ready`
 - `Stop all`
 - `Run doctor`
 
@@ -159,7 +159,7 @@ Must show:
 - Traffic sparkline or traffic empty state per app/domain.
 - Recent incidents and activity timeline.
 - Recently active logs.
-- Quick actions: Add app, Start all, Stop all.
+- Quick actions: Create service, Start ready, Stop all.
 
 Layout guidance:
 
@@ -181,13 +181,28 @@ Empty state:
 
 Purpose: list every managed app and make common actions obvious. For a new user, this page is also the first deployment onboarding surface, not a technical registry/debug screen.
 
+Dokploy research baseline:
+
+- Use a `Project -> Environment -> Service` mental model.
+- Routely MVP may expose a single `Default project` and one runtime-host environment, but it should still present apps, compose stacks, and databases as services inside that project.
+- The primary CTA is `Create service`.
+- First-level service choices are `Application`, `Compose`, `Database`, and deferred `Template / import`.
+- `Application` is where GitHub repo, local folder, Dockerfile, Node/Next.js, static site, and custom source/stack choices live.
+
 Beginner-first rules:
 
-- If there are no apps, show a `Deploy your first app` onboarding panel with clear source cards. Do not show a large `No app selected` inspector because there is nothing to inspect yet.
+- If there are no services, show a `Create your first service` project onboarding panel with service-type cards. Do not show a large `No app selected` inspector because there is nothing to inspect yet.
 - If `/api/apps` or admin-token setup is unavailable, show a compact, dismissible-looking inline warning above the onboarding content. The warning must not dominate the page or replace the path to add an app.
-- Replace infrastructure copy like `Start all scope` with plain language: `Start all ready apps on this server` and `Apps that still need setup will stay off`.
+- Replace infrastructure copy like `Start all scope` with plain language: `Start ready services on this server` and `Services that still need setup will stay off`.
 - Always answer these beginner questions in visible copy: `Where is my app source?`, `What stack did Routely detect?`, `What URL will open?`, and `What do I do next?`.
 - Preserve the Spotify-inspired dark surface system: no light admin cards, no giant red/yellow error slabs, and no generic SaaS template panels.
+
+Create-service cards:
+
+- `Application` — app code from GitHub, local folder, Dockerfile, Node/Next.js, static output, or custom commands.
+- `Compose` — existing `compose.yml` or `docker-compose.yml` with a service Routely can expose/control.
+- `Database` — Postgres, MySQL, MariaDB, Redis, MongoDB, or future supported data services.
+- `Template / import` — visible as deferred when not production-ready; do not fake it as enabled.
 
 Empty-state source cards:
 
@@ -209,11 +224,11 @@ Recommended layout:
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│ Apps                                  Add app / Start ready   │
+│ Apps                                  Create service / Start ready │
 ├──────────────────────────────────────────────────────────────┤
 │ compact warning only when API/auth unavailable               │
 ├──────────────────────────────────────────────────────────────┤
-│ Deploy your first app                                        │
+│ Create your first service                                    │
 │ [GitHub repo] [Local folder] [Docker Compose] [Dockerfile]    │
 │ [Node/Next]   [Static site]  [Custom]                         │
 ├──────────────────────────────────────────────────────────────┤
@@ -242,13 +257,13 @@ Rules:
 - App detail/preview panels should only appear when an app exists or a source card is actively selected.
 - Never hide source paths, repository names, branches, detected recipe, exposed ports, or domain/local URL behind hover-only UI.
 
-### Add App Wizard
+### Application Setup Wizard
 
 Purpose: Dokploy-inspired, beginner-friendly setup that still verifies real execution. The user should feel they are choosing `what they already have` rather than configuring infrastructure.
 
 Entry behavior:
 
-- `Add app` opens a focused source-and-stack picker before any advanced form fields.
+- `Create service -> Application` opens a focused source-and-stack picker before any advanced form fields.
 - The first screen uses large dark source cards with stack icons and one-sentence explanations.
 - A selected source card reveals only the fields needed for that path.
 - Advanced recipe fields stay collapsed until detection has produced a candidate or the user chooses `Custom`.

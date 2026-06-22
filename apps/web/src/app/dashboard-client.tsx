@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
+import { AppWindow, Boxes, Code2, Database, FileCode2, FolderGit2, FolderOpen, Globe2, Layers3, PackagePlus, SlidersHorizontal, Workflow } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
 import { Alert as UiAlert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -434,14 +436,14 @@ const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:
 
 type SourceStackId = "github" | "local" | "compose" | "dockerfile" | "node-next" | "static" | "custom";
 
-const SOURCE_STACK_CARDS: Array<{ description: string; detail: string; icon: string; id: SourceStackId; title: string }> = [
-  { id: "github", icon: "GH", title: "GitHub repo", description: "Deploy from a repository, branch, and optional project subdirectory.", detail: "owner/repo · branch · subdirectory" },
-  { id: "local", icon: "/", title: "Local folder", description: "Use an absolute path on the runtime host, the machine running routely.", detail: "/home/me/projects/my-app" },
-  { id: "compose", icon: "YML", title: "Docker Compose", description: "Point Routely at an existing compose.yml and expose one service.", detail: "compose file · service" },
-  { id: "dockerfile", icon: "DF", title: "Dockerfile", description: "Build one service from a Dockerfile and publish a container port.", detail: "context path · Dockerfile · port" },
-  { id: "node-next", icon: "JS", title: "Node / Next.js", description: "Start with common install, build, start commands, and an app port.", detail: "package scripts · port" },
-  { id: "static", icon: "WWW", title: "Static site", description: "Serve built assets or a public output folder from this host.", detail: "output directory · domain" },
-  { id: "custom", icon: "•••", title: "Custom", description: "Manual recipe for stacks Routely cannot detect yet.", detail: "commands · ports · health" }
+const SOURCE_STACK_CARDS: Array<{ description: string; detail: string; icon: LucideIcon; id: SourceStackId; title: string }> = [
+  { id: "github", icon: FolderGit2, title: "GitHub repo", description: "Deploy from a repository, branch, and optional project subdirectory.", detail: "owner/repo · branch · subdirectory" },
+  { id: "local", icon: FolderOpen, title: "Local folder", description: "Use an absolute path on the runtime host, the machine running routely.", detail: "/home/me/projects/my-app" },
+  { id: "compose", icon: Boxes, title: "Docker Compose", description: "Point Routely at an existing compose.yml and expose one service.", detail: "compose file · service" },
+  { id: "dockerfile", icon: FileCode2, title: "Dockerfile", description: "Build one service from a Dockerfile and publish a container port.", detail: "context path · Dockerfile · port" },
+  { id: "node-next", icon: Code2, title: "Node / Next.js", description: "Start with common install, build, start commands, and an app port.", detail: "package scripts · port" },
+  { id: "static", icon: Globe2, title: "Static site", description: "Serve built assets or a public output folder from this host.", detail: "output directory · domain" },
+  { id: "custom", icon: SlidersHorizontal, title: "Custom", description: "Manual recipe for stacks Routely cannot detect yet.", detail: "commands · ports · health" }
 ];
 
 function StatusBadge({ status }: { status: string }) {
@@ -1584,7 +1586,7 @@ export default function DashboardClient() {
               />
             ) : null}
 
-            {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} deployingByAppId={deployingByAppId} deploymentsByAppId={latestDeploymentByAppId} disabledCount={disabledCount} domainsByAppId={domainsByAppId} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} server={serverStatus} serviceResources={serviceResources} startAllBusy={startAllBusy} startAllPlan={bulkStartPlan} startAllReason={startAllReason} startAllResult={startAllResult} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onDeploy={(app) => void deployApp(app)} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onSelect={setSelectedAppId} onStartAll={() => void runStartAll()} /> : null}
+            {activeModule === "apps" ? <AppsModule actionByAppId={actionByAppId} actionError={actionError} appResources={appResources} apps={apps} appsError={appsError} connected={connected} deployingByAppId={deployingByAppId} deploymentsByAppId={latestDeploymentByAppId} disabledCount={disabledCount} domainsByAppId={domainsByAppId} form={form} formError={formError} formMode={formMode} formSaving={formSaving} health={health} loading={loading} runningCount={runningCount} selectedAppId={selectedAppId} server={serverStatus} serviceResources={serviceResources} startAllBusy={startAllBusy} startAllPlan={bulkStartPlan} startAllReason={startAllReason} startAllResult={startAllResult} stoppedCount={stoppedCount} onAction={(app, action) => void runAction(app, action)} onCreate={openCreateForm} onDeploy={(app) => void deployApp(app)} onEdit={openEditForm} onFormCancel={() => setFormMode(null)} onFormChange={setForm} onFormSubmit={submitForm} onLogs={(app) => void loadLogs(app)} onOpenDatabases={() => setActiveModule("databases")} onSelect={setSelectedAppId} onStartAll={() => void runStartAll()} /> : null}
 
             {showAppOperations ? <AppOperationsModule activeTab={appOperationsTab} apps={apps} appResources={appResources} app={selectedApp} selectedAppId={selectedAppId} connected={connected} deployments={selectedDeployments} domains={selectedApp ? domainsByAppId.get(selectedApp.id) || [] : []} github={github} deploymentLogs={deploymentLogs} deploymentLogsError={deploymentLogsError} deploymentLogsLoading={deploymentLogsLoading} deploying={selectedApp ? Boolean(deployingByAppId[selectedApp.id]) : false} logs={logs} logsLoading={logsLoading} logsError={logsError} currentAction={selectedApp ? actionByAppId[selectedApp.id] : null} module={activeModule} server={serverStatus} onAction={selectedApp ? (action) => void runAction(selectedApp, action) : undefined} onDeploy={selectedApp ? () => void deployApp(selectedApp) : undefined} onDeploymentLogs={(deployment) => void loadDeploymentLogs(deployment)} onEdit={selectedApp ? () => openEditForm(selectedApp) : undefined} onLogs={(app) => void loadLogs(app)} onReload={selectedApp ? () => void loadLogs(selectedApp) : undefined} onSelect={setSelectedAppId} /> : null}
 
@@ -1593,31 +1595,56 @@ export default function DashboardClient() {
   );
 }
 
-function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, deployingByAppId, deploymentsByAppId, disabledCount, domainsByAppId, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onDeploy, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onSelect, onStartAll, runningCount, selectedAppId, server, serviceResources, startAllBusy, startAllPlan: bulkPlan, startAllReason, startAllResult, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; deployingByAppId: Record<number, boolean>; deploymentsByAppId: Map<number, DaemonDeployment>; disabledCount: number; domainsByAppId: Map<number, DaemonDomain[]>; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: (sourceId?: SourceStackId) => void; onDeploy: (app: DaemonApp) => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onSelect: (id: number) => void; onStartAll: () => void; runningCount: number; selectedAppId: number | null; server: DaemonServerStatus | null; serviceResources: DaemonApp[]; startAllBusy: boolean; startAllPlan: BulkStartPlan; startAllReason: string | null; startAllResult: DaemonAppStartAllResponse | null; stoppedCount: number }) {
+function AppsModule({ actionByAppId, actionError, appResources, apps, appsError, connected, deployingByAppId, deploymentsByAppId, disabledCount, domainsByAppId, form, formError, formMode, formSaving, health, loading, onAction, onCreate, onDeploy, onEdit, onFormCancel, onFormChange, onFormSubmit, onLogs, onOpenDatabases, onSelect, onStartAll, runningCount, selectedAppId, server, serviceResources, startAllBusy, startAllPlan: bulkPlan, startAllReason, startAllResult, stoppedCount }: { actionByAppId: Record<number, AppAction | null>; actionError: string | null; appResources: DaemonApp[]; apps: DaemonApp[]; appsError: string | null; connected: boolean; deployingByAppId: Record<number, boolean>; deploymentsByAppId: Map<number, DaemonDeployment>; disabledCount: number; domainsByAppId: Map<number, DaemonDomain[]>; form: AppFormState; formError: string | null; formMode: FormMode | null; formSaving: boolean; health: HealthResponse | null; loading: boolean; onAction: (app: DaemonApp, action: AppAction) => void; onCreate: (sourceId?: SourceStackId) => void; onDeploy: (app: DaemonApp) => void; onEdit: (app: DaemonApp) => void; onFormCancel: () => void; onFormChange: (form: AppFormState) => void; onFormSubmit: (event: FormEvent<HTMLFormElement>) => void; onLogs: (app: DaemonApp) => void; onOpenDatabases: () => void; onSelect: (id: number) => void; onStartAll: () => void; runningCount: number; selectedAppId: number | null; server: DaemonServerStatus | null; serviceResources: DaemonApp[]; startAllBusy: boolean; startAllPlan: BulkStartPlan; startAllReason: string | null; startAllResult: DaemonAppStartAllResponse | null; stoppedCount: number }) {
   const attentionCount = apps.filter((app) => Boolean(appAttentionMessage(app))).length;
+  const environmentName = server?.production ? "Production" : "Local runtime";
+  const projectDescription = apps.length === 0
+    ? "Create a service first, then choose GitHub, local folder, Compose, Dockerfile, Node/Next, or static source."
+    : "Services in this project run on the machine where routely is running.";
 
   return (
-    <section className={`min-w-0 overflow-hidden rounded-[22px] border border-[#2D352F]/70 bg-[#101412] ${PANEL_SHADOW}`}>
-      <ModuleHeader module="apps" stats={<><MetricPill label="running" value={`${runningCount}/${apps.length}`} accent /><MetricPill label="attention" value={String(attentionCount)} /><MetricPill label="services" value={String(serviceResources.length)} /><MetricPill label="stopped" value={String(stoppedCount)} /><MetricPill label="disabled" value={String(disabledCount)} /></>} actions={<><Button onClick={onStartAll} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || "Start stopped enabled command and Compose resources that passed setup gates"} variant="primary">Start All</Button><PillButton onClick={onCreate} strong disabled={!connected}>Add app</PillButton></>} />
+    <section className={`min-w-0 overflow-hidden rounded-[26px] border border-[#2D352F]/70 bg-[#101412] ${PANEL_SHADOW}`}>
+      <ProjectWorkspaceHeader
+        appCount={appResources.length}
+        attentionCount={attentionCount}
+        connected={connected}
+        disabledCount={disabledCount}
+        environmentName={environmentName}
+        onCreate={() => onCreate()}
+        onStartReady={onStartAll}
+        projectDescription={projectDescription}
+        runningCount={runningCount}
+        serviceCount={serviceResources.length}
+        startAllBusy={startAllBusy}
+        startAllReason={startAllReason}
+        stoppedCount={stoppedCount}
+      />
 
       {!connected && health ? <CompactWarning title="Daemon offline" message={health.error || "Start Routely from the CLI to bring the server session online."} /> : null}
       {actionError ? <CompactWarning title="Action failed" message={actionError} /> : null}
       {appsError ? <CompactWarning title="Registry unavailable" message={appsError} /> : null}
       {startAllResult ? <StartAllReport result={startAllResult} /> : null}
 
-      <div className="border-b border-white/5 bg-black/20 px-4 py-3">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Start all ready apps on this server</p>
-        <p className="mt-1 text-sm text-muted">
-          Routely can start {bulkPlan.stoppedStartableCount} stopped app{bulkPlan.stoppedStartableCount === 1 ? "" : "s"} that are enabled and already passed setup checks. Apps that still need setup, are disabled, or failed readiness stay off.
-        </p>
-      </div>
+      {apps.length > 0 ? <ProjectServiceCreatePanel connected={connected} onCreate={onCreate} onOpenDatabases={onOpenDatabases} /> : null}
+
+      {apps.length > 0 ? <div className="border-b border-white/5 bg-black/20 px-4 py-3">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Start ready services</p>
+            <p className="mt-1 text-sm text-muted">
+              {bulkPlan.stoppedStartableCount} stopped service{bulkPlan.stoppedStartableCount === 1 ? "" : "s"} can start now. Services that still need setup, are disabled, or failed readiness stay off.
+            </p>
+          </div>
+          <PillButton onClick={onStartAll} disabled={Boolean(startAllReason)} strong>{startAllBusy ? "Starting" : "Start ready"}</PillButton>
+        </div>
+      </div> : null}
 
       {formMode ? <AppForm mode={formMode} form={form} error={formError} saving={formSaving} onChange={onFormChange} onCancel={onFormCancel} onSubmit={onFormSubmit} /> : null}
 
       <div className="bg-black/10">
-        {loading ? <LoadingRows /> : apps.length === 0 ? <FirstAppEmptyState connected={connected} onAdd={onCreate} /> : (
+        {loading ? <LoadingRows /> : apps.length === 0 ? <ProjectEmptyState connected={connected} onAdd={onCreate} onOpenDatabases={onOpenDatabases} /> : (
           <>
-            <ResourceSection title="Apps" count={appResources.length} />
+            <ResourceSection title="Application services" count={appResources.length} />
             <div className="grid gap-3 p-3 sm:p-4">
               {appResources.map((app) => <AppRow key={app.id} app={app} active={selectedAppId === app.id} connected={connected} currentAction={actionByAppId[app.id]} deploying={Boolean(deployingByAppId[app.id])} domains={domainsByAppId.get(app.id) || []} latestDeployment={deploymentsByAppId.get(app.id) || null} server={server} onSelect={() => onSelect(app.id)} onLogs={() => onLogs(app)} onDeploy={() => onDeploy(app)} onEdit={() => onEdit(app)} onAction={(action) => onAction(app, action)} />)}
             </div>
@@ -1632,6 +1659,120 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
         )}
       </div>
     </section>
+  );
+}
+
+function ProjectWorkspaceHeader({ appCount, attentionCount, connected, disabledCount, environmentName, onCreate, onStartReady, projectDescription, runningCount, serviceCount, startAllBusy, startAllReason, stoppedCount }: { appCount: number; attentionCount: number; connected: boolean; disabledCount: number; environmentName: string; onCreate: () => void; onStartReady: () => void; projectDescription: string; runningCount: number; serviceCount: number; startAllBusy: boolean; startAllReason: string | null; stoppedCount: number }) {
+  return (
+    <div className="border-b border-white/5 bg-[radial-gradient(circle_at_top_left,rgba(30,215,96,0.14),transparent_32%),linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0)_42%)] px-4 py-4 sm:px-5 sm:py-5">
+      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="inline-flex items-center gap-2 rounded-full border border-accent/20 bg-accent/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.14em] text-accent">
+              <Layers3 className="h-3.5 w-3.5" aria-hidden="true" /> Project
+            </span>
+            <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{environmentName} environment</span>
+            <span className={`rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${connected ? "border-accent/20 bg-accent/10 text-accent" : "border-warning/20 bg-warning/10 text-warning"}`}>{connected ? "server online" : "server offline"}</span>
+          </div>
+          <h1 className="mt-3 text-2xl font-black leading-tight text-foreground sm:text-3xl">Default project</h1>
+          <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">{projectDescription}</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button onClick={onStartReady} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || "Start ready services in this project"} variant="secondary">Start ready</Button>
+          <Button onClick={onCreate} disabled={!connected} variant="primary"><PackagePlus className="h-4 w-4" aria-hidden="true" /> Create service</Button>
+        </div>
+      </div>
+      <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+        <ProjectStat label="applications" value={String(appCount)} accent />
+        <ProjectStat label="resources" value={String(appCount + serviceCount)} />
+        <ProjectStat label="running" value={`${runningCount}/${appCount + serviceCount || 0}`} />
+        <ProjectStat label="attention" value={String(attentionCount)} />
+        <ProjectStat label="stopped / disabled" value={`${stoppedCount}/${disabledCount}`} />
+      </div>
+    </div>
+  );
+}
+
+function ProjectStat({ accent, label, value }: { accent?: boolean; label: string; value: string }) {
+  return (
+    <div className="rounded-2xl border border-white/8 bg-black/24 px-3 py-2 shadow-[0_0_0_1px_rgba(255,255,255,0.04)_inset]">
+      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">{label}</p>
+      <p className={`mt-1 text-lg font-black ${accent ? "text-accent" : "text-foreground"}`}>{value}</p>
+    </div>
+  );
+}
+
+function ProjectServiceCreatePanel({ connected, onCreate, onOpenDatabases }: { connected: boolean; onCreate: (sourceId?: SourceStackId) => void; onOpenDatabases: () => void }) {
+  return (
+    <div className="border-b border-white/5 bg-black/10 px-4 py-4 sm:px-5">
+      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Create service</p>
+          <h2 className="mt-1 text-lg font-black">Add a resource to this project</h2>
+          <p className="mt-1 max-w-3xl text-sm text-muted">Dokploy-style flow: create the service type first, then configure source, environment, domains, logs, and lifecycle.</p>
+        </div>
+      </div>
+      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <ServiceKindCard icon={AppWindow} title="Application" detail="GitHub, local folder, Dockerfile, Node/Next, or static app" disabled={!connected} onClick={() => onCreate("github")} />
+        <ServiceKindCard icon={Boxes} title="Compose" detail="Use an existing compose.yml and expose one service" disabled={!connected} onClick={() => onCreate("compose")} />
+        <ServiceKindCard icon={Database} title="Database" detail="Create Postgres, MySQL, MariaDB, Redis, or MongoDB service" onClick={onOpenDatabases} />
+        <ServiceKindCard icon={Workflow} title="Template / import" detail="Coming later: starter templates and imported compose stacks" disabled />
+      </div>
+    </div>
+  );
+}
+
+function ServiceKindCard({ detail, disabled, icon: Icon, onClick, title }: { detail: string; disabled?: boolean; icon: LucideIcon; onClick?: () => void; title: string }) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={`group min-h-[132px] rounded-[20px] border p-4 text-left transition ${FOCUS_RING} ${disabled ? "cursor-not-allowed border-white/5 bg-white/[0.025] opacity-55" : "border-[#2D352F]/80 bg-[#171C1A] hover:border-accent/40 hover:bg-[#1D261F]"}`}
+    >
+      <span className="flex items-start gap-3">
+        <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl border ${disabled ? "border-white/10 bg-black/20 text-muted" : "border-accent/20 bg-accent/10 text-accent group-hover:bg-accent group-hover:text-black"}`}>
+          <Icon className="h-6 w-6" aria-hidden="true" />
+        </span>
+        <span className="min-w-0">
+          <span className="block text-sm font-black text-foreground">{title}</span>
+          <span className="mt-1 block text-xs leading-5 text-muted">{detail}</span>
+        </span>
+      </span>
+    </button>
+  );
+}
+
+function ProjectEmptyState({ connected, onAdd, onOpenDatabases }: { connected: boolean; onAdd: (sourceId?: SourceStackId) => void; onOpenDatabases: () => void }) {
+  return (
+    <div className="p-4 sm:p-5">
+      <div className="overflow-hidden rounded-[24px] border border-[#2D352F]/80 bg-[#111612] shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
+        <div className="grid gap-4 border-b border-white/5 bg-[radial-gradient(circle_at_top_left,rgba(30,215,96,0.16),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.055),transparent_42%)] px-4 py-5 lg:grid-cols-[minmax(0,0.72fr)_minmax(420px,1.28fr)] lg:items-center">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-accent">No services yet</p>
+            <h2 className="mt-2 text-2xl font-black leading-tight sm:text-3xl">Create your first service</h2>
+            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">Like Dokploy, pick the resource type first. Most web apps start with Application; existing stacks can start with Compose.</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-2">
+            <ServiceKindCard icon={AppWindow} title="Application" detail="GitHub, local folder, Dockerfile, Node/Next, or static app" disabled={!connected} onClick={() => onAdd("github")} />
+            <ServiceKindCard icon={Boxes} title="Compose" detail="Use an existing compose.yml and expose one service" disabled={!connected} onClick={() => onAdd("compose")} />
+            <ServiceKindCard icon={Database} title="Database" detail="Create Postgres, MySQL, MariaDB, Redis, or MongoDB" onClick={onOpenDatabases} />
+            <ServiceKindCard icon={Workflow} title="Template / import" detail="Coming later: starter templates and imported compose stacks" disabled />
+          </div>
+        </div>
+        <div className="px-4 py-4">
+          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-bold">Application source shortcuts</p>
+              <p className="mt-1 text-xs text-muted">Choose exactly what you already have. The wizard keeps path/repo visible until setup passes.</p>
+            </div>
+            <PillButton onClick={() => onAdd()} strong disabled={!connected}>Open full wizard</PillButton>
+          </div>
+          <SourceStackCardGrid disabled={!connected} onSelect={(sourceId) => onAdd(sourceId)} selectedId={null} />
+          {!connected ? <p className="mt-3 rounded-full bg-warning/10 px-3 py-2 text-xs text-warning">Start the Routely server session to save a service. The project flow stays visible so setup still makes sense.</p> : null}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -3090,6 +3231,7 @@ function SourceStackCardGrid({ disabled, onSelect, selectedId }: { disabled?: bo
     <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
       {SOURCE_STACK_CARDS.map((card) => {
         const selected = selectedId === card.id;
+        const Icon = card.icon;
         return (
           <button
             key={card.id}
@@ -3100,8 +3242,8 @@ function SourceStackCardGrid({ disabled, onSelect, selectedId }: { disabled?: bo
             className={`group min-h-[132px] rounded-[18px] border p-3 text-left transition ${FOCUS_RING} ${selected ? "border-accent/70 bg-accent-soft shadow-[0_0_0_1px_rgba(39,216,111,0.18)_inset,0_16px_34px_rgba(0,0,0,0.28)]" : "border-[#2D352F]/80 bg-[#171C1A] hover:border-[#415246] hover:bg-[#1C241F]"}`}
           >
             <span className="flex items-start gap-3">
-              <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border font-mono text-[11px] font-black ${selected ? "border-accent/30 bg-accent text-black" : "border-white/10 bg-black/30 text-accent"}`} role="img" aria-label={`${card.title} icon`}>
-                {card.icon}
+              <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border ${selected ? "border-accent/30 bg-accent text-black" : "border-white/10 bg-black/30 text-accent"}`} role="img" aria-label={`${card.title} icon`}>
+                <Icon className="h-5 w-5" aria-hidden="true" />
               </span>
               <span className="min-w-0">
                 <span className="block text-sm font-black text-foreground">{card.title}</span>
@@ -3118,6 +3260,7 @@ function SourceStackCardGrid({ disabled, onSelect, selectedId }: { disabled?: bo
 
 function SelectedSourceFields({ form, healthStatusInvalid, nameMissing, onPatch, portInvalid, saving, showErrors, sourceId, sourceMissing }: { form: AppFormState; healthStatusInvalid: boolean; nameMissing: boolean; onPatch: (patch: Partial<AppFormState>) => void; portInvalid: boolean; saving: boolean; showErrors: boolean; sourceId: SourceStackId; sourceMissing: boolean }) {
   const selectedCard = SOURCE_STACK_CARDS.find((card) => card.id === sourceId) || SOURCE_STACK_CARDS[0];
+  const SelectedIcon = selectedCard.icon;
   const nameField = <Field label="App name" value={form.name} onChange={(value) => onPatch({ name: value })} required error={nameMissing && showErrors ? "Required" : undefined} disabled={saving} placeholder="my-app" />;
   const portField = <Field label="App port" value={form.port} onChange={(value) => onPatch({ port: value })} type="number" error={portInvalid ? "Positive integer" : undefined} disabled={saving} helper="Only enter a port the app actually listens on." placeholder="3000" />;
   const healthFields = <><Field label="Health path" value={form.healthcheckPath} onChange={(value) => onPatch({ healthcheckPath: value })} disabled={saving} placeholder="/" /><Field label="Expected status" value={form.healthcheckStatus} onChange={(value) => onPatch({ healthcheckStatus: value })} type="number" error={healthStatusInvalid ? "Positive integer" : undefined} disabled={saving} placeholder="200" /></>;
@@ -3126,7 +3269,7 @@ function SelectedSourceFields({ form, healthStatusInvalid, nameMissing, onPatch,
     <section className="mt-4 rounded-[20px] border border-accent/15 bg-[#121814] p-3 shadow-[0_18px_42px_rgba(0,0,0,0.2)] sm:p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-accent font-mono text-[10px] font-black text-black" role="img" aria-label={`${selectedCard.title} icon`}>{selectedCard.icon}</span>
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-accent text-black" role="img" aria-label={`${selectedCard.title} icon`}><SelectedIcon className="h-5 w-5" aria-hidden="true" /></span>
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-accent">Start here</p>
             <h3 className="truncate text-base font-black">{selectedCard.title}</h3>
@@ -3378,48 +3521,4 @@ function CompactWarning({ message, title }: { message: string; title: string }) 
 
 function LoadingRows() {
   return <SkeletonRows />;
-}
-
-function FirstAppEmptyState({ connected, onAdd }: { connected: boolean; onAdd: (sourceId?: SourceStackId) => void }) {
-  return (
-    <div className="p-3 sm:p-4">
-      <div className="overflow-hidden rounded-[24px] border border-[#2D352F]/80 bg-[#111612] shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
-        <div className="grid gap-4 border-b border-white/5 bg-[radial-gradient(circle_at_top_left,rgba(39,216,111,0.16),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.055),transparent_42%)] px-4 py-5 lg:grid-cols-[minmax(0,0.95fr)_minmax(320px,1.05fr)] lg:items-center">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-accent">First deployment</p>
-            <h2 className="mt-2 text-2xl font-black leading-tight sm:text-3xl">Deploy your first app</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">
-              Pick where your app lives, confirm the stack Routely should run, then verify setup before it can start on this runtime host.
-            </p>
-            <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.12em] text-muted">
-              <span className="rounded-full bg-black/30 px-3 py-1 shadow-[0_0_0_1px_rgba(255,255,255,0.06)_inset]">1 · Source</span>
-              <span className="rounded-full bg-black/30 px-3 py-1 shadow-[0_0_0_1px_rgba(255,255,255,0.06)_inset]">2 · Stack</span>
-              <span className="rounded-full bg-black/30 px-3 py-1 shadow-[0_0_0_1px_rgba(255,255,255,0.06)_inset]">3 · Verify</span>
-            </div>
-          </div>
-          <div className="rounded-[20px] border border-white/10 bg-black/25 p-3">
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">What Routely will ask</p>
-            <dl className="mt-3 grid gap-3 text-xs sm:grid-cols-2">
-              <Meta label="Where is my source?" value="GitHub repo or absolute host path" />
-              <Meta label="What stack?" value="Card recipe, then real setup verification" />
-              <Meta label="What URL opens?" value="Domain when verified, local URL when exposed" />
-              <Meta label="What next?" value="Fix setup, then Start or Enable" />
-            </dl>
-          </div>
-        </div>
-
-        <div className="px-4 py-4">
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-bold">Choose the source or stack you already have</p>
-              <p className="mt-1 text-xs text-muted">Cards open Add App with the right beginner fields first. No readiness is assumed until the backend verifies it.</p>
-            </div>
-            <PillButton onClick={() => onAdd()} strong disabled={!connected}>Add app</PillButton>
-          </div>
-          <SourceStackCardGrid disabled={!connected} onSelect={(sourceId) => onAdd(sourceId)} selectedId={null} />
-          {!connected ? <p className="mt-3 rounded-full bg-warning/10 px-3 py-2 text-xs text-warning">Start the Routely server session to save an app. The deployment path stays visible so setup still makes sense.</p> : null}
-        </div>
-      </div>
-    </div>
-  );
 }
