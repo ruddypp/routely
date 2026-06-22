@@ -2378,18 +2378,18 @@ function AppRow({
   const restartReason = appActionBlockReason(app, "restart", connected, busy);
 
   return (
-    <article className={`grid gap-3 border-b border-white/5 px-3 py-3 transition hover:bg-white/[0.035] sm:px-4 xl:grid-cols-[minmax(240px,1.05fr)_minmax(180px,0.78fr)_minmax(170px,0.8fr)_auto] xl:items-center ${active ? "bg-white/[0.055] shadow-[3px_0_0_0_var(--accent)_inset]" : ""}`}>
+    <article className={`grid min-w-0 gap-3 border-b border-white/5 px-3 py-3 transition hover:bg-white/[0.035] sm:px-4 lg:grid-cols-[minmax(220px,0.78fr)_minmax(0,1.22fr)] xl:grid-cols-[minmax(240px,0.72fr)_minmax(0,1.28fr)] ${active ? "bg-white/[0.055] shadow-[3px_0_0_0_var(--accent)_inset]" : ""}`}>
       <button type="button" onClick={onSelect} className={`min-w-0 rounded-md text-left ${FOCUS_RING}`}>
         <div className="flex items-center gap-3">
           <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-full text-xs font-black ${running ? "bg-accent text-black" : "bg-surface-raised text-muted"}`}>
             {appInitials(app.name)}
           </span>
-          <span className="min-w-0">
-            <span className="flex min-w-0 items-center gap-2">
-              <span className="block truncate text-sm font-bold">{app.name}</span>
-              {disabledReason ? <span className="shrink-0 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{disabledReason}</span> : null}
-              {bulkStartReason ? <span title={bulkStartReason} className="shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">{bulkStartStateLabel(app)}</span> : null}
-              {app.needsRestart || app.needsRedeploy ? <span className="shrink-0 rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">pending</span> : null}
+          <span className="min-w-0 flex-1">
+            <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <span className="min-w-[8rem] max-w-full flex-1 truncate text-sm font-bold">{app.name}</span>
+              {disabledReason ? <span className="max-w-full rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-muted">{disabledReason}</span> : null}
+              {bulkStartReason ? <span title={bulkStartReason} className="max-w-full truncate rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">{bulkStartStateLabel(app)}</span> : null}
+              {app.needsRestart || app.needsRedeploy ? <span className="max-w-full rounded-full bg-warning/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.1em] text-warning">pending</span> : null}
             </span>
             <span className="block truncate font-mono text-[11px] text-muted">{resourceLabel(app)} · {app.driver}/{app.preset}</span>
           </span>
@@ -2401,7 +2401,7 @@ function AppRow({
         <Meta label="Domain" value={domainSummary(domains)} mono />
         <Meta label="Source" value={compactSource(app)} mono />
       </div>
-      <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 xl:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2">
         <div className="min-w-0">
           <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-muted">Runtime</p>
           <div className="mt-1"><StatusBadge status={app.status} /></div>
@@ -2411,7 +2411,7 @@ function AppRow({
         <Meta label="Deploy" value={deployReason || (latestDeployment ? `${latestDeployment.status} #${latestDeployment.id}` : "ready")} />
         <Meta label="Updated" value={timeAgo(app.updatedAt)} />
       </div>
-      <div className="flex min-w-0 flex-wrap items-center gap-1.5 xl:justify-end xl:flex-nowrap">
+      <div className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5 sm:gap-2 lg:col-span-2 lg:justify-end">
         <RoundAction label="Start" onClick={() => onAction("start")} disabled={Boolean(startReason)} reason={startReason} active={currentAction === "start"} />
         <RoundAction label="Stop" onClick={() => onAction("stop")} disabled={Boolean(stopReason)} reason={stopReason} active={currentAction === "stop"} />
         <RoundAction label="Restart" onClick={() => onAction("restart")} disabled={Boolean(restartReason)} reason={restartReason} active={currentAction === "restart"} />

@@ -39,6 +39,19 @@ try {
     await page.waitForFunction(() => document.body.innerText.includes("Add resource"), null, { timeout: 5000 });
     const appsBody = await page.locator("body").innerText();
     if (!appsBody.includes("hello-node-command") && !appsBody.includes("hello-dockerfile-app")) throw new Error("Dashboard did not render registered app rows in the Apps module.");
+    const overflow = await page.evaluate(() => {
+      const documentWidth = Math.ceil(document.documentElement.scrollWidth);
+      const bodyWidth = Math.ceil(document.body.scrollWidth);
+      const viewportWidth = Math.ceil(window.innerWidth);
+      return {
+        bodyWidth,
+        documentWidth,
+        viewportWidth
+      };
+    });
+    if (overflow.documentWidth > overflow.viewportWidth || overflow.bodyWidth > overflow.viewportWidth) {
+      throw new Error(`Dashboard overflow at ${viewport.width}x${viewport.height}: document=${overflow.documentWidth}, body=${overflow.bodyWidth}, viewport=${overflow.viewportWidth}`);
+    }
     await page.screenshot({ path: `${outputDir}/dashboard-smoke-${viewport.width}x${viewport.height}.png`, fullPage: true });
     await page.close();
   }
