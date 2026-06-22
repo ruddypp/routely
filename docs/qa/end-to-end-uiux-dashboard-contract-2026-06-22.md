@@ -301,25 +301,6 @@ These gaps are based on the current dashboard shell, primitives, `dashboard-clie
 
 ## Demo Acceptance Checks For Frontend
 
-## Gap List By Demo
-
-### Local Dashboard-First Demo
-
-- Expected copy: `Start All starts stopped command/Compose apps; disabled and unsupported resources are skipped.` Visual state: Start All report uses separate started/skipped/failed counts. Acceptance: disabled resources stay visible and editable after bulk actions.
-- Expected copy: `Included in Start All` should clarify enablement better than a generic enabled toggle. Visual state: disabled badge remains near the app name without forcing horizontal overflow. Acceptance: stop-now and disable-future actions use different labels and disabled reasons.
-- Expected copy: `Logs unavailable until the app has run` for empty log states. Visual state: log panels remain reachable from Apps and Logs. Acceptance: failed/crashed apps expose a next diagnostic action.
-
-### One-VPS Operations Demo
-
-- Expected copy: `Run server doctor before production actions` when readiness is unknown. Visual state: Server Status owns auth, Docker, data-dir, and doctor blockers. Acceptance: deploy/domain/backup/notification controls reuse the same blocker reason.
-- Expected copy: `generated proxy route` and `TLS pending` never read as success. Visual state: warning or muted tones for generated/pending/unverified states. Acceptance: HTTPS links appear only when TLS is active or verified.
-- Expected copy: `backup metadata only; restore deferred for public alpha` for backup surfaces. Visual state: no full local path is treated as primary user copy. Acceptance: backup actions avoid destructive restore promises.
-
-### GitHub Redeploy Diagnosis Demo
-
-- Expected copy: `ignored branch`, `invalid signature`, `duplicate delivery`, and `deploy failed: {phase}` must be distinct. Visual state: delivery state and deployment phase are adjacent. Acceptance: a broken redeploy routes to deployment logs without hiding the latest successful deployment.
-- Expected copy: `GitHub App setup missing on server` for incomplete server-side prerequisites. Visual state: connect/deploy controls are disabled with the same setup reason. Acceptance: repo/branch mapping must be visible before any deploy-triggering action.
-
 ### Local Dashboard-First Demo
 
 - With three apps and one database, `Overview` shows real fleet counts and urgent next action.
