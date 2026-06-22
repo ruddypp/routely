@@ -32,6 +32,7 @@ Implementation references:
 - `docs/10-implementation-backlog.md` for implementation slices.
 - `docs/11-feature-scope.md` for feature-area alpha scope and deferred scope.
 - `docs/12-prd.md` for canonical product requirements.
+- `docs/13-end-to-end-execution-plan.md` for the role-by-role execution plan derived from the latest user direction.
 - `docs/adr/*` for accepted architecture decisions.
 - `docs/agents/*` for agent workflow support docs referenced by `AGENTS.md`.
 
@@ -53,6 +54,7 @@ Implementation references:
 | `docs/10-implementation-backlog.md` | Replacement implementation backlog keyed to the Compose-first alpha plan. |
 | `docs/11-feature-scope.md` | Replacement consolidated feature scope. |
 | `docs/12-prd.md` | Canonical product requirements document. |
+| `docs/13-end-to-end-execution-plan.md` | PM execution plan for role-by-role delivery of the local-to-VPS Routely direction. |
 
 ## Legacy Disposition Table
 
@@ -140,8 +142,9 @@ For implementation work, also read:
 2. `CONTEXT.md`
 3. `README.md`
 4. `docs/09-current-status.md`
-5. The relevant architecture/interface/security/feature-scope docs.
-6. Relevant code before editing.
+5. `docs/13-end-to-end-execution-plan.md` when planning or launching role work.
+6. The relevant architecture/interface/security/feature-scope docs.
+7. Relevant code before editing.
 
 For web work, also read the relevant Next.js docs under `node_modules/next/dist/docs/` before editing `apps/web`, as required by `AGENTS.md`.
 

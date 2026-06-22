@@ -34,6 +34,7 @@ New agents should start here:
 - [Implementation Backlog](./10-implementation-backlog.md)
 - [Feature Scope](./11-feature-scope.md)
 - [Product Requirements Document](./12-prd.md)
+- [End-To-End Execution Plan](./13-end-to-end-execution-plan.md)
 
 ## Evidence And Operations
 
