@@ -141,7 +141,7 @@ ROUTELY_DASHBOARD_PORT=3030
 ROUTELY_SERVER_PUBLIC_IP=<server-ip>
 ```
 
-`ROUTELY_SERVER_MODE=production` is the canonical backend production-mode signal for the daemon and same-origin dashboard route handlers. Keep `ROUTELY_ENV=production` set for the dashboard process as well, and configure `ROUTELY_ADMIN_TOKEN` anywhere server-side code proxies production daemon requests.
+`ROUTELY_SERVER_MODE=production` is the canonical daemon production-mode switch. The daemon exposes the lightweight production/auth contract at `/auth/status` as `production` and `requiresAuth`, plus `auth.required`/`configured`, without returning the admin token. Keep `ROUTELY_ENV=production` set for the dashboard process as well, and configure `ROUTELY_ADMIN_TOKEN` anywhere server-side code proxies production daemon requests.
 
 3. Initialize production state and save the printed admin token somewhere private:
 
