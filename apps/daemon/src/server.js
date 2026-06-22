@@ -262,7 +262,7 @@ function isAuthorized(request) {
 
 app.addHook("preHandler", async (request, reply) => {
   const url = request.url.split("?")[0];
-  const publicPaths = new Set(["/health", "/server/status", "/auth/status", "/github/webhook"]);
+  const publicPaths = new Set(["/health", "/auth/status", "/github/webhook"]);
 
   if (publicPaths.has(url)) {
     return;

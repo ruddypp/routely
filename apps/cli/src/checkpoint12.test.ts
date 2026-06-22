@@ -149,6 +149,19 @@ describe("QA regression fixes", () => {
       ROUTELY_ADMIN_TOKEN: adminToken
     });
 
+    const authStatus = await jsonRequest(baseUrl, "/auth/status");
+    expect(authStatus.response.status).toBe(200);
+    expect(authStatus.body).toMatchObject({
+      mode: "production",
+      production: true,
+      requiresAuth: true,
+      auth: { required: true, configured: true, tokenSource: "environment" }
+    });
+    expect(JSON.stringify(authStatus.body)).not.toContain(adminToken);
+
+    const diagnostic = await jsonRequest(baseUrl, "/server/status");
+    expect(diagnostic.response.status).toBe(401);
+
     const missing = await jsonRequest(baseUrl, "/apps");
     expect(missing.response.status).toBe(401);
     expect(missing.body.error).toContain("admin token");
@@ -158,19 +171,6 @@ describe("QA regression fixes", () => {
     });
     expect(authorized.response.status).toBe(200);
     expect(authorized.body.apps).toEqual([]);
-
-    const authStatus = await jsonRequest(baseUrl, "/auth/status");
-    expect(authStatus.response.status).toBe(200);
-    expect(authStatus.body).toMatchObject({
-      mode: "production",
-      production: true,
-      requiresAuth: true,
-      auth: {
-        required: true,
-        configured: true,
-        tokenSource: "environment"
-      }
-    });
   });
 
   it("enforces persisted production mode as the canonical backend auth signal", async () => {
@@ -516,36 +516,6 @@ describe("QA regression fixes", () => {
 
     const listed = await jsonRequest(baseUrl, `/apps/${app.id}/env`);
     expect(JSON.stringify(listed.body)).not.toContain("postgres://raw-secret");
-  });
-
-  it("exposes daemon production auth state without leaking the admin token", async () => {
-    const workspace = await createWorkspace();
-    const adminToken = `admin-${randomUUID()}`;
-    const { baseUrl } = await startDaemon(workspace, {
-      ROUTELY_ENV: "",
-      ROUTELY_SERVER_MODE: "production",
-      ROUTELY_ADMIN_TOKEN: adminToken
-    });
-
-    const status = await jsonRequest(baseUrl, "/auth/status");
-    expect(status.response.status).toBe(200);
-    expect(status.body).toMatchObject({
-      mode: "production",
-      production: true,
-      requiresAuth: true,
-      auth: { required: true, configured: true, tokenSource: "environment" }
-    });
-    expect(JSON.stringify(status.body)).not.toContain(adminToken);
-
-    const unauthenticatedMutation = await jsonRequest(baseUrl, "/apps/start-all", { method: "POST" });
-    expect(unauthenticatedMutation.response.status).toBe(401);
-
-    const authorizedCreate = await jsonRequest(baseUrl, "/apps", {
-      method: "POST",
-      headers: { authorization: `Bearer ${adminToken}` },
-      body: JSON.stringify({ name: "prod-web", driver: "command", command: "node -e \"setInterval(() => {}, 1000)\"" })
-    });
-    expect(authorizedCreate.response.status).toBe(201);
   });
 
   it("redacts database app env values from create responses", async () => {
