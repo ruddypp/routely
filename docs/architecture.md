@@ -290,6 +290,19 @@ Recommended route groups:
 
 Route handlers can map to existing daemon routes during migration, but the UI contract should stabilize around task routes.
 
+
+## Dependency Philosophy
+
+Routely should use strong third-party libraries when they help the product become more reliable and easier to ship. Dependencies are acceptable in both frontend and backend work when they are purposeful, maintained, and hidden behind Routely module seams.
+
+Dependency rules:
+
+- Add dependencies for real leverage: charts, validation, runtime orchestration, observability, terminal handling, GitHub integration, security, or parsing.
+- Avoid dependency sprawl that leaks library details across many modules.
+- Wrap dependencies behind deep modules such as RecipeEngine, RuntimeOrchestrator, ProxyManager, ObservabilityCollector, LogsGateway, or TerminalGateway.
+- Document lock-in-level choices with ADRs.
+- Commit dependency and lockfile changes with the slice that uses them.
+
 ## Refactor Strategy
 
 ### Rule 1: Prefactor before feature work

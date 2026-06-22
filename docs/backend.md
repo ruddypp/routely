@@ -4,6 +4,32 @@
 
 The backend makes Routely real: it must actually run apps, verify setup, control lifecycle, attach databases, route domains, collect logs/metrics, and expose safe dashboard APIs. The backend should hide Docker/Compose details behind small module interfaces.
 
+
+## Backend Dependency Policy
+
+Backend agents may add dependencies, libraries, or focused frameworks when they materially improve correctness, reliability, security, observability, or implementation speed. The goal is maximum product quality, not artificial zero-dependency minimalism.
+
+Allowed dependency categories:
+
+- Docker/Compose helpers when they reduce brittle shell command handling.
+- Validation/schema libraries for API inputs, recipe definitions, env values, and state transitions.
+- Git/GitHub helpers for provider workflows.
+- Metrics/system information libraries for host observability when Node built-ins are insufficient.
+- Terminal/PTY libraries for scoped terminal sessions.
+- Log streaming/parsing/redaction helpers.
+- Security utilities for secrets, tokens, signatures, rate limiting, DNS/IP checks, and safe path handling.
+- Lightweight job/queue/scheduler utilities if a slice needs durable background work.
+
+Rules:
+
+- Prefer well-maintained packages with clear docs and active releases.
+- Keep dependencies focused; do not add a large platform framework when a small library solves the problem.
+- If a dependency changes architecture or creates meaningful lock-in, add an ADR.
+- Include `package.json` and lockfile changes in the same commit.
+- Explain why the dependency was added in the final handoff.
+- Add tests at the module seam so callers are not coupled to the library directly.
+- Do not use a dependency to bypass security boundaries or readiness verification.
+
 ## Runtime Dependency
 
 Docker and Docker Compose are required for the primary MVP path. Startup must check these dependencies before presenting apps as manageable.

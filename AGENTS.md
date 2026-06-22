@@ -35,6 +35,7 @@ Auto-commit rules:
 - Apps must pass setup verification before being marked ready.
 - Backup/restore is deferred until safe and production-grade.
 - Dashboard UI must be an operations dashboard, not a static app list.
+- Dependencies/libraries/frameworks are allowed when they materially improve quality; keep them focused, documented, tested, and committed with the slice that uses them.
 
 ## Agent Skills
 

@@ -20,6 +20,7 @@ Every slice must end with:
 - Do not expose backup/restore as an enabled feature.
 - Do not mark apps ready without setup verification.
 - Do not create broad rewrites that mix unrelated modules.
+- Dependencies are allowed when they improve quality; explain why, keep them focused, and include package/lockfile changes in the same slice commit.
 
 ## Slice 0 — Documentation Reset
 
