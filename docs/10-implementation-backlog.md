@@ -379,6 +379,297 @@ Reconcile public docs, QA/Security reports, and release-readiness status so a ne
 - [ ] One-VPS demo remains a release gate.
 - [ ] GitHub redeploy demo remains a release gate.
 
+## 2026-06-22 Coordinated QA/Security Bug Routing
+
+Status: Agent-ready bug instructions from Routely Lead's coordinated QA/Security findings after report commit `51a7268`.
+
+Source reports:
+
+- `docs/qa/end-to-end-local-demo-2026-06-22.md`
+- `docs/qa/end-to-end-vps-demo-2026-06-22.md`
+- `docs/qa/end-to-end-github-demo-2026-06-22.md`
+- `docs/security/end-to-end-local-dashboard-trust-boundary-2026-06-22.md`
+- `docs/security/end-to-end-vps-github-trust-boundary-2026-06-22.md`
+
+Use these briefs as the owner handoff until GitHub has the canonical triage labels. Publish each code/docs item as `ready-for-agent` once `needs-triage`, `needs-info`, `ready-for-agent`, and `ready-for-human` exist. Keep the source reports unchanged.
+
+### Frontend Owner Instructions
+
+#### Bug: Mobile dashboard clips demo-critical content
+
+Severity: High release blocker.
+
+Source finding: `FE-QA-2026-06-22-LOCAL-01` in `docs/qa/end-to-end-local-demo-2026-06-22.md`.
+
+Current behavior: At 375px and 390px widths, the dashboard visually clips demo-critical content even after responsive fix `700ee5f`. The page can report no document-level horizontal overflow while parent containers hide clipped content. QA observed the workspace heading clipped, top status row off-screen, Start All scope text cut off, some actions unreachable, and bottom navigation labels truncated.
+
+Desired behavior: The local dashboard demo remains readable and operable at 375px, 390px, tablet, and desktop widths. Top status chips, module headers, Start All copy, app rows, database rows, action buttons, and bottom navigation labels must stay inside the viewport without hidden left/right clipping.
+
+Key interfaces:
+
+- Dashboard shell/header/module layout and bottom navigation responsive behavior.
+- Apps/Services dashboard state rendering for local demo data.
+- Responsive test coverage that inspects element bounding boxes against the viewport, not only `documentElement.scrollWidth`.
+
+Acceptance criteria:
+
+- [ ] At 375px and 390px widths, no demo-critical dashboard element starts left of the viewport or ends right of the viewport.
+- [ ] Top status chips, Start All controls, app/database rows, and primary actions remain readable and reachable on mobile.
+- [ ] Existing desktop and tablet dashboard layouts keep their current information hierarchy.
+- [ ] A frontend test or Playwright check fails when any required element's bounding box is clipped by a hidden-overflow parent.
+
+Verification:
+
+- [ ] Run the focused web checks for the touched dashboard surface.
+- [ ] Capture or regenerate responsive evidence at 375px, 390px, 768px, and 1280px.
+- [ ] QA reruns the local demo responsive check and closes `FE-QA-2026-06-22-LOCAL-01`.
+
+Out of scope:
+
+- Redesigning the dashboard information architecture beyond the minimum layout changes needed to prevent clipping.
+- Hiding demo-critical controls on mobile instead of making them readable and reachable.
+
+#### Bug: Same-origin dashboard routes proxy admin token without caller auth
+
+Severity: High release blocker, shared with Backend.
+
+Source findings: `SEC-E2E-LOCAL-02` and `SEC-E2E-VPS-02` in the Security reports.
+
+Current behavior: Dashboard route helpers can forward the server-side `ROUTELY_ADMIN_TOKEN` to private daemon mutation/admin paths when `ROUTELY_ENV` is missing, even if the incoming dashboard caller is unauthenticated. The deployment log stream route has a separate token-forwarding path with the same trust-boundary risk.
+
+Desired behavior: Same-origin dashboard route handlers must require caller auth before proxying the server-side admin token whenever production mode, an admin token, or daemon auth status indicates private control-plane access. Unauthenticated callers must never cause the web process to perform privileged daemon mutations.
+
+Key interfaces:
+
+- Dashboard caller-auth guard and token-forwarding helper.
+- Deployment log stream route guard.
+- Same-origin API route families for apps, deployments, domains, proxy, GitHub, env/secrets, databases, backups, metrics, health refreshes, and notifications.
+- Daemon `/auth/status` or equivalent safe auth-status contract supplied by Backend.
+
+Frontend acceptance criteria:
+
+- [ ] With `ROUTELY_ADMIN_TOKEN` configured and `ROUTELY_ENV` unset, unauthenticated dashboard requests to private mutation/admin route handlers return an auth failure and do not forward the admin token.
+- [ ] With production/auth-required daemon status, unauthenticated dashboard requests cannot trigger deploys, domain/proxy changes, env/secrets changes, GitHub connection changes, database operations, backup runs, notification mutations, log streams, health refreshes, or metrics refreshes.
+- [ ] Authenticated callers can still use the same dashboard APIs when they supply the expected token/session.
+- [ ] The deployment log stream route uses the same auth decision as the rest of the dashboard proxy surface.
+
+Verification:
+
+- [ ] Add or update web route-handler tests for `ROUTELY_ADMIN_TOKEN` set with `ROUTELY_ENV` unset.
+- [ ] Add or update tests for production/auth-required daemon status and unauthenticated mutation attempts.
+- [ ] Security reruns the dashboard trust-boundary checks for `SEC-E2E-LOCAL-02` and `SEC-E2E-VPS-02`.
+
+Out of scope:
+
+- Building a new multi-user auth system.
+- Changing public health/auth-status responses beyond what is needed for safe dashboard gating.
+
+### Backend Owner Instructions
+
+#### Bug: Non-loopback local daemon bind can expose unauthenticated control plane
+
+Severity: High release blocker.
+
+Source finding: `SEC-E2E-LOCAL-01` in `docs/security/end-to-end-local-dashboard-trust-boundary-2026-06-22.md`.
+
+Current behavior: A local operator can configure the daemon host to a non-loopback address such as `0.0.0.0` while local-mode authorization still allows private routes without production auth. The CLI launcher can pass this environment through to the daemon.
+
+Desired behavior: Local daemon startup must reject non-loopback binds unless production auth is active or an explicit unsafe local override is present. If the unsafe override exists, startup output must make the risk obvious.
+
+Key interfaces:
+
+- Daemon host/bind configuration.
+- Local versus production authorization mode.
+- CLI local launcher environment handling.
+- Private daemon route families for apps, deployments, domains, env, GitHub, databases, backups, notifications, logs, health, and metrics.
+
+Acceptance criteria:
+
+- [ ] Default local daemon startup binds only to loopback.
+- [ ] Local startup with a non-loopback daemon host fails before listening when production auth is not active and no unsafe override is set.
+- [ ] Production-authenticated startup can bind according to the production deployment contract.
+- [ ] Any explicit unsafe local bind override requires a scary, documented env var and emits clear warning copy.
+- [ ] CLI/daemon tests cover default loopback, non-loopback rejection, production-auth allowance, and unsafe override behavior.
+
+Verification:
+
+- [ ] Run focused daemon/CLI tests for startup binding and auth behavior.
+- [ ] Security confirms `SEC-E2E-LOCAL-01` is closed without opening a live unsafe listener during review.
+
+Out of scope:
+
+- Changing the trusted solo-operator local app execution model.
+- Making local command or Compose apps themselves untrusted sandboxes.
+
+#### Bug: Same-origin admin-token proxy needs backend contract and regression coverage
+
+Severity: High release blocker, shared with Frontend.
+
+Source findings: `SEC-E2E-LOCAL-02` and `SEC-E2E-VPS-02` in the Security reports.
+
+Current behavior: The daemon correctly protects production private routes, but the web process can become a confused deputy if it has `ROUTELY_ADMIN_TOKEN` and its route handlers do not require caller auth before token forwarding.
+
+Desired behavior: Backend-owned daemon auth signals and private mutation contracts must support the Frontend fix. The daemon must keep private mutation/admin paths token-protected in production, expose only safe auth-status metadata publicly, and provide testable semantics that dashboard routes can use to decide whether caller auth is required.
+
+Key interfaces:
+
+- Daemon public auth-status and health/status metadata.
+- Daemon private mutation/admin route authorization.
+- Dashboard-to-daemon proxy contract for admin-token forwarding.
+
+Backend acceptance criteria:
+
+- [ ] Public auth-status metadata is sufficient for the dashboard to detect production/auth-required daemon state without exposing token material.
+- [ ] Private daemon mutations remain rejected without a valid admin token in production mode.
+- [ ] Shared or integration tests cover production/auth-required daemon state plus unauthenticated dashboard mutation attempts, in coordination with Frontend.
+- [ ] No backend change weakens public health/status redaction already verified by QA.
+
+Verification:
+
+- [ ] Run focused daemon auth tests and the cross-surface web route-handler tests touched by the fix.
+- [ ] Security reruns the same-origin proxy trust-boundary checks.
+
+Out of scope:
+
+- Introducing a new auth provider or role model for public alpha.
+
+#### Bug: Production app ports publish on all interfaces
+
+Severity: High release blocker.
+
+Source finding: `SEC-E2E-VPS-01` in `docs/security/end-to-end-vps-github-trust-boundary-2026-06-22.md`.
+
+Current behavior: Dockerfile deployments and generated Compose configs publish non-internal app ports without a host IP, which Docker treats as all-interface binds. Proxy route generation assumes localhost targets, so direct host-port exposure can bypass domain verification, TLS, proxy headers, and future proxy controls.
+
+Desired behavior: Production app traffic should be reachable through the intended loopback/proxy path only. Dockerfile and generated Compose app ports must bind to loopback or use a proxy-only Docker network without public host publishing.
+
+Key interfaces:
+
+- Dockerfile deployment port publishing.
+- Generated Compose port/network configuration for non-internal app services.
+- Proxy route target generation and deployment host-port metadata.
+
+Acceptance criteria:
+
+- [ ] Dockerfile production deploys do not publish app ports on all interfaces.
+- [ ] Generated Compose production configs bind app ports to loopback or place apps behind a proxy-only network without public host publishing.
+- [ ] Database/internal services remain internal-only by default.
+- [ ] Proxy route generation continues to target the local/proxy-reachable address that matches the deployment metadata.
+- [ ] Tests assert Dockerfile and generated Compose app ports are not all-interface binds.
+
+Verification:
+
+- [ ] Run focused driver/proxy/daemon deployment tests for Dockerfile and Compose paths.
+- [ ] Security reruns one-VPS static review and, after Lead provides environment, confirms no direct public host-port exposure in live smoke.
+
+Out of scope:
+
+- Claiming public proxy/TLS safety before this fix lands and a real one-VPS smoke confirms it.
+- Implementing a full service-mesh or multi-host networking model.
+
+#### Bug: Invalid-signature GitHub deliveries can poison dedupe
+
+Severity: Medium, not a release blocker by itself but required before GitHub demo confidence.
+
+Source finding: `SEC-E2E-VPS-03` in `docs/security/end-to-end-vps-github-trust-boundary-2026-06-22.md`.
+
+Current behavior: The webhook handler can record an invalid-signature delivery using the caller-supplied delivery ID in the same dedupe keyspace used for valid deliveries. A later valid delivery with the same ID can be treated as a duplicate and suppressed.
+
+Desired behavior: Invalid-signature attempts must not prevent a later valid GitHub delivery with the same delivery ID from being processed. Rejected attempts can be logged or recorded, but not in a way that poisons valid delivery dedupe.
+
+Key interfaces:
+
+- GitHub webhook signature validation and raw-body handling.
+- GitHub delivery persistence/dedupe contract.
+- Public daemon and same-origin GitHub webhook routes.
+
+Acceptance criteria:
+
+- [ ] An invalid-signature request followed by a valid signed request with the same delivery ID processes the valid request according to repo/branch mapping.
+- [ ] Valid duplicate deliveries remain deduped where practical.
+- [ ] Rejected invalid-signature attempts remain observable enough for diagnostics without sharing the valid-delivery dedupe keyspace incorrectly.
+- [ ] Tests cover invalid-first then valid-same-delivery-ID behavior.
+
+Verification:
+
+- [ ] Run focused GitHub webhook tests.
+- [ ] Security reruns the GitHub trust-boundary dedupe check.
+
+Out of scope:
+
+- Replacing GitHub App installation/repository authorization beyond the existing solo-operator alpha contract.
+- Adding broad rate limiting unless needed for the minimal fix.
+
+### PM/Docs Owner Instructions
+
+#### Bug: Public docs make local DB port and VPS prerequisites fragile
+
+Severity: Medium docs readiness issue.
+
+Source findings: `DOC-QA-2026-06-22-LOCAL-01` in `docs/qa/end-to-end-local-demo-2026-06-22.md` and `DOC-QA-2026-06-22-VPS-01` in `docs/qa/end-to-end-vps-demo-2026-06-22.md`.
+
+Current behavior: The README local quick start hardcodes `routely db add postgres --name postgres --port 5432`, which failed on QA's Fedora host because local Postgres already occupied `127.0.0.1:5432`. The VPS docs name broad ingredients but do not consolidate the exact OS, SSH/sudo, firewall, DNS, public IP, dashboard access, cleanup, and 80/443 capability/systemd expectations needed for a new solo operator or QA rerun.
+
+Desired behavior: Public docs should provide copy-pasteable local setup with alternate-port guidance and a concrete one-VPS prerequisite checklist before the release gate is attempted.
+
+Key interfaces:
+
+- README local quick start and database setup guidance.
+- Public alpha docs for one-VPS prerequisites and QA environment handoff.
+- Backend-reviewed command behavior for database host ports and production server prerequisites.
+
+Acceptance criteria:
+
+- [ ] Local docs explain how to check whether `5432` is occupied and how to choose a safe alternate host port such as `55432` without changing internal database semantics.
+- [ ] Local quick-start copy makes clear which ports the demo uses and how to resolve collisions before running `routely`.
+- [ ] VPS docs include provider-neutral prerequisites: Linux host, public IP, SSH user/key, sudo/root expectations, Docker/Compose/Node/npm baseline, data directory, firewall/security group ports 80/443, dashboard/daemon access path, domain/subdomain, DNS control, `ROUTELY_SERVER_PUBLIC_IP`, admin token handling, and cleanup expectations.
+- [ ] Backend reviews the documented commands and prerequisite claims for accuracy.
+- [ ] Release-readiness docs continue to separate local simulation from real VPS/DNS/GitHub acceptance.
+
+Verification:
+
+- [ ] Run `git diff --check` for docs.
+- [ ] PM/Docs performs targeted searches for `5432`, `55432`, `ROUTELY_SERVER_PUBLIC_IP`, VPS prerequisites, and release-gate language.
+- [ ] Backend review confirms the docs match implemented command behavior.
+
+Out of scope:
+
+- Changing database port behavior in code unless Backend opens a separate implementation issue.
+- Treating local simulation as satisfying the real VPS release gate.
+
+### Lead/Environment Owner Instructions
+
+#### Blocker: Real VPS/DNS and GitHub push demos need disposable external resources
+
+Severity: Environment blocker for Demo 2 and Demo 3 release gates.
+
+Source findings: `ENV-QA-2026-06-22-VPS-01` in `docs/qa/end-to-end-vps-demo-2026-06-22.md` and `ENV-QA-2026-06-22-GITHUB-01` in `docs/qa/end-to-end-github-demo-2026-06-22.md`.
+
+Current behavior: QA could run local/static/API checks, but could not accept the one-VPS or real GitHub push demos because no disposable VPS, DNS/domain access, public webhook URL, deployed app, test repository details, or push credentials were provided.
+
+Desired behavior: Routely Lead provides a disposable, explicitly authorized environment packet so QA can rerun Demo 2 and Demo 3 without private chat context or ambiguous credentials.
+
+Prerequisites to provide:
+
+- Disposable Linux VPS host/IP, SSH user/key or agent access, sudo/root permission, and cleanup permission.
+- `ROUTELY_SERVER_PUBLIC_IP`, open inbound 80/443, and an explicit dashboard/daemon access path.
+- Disposable domain or subdomain, DNS provider credentials or manual DNS control, and target A/AAAA records.
+- Admin token handling instructions that avoid printing secrets in reports.
+- GitHub App installation/test repository, target branch, push credentials or explicit repo access, and public webhook URL configured in GitHub.
+- Permission to create/remove Docker containers, routes, certificates, database/backup state, webhook deliveries, and test commits.
+
+Acceptance criteria:
+
+- [ ] QA can execute the one-VPS demo on a real host with real DNS/proxy/HTTPS state.
+- [ ] QA can execute one successful GitHub push redeploy and one intentional failing push against a deployed app.
+- [ ] Security can validate live port exposure, Docker networking, DNS/ACME/TLS behavior, webhook delivery behavior, backup assumptions, and untrusted dashboard text rendering.
+- [ ] Release readiness remains blocked until the real environment reruns pass and reports are committed by Routely Lead.
+
+Out of scope:
+
+- Asking Backend, Frontend, or PM to fake acceptance with local/static checks.
+- Reusing long-lived production credentials for disposable QA validation.
+
 ## Verification Policy
 
 Use the narrowest checks that cover the touched work. Minimums:
