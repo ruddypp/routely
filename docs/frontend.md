@@ -186,25 +186,27 @@ Dokploy research baseline:
 - Use a `Project -> Environment -> Service` mental model.
 - Routely MVP may expose a single `Default project` and one runtime-host environment, but it should still present apps, compose stacks, and databases as services inside that project.
 - The primary CTA is `Create service`.
-- First-level service choices are `Application`, `Compose`, `Database`, and deferred `Template / import`.
+- First-level service choices are a compact header menu: `Application`, `Database`, `Compose`, and deferred `Template / import`.
 - `Application` is where GitHub repo, local folder, Dockerfile, Node/Next.js, static site, and custom source/stack choices live.
+- Do not show service-type cards and source/stack cards at the same time in the empty state; that creates a duplicate onboarding surface.
 
 Beginner-first rules:
 
-- If there are no services, show a `Create your first service` project onboarding panel with service-type cards. Do not show a large `No app selected` inspector because there is nothing to inspect yet.
+- If there are no services, show a `No services found` service-list empty state. Do not show a large `No app selected` inspector because there is nothing to inspect yet.
+- If there are no services, show an empty service list with guidance to use the header `Create service` menu. Do not duplicate the create menu inside the empty state.
 - If `/api/apps` or admin-token setup is unavailable, show a compact, dismissible-looking inline warning above the onboarding content. The warning must not dominate the page or replace the path to add an app.
 - Replace infrastructure copy like `Start all scope` with plain language: `Start ready services on this server` and `Services that still need setup will stay off`.
 - Always answer these beginner questions in visible copy: `Where is my app source?`, `What stack did Routely detect?`, `What URL will open?`, and `What do I do next?`.
 - Preserve the Spotify-inspired dark surface system: no light admin cards, no giant red/yellow error slabs, and no generic SaaS template panels.
 
-Create-service cards:
+Create-service menu:
 
 - `Application` — app code from GitHub, local folder, Dockerfile, Node/Next.js, static output, or custom commands.
-- `Compose` — existing `compose.yml` or `docker-compose.yml` with a service Routely can expose/control.
 - `Database` — Postgres, MySQL, MariaDB, Redis, MongoDB, or future supported data services.
+- `Compose` — existing `compose.yml` or `docker-compose.yml` with a service Routely can expose/control.
 - `Template / import` — visible as deferred when not production-ready; do not fake it as enabled.
 
-Empty-state source cards:
+Application setup source logos:
 
 - `GitHub repo` — connect/select a repository and branch; icon should read as GitHub/source control.
 - `Local folder` — choose or type a host path such as `/home/me/projects/my-app`; icon should read as folder/path.
@@ -214,11 +216,11 @@ Empty-state source cards:
 - `Static site` — serve built assets or a static output directory; icon should read as globe/page.
 - `Custom` — manual recipe for stacks not detected yet; icon should read as tools/sliders.
 
-Icon guidance:
+Icon/logo guidance:
 
-- Use purposeful dependencies or local SVGs for stack icons. `lucide-react`, `simple-icons`, Devicon SVGs, or focused local icon components are acceptable if committed with the slice.
-- Icons must have accessible labels and a consistent tile treatment on dark panels.
-- Brand icons may be monochrome or subtly branded, but Routely Green remains the primary action accent.
+- Use purposeful dependencies or local SVGs for stack logos. `simple-icons`, Devicon SVGs, and focused local icon components are acceptable if committed with the slice.
+- Stack logos must have accessible labels and a consistent tile treatment on dark panels.
+- Brand logos may keep brand color where readable, but Routely Green remains the primary action accent.
 
 Recommended layout:
 
@@ -228,11 +230,10 @@ Recommended layout:
 ├──────────────────────────────────────────────────────────────┤
 │ compact warning only when API/auth unavailable               │
 ├──────────────────────────────────────────────────────────────┤
-│ Create your first service                                    │
-│ [GitHub repo] [Local folder] [Docker Compose] [Dockerfile]    │
-│ [Node/Next]   [Static site]  [Custom]                         │
+│ Select all · Bulk actions · Sort · Search · Start ready       │
 ├──────────────────────────────────────────────────────────────┤
-│ When apps exist: searchable list + app detail preview         │
+│ Service list or empty row: No services found                  │
+│ Application form: source logo tiles + path/repo fields        │
 └──────────────────────────────────────────────────────────────┘
 ```
 

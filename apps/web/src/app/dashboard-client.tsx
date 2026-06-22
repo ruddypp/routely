@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FormEvent, ReactNode } from "react";
 import { AppWindow, Boxes, Code2, Database, FileCode2, FolderGit2, FolderOpen, Globe2, Layers3, PackagePlus, SlidersHorizontal, Workflow } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { siDocker, siGithub, siHtml5, siJavascript, siNextdotjs, siNodedotjs } from "simple-icons";
+import type { SimpleIcon } from "simple-icons";
 import { Alert as UiAlert } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -436,13 +438,15 @@ const FOCUS_RING = "focus-visible:outline focus-visible:outline-2 focus-visible:
 
 type SourceStackId = "github" | "local" | "compose" | "dockerfile" | "node-next" | "static" | "custom";
 
-const SOURCE_STACK_CARDS: Array<{ description: string; detail: string; icon: LucideIcon; id: SourceStackId; title: string }> = [
-  { id: "github", icon: FolderGit2, title: "GitHub repo", description: "Deploy from a repository, branch, and optional project subdirectory.", detail: "owner/repo · branch · subdirectory" },
+type SourceStackCard = { brandIcons?: SimpleIcon[]; description: string; detail: string; icon: LucideIcon; id: SourceStackId; title: string };
+
+const SOURCE_STACK_CARDS: SourceStackCard[] = [
+  { id: "github", icon: FolderGit2, brandIcons: [siGithub], title: "GitHub repo", description: "Deploy from a repository, branch, and optional project subdirectory.", detail: "owner/repo · branch · subdirectory" },
   { id: "local", icon: FolderOpen, title: "Local folder", description: "Use an absolute path on the runtime host, the machine running routely.", detail: "/home/me/projects/my-app" },
-  { id: "compose", icon: Boxes, title: "Docker Compose", description: "Point Routely at an existing compose.yml and expose one service.", detail: "compose file · service" },
-  { id: "dockerfile", icon: FileCode2, title: "Dockerfile", description: "Build one service from a Dockerfile and publish a container port.", detail: "context path · Dockerfile · port" },
-  { id: "node-next", icon: Code2, title: "Node / Next.js", description: "Start with common install, build, start commands, and an app port.", detail: "package scripts · port" },
-  { id: "static", icon: Globe2, title: "Static site", description: "Serve built assets or a public output folder from this host.", detail: "output directory · domain" },
+  { id: "compose", icon: Boxes, brandIcons: [siDocker], title: "Docker Compose", description: "Point Routely at an existing compose.yml and expose one service.", detail: "compose file · service" },
+  { id: "dockerfile", icon: FileCode2, brandIcons: [siDocker], title: "Dockerfile", description: "Build one service from a Dockerfile and publish a container port.", detail: "context path · Dockerfile · port" },
+  { id: "node-next", icon: Code2, brandIcons: [siNodedotjs, siNextdotjs, siJavascript], title: "Node / Next.js", description: "Start with common install, build, start commands, and an app port.", detail: "package scripts · port" },
+  { id: "static", icon: Globe2, brandIcons: [siHtml5], title: "Static site", description: "Serve built assets or a public output folder from this host.", detail: "output directory · domain" },
   { id: "custom", icon: SlidersHorizontal, title: "Custom", description: "Manual recipe for stacks Routely cannot detect yet.", detail: "commands · ports · health" }
 ];
 
@@ -1394,7 +1398,7 @@ export default function DashboardClient() {
   const dockerfileApps = appResources.filter((app) => app.driver === "dockerfile");
   const appModuleTabs: Record<"env" | "logs" | "health", InspectorTab> = { env: "env", logs: "logs", health: "health" };
   const appOperationsTab = activeModule === "env" || activeModule === "logs" || activeModule === "health" ? appModuleTabs[activeModule] : undefined;
-  const showAppOperations = activeModule === "apps" ? apps.length > 0 : Boolean(appOperationsTab);
+  const showAppOperations = activeModule === "apps" ? false : Boolean(appOperationsTab);
   const moduleLoading = loading || refreshing;
   const bulkStartPlan = useMemo(() => startAllPlan(apps), [apps]);
   const startAllReason = startAllBlockReason(apps, connected, startAllBusy);
@@ -1610,7 +1614,8 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
         connected={connected}
         disabledCount={disabledCount}
         environmentName={environmentName}
-        onCreate={() => onCreate()}
+        onCreate={onCreate}
+        onOpenDatabases={onOpenDatabases}
         onStartReady={onStartAll}
         projectDescription={projectDescription}
         runningCount={runningCount}
@@ -1625,24 +1630,12 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
       {appsError ? <CompactWarning title="Registry unavailable" message={appsError} /> : null}
       {startAllResult ? <StartAllReport result={startAllResult} /> : null}
 
-      {apps.length > 0 ? <ProjectServiceCreatePanel connected={connected} onCreate={onCreate} onOpenDatabases={onOpenDatabases} /> : null}
-
-      {apps.length > 0 ? <div className="border-b border-white/5 bg-black/20 px-4 py-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Start ready services</p>
-            <p className="mt-1 text-sm text-muted">
-              {bulkPlan.stoppedStartableCount} stopped service{bulkPlan.stoppedStartableCount === 1 ? "" : "s"} can start now. Services that still need setup, are disabled, or failed readiness stay off.
-            </p>
-          </div>
-          <PillButton onClick={onStartAll} disabled={Boolean(startAllReason)} strong>{startAllBusy ? "Starting" : "Start ready"}</PillButton>
-        </div>
-      </div> : null}
+      <ProjectServicesToolbar appCount={apps.length} readyCount={bulkPlan.stoppedStartableCount} startAllBusy={startAllBusy} startAllReason={startAllReason} onStartAll={onStartAll} />
 
       {formMode ? <AppForm mode={formMode} form={form} error={formError} saving={formSaving} onChange={onFormChange} onCancel={onFormCancel} onSubmit={onFormSubmit} /> : null}
 
       <div className="bg-black/10">
-        {loading ? <LoadingRows /> : apps.length === 0 ? <ProjectEmptyState connected={connected} onAdd={onCreate} onOpenDatabases={onOpenDatabases} /> : (
+        {loading ? <LoadingRows /> : apps.length === 0 ? <ProjectEmptyState /> : (
           <>
             <ResourceSection title="Application services" count={appResources.length} />
             <div className="grid gap-3 p-3 sm:p-4">
@@ -1662,7 +1655,7 @@ function AppsModule({ actionByAppId, actionError, appResources, apps, appsError,
   );
 }
 
-function ProjectWorkspaceHeader({ appCount, attentionCount, connected, disabledCount, environmentName, onCreate, onStartReady, projectDescription, runningCount, serviceCount, startAllBusy, startAllReason, stoppedCount }: { appCount: number; attentionCount: number; connected: boolean; disabledCount: number; environmentName: string; onCreate: () => void; onStartReady: () => void; projectDescription: string; runningCount: number; serviceCount: number; startAllBusy: boolean; startAllReason: string | null; stoppedCount: number }) {
+function ProjectWorkspaceHeader({ appCount, attentionCount, connected, disabledCount, environmentName, onCreate, onOpenDatabases, onStartReady, projectDescription, runningCount, serviceCount, startAllBusy, startAllReason, stoppedCount }: { appCount: number; attentionCount: number; connected: boolean; disabledCount: number; environmentName: string; onCreate: (sourceId?: SourceStackId) => void; onOpenDatabases: () => void; onStartReady: () => void; projectDescription: string; runningCount: number; serviceCount: number; startAllBusy: boolean; startAllReason: string | null; stoppedCount: number }) {
   return (
     <div className="border-b border-white/5 bg-[radial-gradient(circle_at_top_left,rgba(30,215,96,0.14),transparent_32%),linear-gradient(135deg,rgba(255,255,255,0.06),rgba(255,255,255,0)_42%)] px-4 py-4 sm:px-5 sm:py-5">
       <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -1678,8 +1671,9 @@ function ProjectWorkspaceHeader({ appCount, attentionCount, connected, disabledC
           <p className="mt-2 max-w-3xl text-sm leading-6 text-muted">{projectDescription}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary">Project Environment</Button>
           <Button onClick={onStartReady} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || "Start ready services in this project"} variant="secondary">Start ready</Button>
-          <Button onClick={onCreate} disabled={!connected} variant="primary"><PackagePlus className="h-4 w-4" aria-hidden="true" /> Create service</Button>
+          <CreateServiceMenu connected={connected} onCreateApplication={() => onCreate("github")} onCreateCompose={() => onCreate("compose")} onCreateDatabase={onOpenDatabases} />
         </div>
       </div>
       <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
@@ -1702,76 +1696,83 @@ function ProjectStat({ accent, label, value }: { accent?: boolean; label: string
   );
 }
 
-function ProjectServiceCreatePanel({ connected, onCreate, onOpenDatabases }: { connected: boolean; onCreate: (sourceId?: SourceStackId) => void; onOpenDatabases: () => void }) {
+function CreateServiceMenu({ connected, onCreateApplication, onCreateCompose, onCreateDatabase }: { connected: boolean; onCreateApplication: () => void; onCreateCompose: () => void; onCreateDatabase: () => void }) {
+  const [open, setOpen] = useState(false);
+
+  function choose(action: () => void) {
+    action();
+    setOpen(false);
+  }
+
   return (
-    <div className="border-b border-white/5 bg-black/10 px-4 py-4 sm:px-5">
-      <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Create service</p>
-          <h2 className="mt-1 text-lg font-black">Add a resource to this project</h2>
-          <p className="mt-1 max-w-3xl text-sm text-muted">Dokploy-style flow: create the service type first, then configure source, environment, domains, logs, and lifecycle.</p>
+    <div className="relative">
+      <Button onClick={() => setOpen((current) => !current)} disabled={!connected} variant="primary">
+        <PackagePlus className="h-4 w-4" aria-hidden="true" /> Create Service
+      </Button>
+      {open ? (
+        <div className="absolute right-0 z-30 mt-2 w-[240px] overflow-hidden rounded-2xl border border-[#2D352F] bg-[#101412] p-2 shadow-[0_24px_70px_rgba(0,0,0,0.48)]">
+          <p className="px-3 py-2 text-[10px] font-bold uppercase tracking-[0.14em] text-muted">Actions</p>
+          <CreateServiceMenuItem icon={AppWindow} title="Application" detail="GitHub, local path, Dockerfile, Node/Next" onClick={() => choose(onCreateApplication)} />
+          <CreateServiceMenuItem icon={Database} title="Database" detail="Postgres, MySQL, Redis, MongoDB" onClick={() => choose(onCreateDatabase)} />
+          <CreateServiceMenuItem icon={Boxes} title="Compose" detail="Existing compose.yml stack" onClick={() => choose(onCreateCompose)} />
+          <CreateServiceMenuItem disabled icon={Workflow} title="Template" detail="Deferred until templates are ready" />
+          <CreateServiceMenuItem disabled icon={FileCode2} title="Import" detail="Deferred compose import" />
         </div>
-      </div>
-      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        <ServiceKindCard icon={AppWindow} title="Application" detail="GitHub, local folder, Dockerfile, Node/Next, or static app" disabled={!connected} onClick={() => onCreate("github")} />
-        <ServiceKindCard icon={Boxes} title="Compose" detail="Use an existing compose.yml and expose one service" disabled={!connected} onClick={() => onCreate("compose")} />
-        <ServiceKindCard icon={Database} title="Database" detail="Create Postgres, MySQL, MariaDB, Redis, or MongoDB service" onClick={onOpenDatabases} />
-        <ServiceKindCard icon={Workflow} title="Template / import" detail="Coming later: starter templates and imported compose stacks" disabled />
-      </div>
+      ) : null}
     </div>
   );
 }
 
-function ServiceKindCard({ detail, disabled, icon: Icon, onClick, title }: { detail: string; disabled?: boolean; icon: LucideIcon; onClick?: () => void; title: string }) {
+function CreateServiceMenuItem({ detail, disabled, icon: Icon, onClick, title }: { detail: string; disabled?: boolean; icon: LucideIcon; onClick?: () => void; title: string }) {
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={onClick}
-      className={`group min-h-[132px] rounded-[20px] border p-4 text-left transition ${FOCUS_RING} ${disabled ? "cursor-not-allowed border-white/5 bg-white/[0.025] opacity-55" : "border-[#2D352F]/80 bg-[#171C1A] hover:border-accent/40 hover:bg-[#1D261F]"}`}
+      className={`flex w-full items-center gap-3 rounded-xl px-3 py-2 text-left transition ${FOCUS_RING} ${disabled ? "cursor-not-allowed opacity-45" : "hover:bg-white/[0.06]"}`}
     >
-      <span className="flex items-start gap-3">
-        <span className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl border ${disabled ? "border-white/10 bg-black/20 text-muted" : "border-accent/20 bg-accent/10 text-accent group-hover:bg-accent group-hover:text-black"}`}>
-          <Icon className="h-6 w-6" aria-hidden="true" />
-        </span>
-        <span className="min-w-0">
-          <span className="block text-sm font-black text-foreground">{title}</span>
-          <span className="mt-1 block text-xs leading-5 text-muted">{detail}</span>
-        </span>
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-accent/20 bg-accent/10 text-accent">
+        <Icon className="h-4.5 w-4.5" aria-hidden="true" />
+      </span>
+      <span className="min-w-0">
+        <span className="block text-sm font-bold text-foreground">{title}</span>
+        <span className="mt-0.5 block truncate text-[11px] text-muted">{detail}</span>
       </span>
     </button>
   );
 }
 
-function ProjectEmptyState({ connected, onAdd, onOpenDatabases }: { connected: boolean; onAdd: (sourceId?: SourceStackId) => void; onOpenDatabases: () => void }) {
+function ProjectServicesToolbar({ appCount, onStartAll, readyCount, startAllBusy, startAllReason }: { appCount: number; onStartAll: () => void; readyCount: number; startAllBusy: boolean; startAllReason: string | null }) {
   return (
-    <div className="p-4 sm:p-5">
-      <div className="overflow-hidden rounded-[24px] border border-[#2D352F]/80 bg-[#111612] shadow-[0_24px_60px_rgba(0,0,0,0.28)]">
-        <div className="grid gap-4 border-b border-white/5 bg-[radial-gradient(circle_at_top_left,rgba(30,215,96,0.16),transparent_34%),linear-gradient(135deg,rgba(255,255,255,0.055),transparent_42%)] px-4 py-5 lg:grid-cols-[minmax(0,0.72fr)_minmax(420px,1.28fr)] lg:items-center">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.18em] text-accent">No services yet</p>
-            <h2 className="mt-2 text-2xl font-black leading-tight sm:text-3xl">Create your first service</h2>
-            <p className="mt-2 max-w-2xl text-sm leading-6 text-muted">Like Dokploy, pick the resource type first. Most web apps start with Application; existing stacks can start with Compose.</p>
-          </div>
-          <div className="grid gap-3 md:grid-cols-2">
-            <ServiceKindCard icon={AppWindow} title="Application" detail="GitHub, local folder, Dockerfile, Node/Next, or static app" disabled={!connected} onClick={() => onAdd("github")} />
-            <ServiceKindCard icon={Boxes} title="Compose" detail="Use an existing compose.yml and expose one service" disabled={!connected} onClick={() => onAdd("compose")} />
-            <ServiceKindCard icon={Database} title="Database" detail="Create Postgres, MySQL, MariaDB, Redis, or MongoDB" onClick={onOpenDatabases} />
-            <ServiceKindCard icon={Workflow} title="Template / import" detail="Coming later: starter templates and imported compose stacks" disabled />
-          </div>
+    <div className="border-b border-white/5 bg-black/20 px-4 py-3">
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-sm text-muted">
+            <input disabled type="checkbox" className="h-4 w-4 rounded border-white/10 bg-black/30 accent-[var(--accent)]" />
+            Select All {appCount > 0 ? `(${appCount})` : ""}
+          </label>
+          <Button disabled variant="secondary">Bulk Actions</Button>
+          <span className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-[11px] text-muted">Sort: Last deploy</span>
         </div>
-        <div className="px-4 py-4">
-          <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <p className="text-sm font-bold">Application source shortcuts</p>
-              <p className="mt-1 text-xs text-muted">Choose exactly what you already have. The wizard keeps path/repo visible until setup passes.</p>
-            </div>
-            <PillButton onClick={() => onAdd()} strong disabled={!connected}>Open full wizard</PillButton>
-          </div>
-          <SourceStackCardGrid disabled={!connected} onSelect={(sourceId) => onAdd(sourceId)} selectedId={null} />
-          {!connected ? <p className="mt-3 rounded-full bg-warning/10 px-3 py-2 text-xs text-warning">Start the Routely server session to save a service. The project flow stays visible so setup still makes sense.</p> : null}
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <input disabled placeholder="Search services..." className="h-9 rounded-full border border-white/10 bg-black/25 px-3 text-sm text-muted outline-none" />
+          <Button onClick={onStartAll} disabled={Boolean(startAllReason)} loading={startAllBusy} loadingLabel="Starting" title={startAllReason || `${readyCount} stopped services can start`} variant="secondary">Start ready</Button>
         </div>
       </div>
+    </div>
+  );
+}
+
+function ProjectEmptyState() {
+  return (
+    <div className="px-4 py-12 text-center">
+      <div className="mx-auto grid h-14 w-14 place-items-center rounded-2xl border border-[#2D352F] bg-[#171C1A] text-accent">
+        <AppWindow className="h-7 w-7" aria-hidden="true" />
+      </div>
+      <h2 className="mt-4 text-xl font-black">No services found</h2>
+      <p className="mx-auto mt-2 max-w-xl text-sm leading-6 text-muted">
+        Create a service from the header. Choose Application for app code, Compose for an existing compose file, or Database for stateful services.
+      </p>
     </div>
   );
 }
@@ -3139,7 +3140,7 @@ function AppForm({
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">{mode === "create" ? "Add resource" : "Edit resource"}</p>
-          <h2 className="text-base font-bold">Registry definition</h2>
+          <h2 className="text-base font-bold">Create service definition</h2>
         </div>
         <div className="grid grid-cols-2 gap-2 sm:flex">
           <PillButton type="button" onClick={onCancel} disabled={saving}>Cancel</PillButton>
@@ -3149,20 +3150,21 @@ function AppForm({
 
       {error ? <div className="mt-3 rounded-md bg-negative/10 px-3 py-2 text-sm text-negative shadow-[0_0_0_1px_rgba(243,114,127,0.22)_inset]">{error}</div> : null}
       <div className="mt-3 rounded-md border border-info/20 bg-info-soft px-3 py-2 text-xs text-foreground-secondary">
-        Choose what you already have first. Routely stores the source, stack recipe, port, and readiness gates here; live DNS/proxy and repository connection stay in their dedicated modules.
+        Choose source first. Path, repo, stack, port, and readiness gate stay visible here.
       </div>
 
-      <div className="mt-4">
-        <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Source and stack</p>
-            <p className="mt-1 text-sm text-muted">Pick the card that matches your app. The fields below will focus on that path.</p>
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,0.94fr)_minmax(420px,1.06fr)] xl:items-start">
+        <div>
+          <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted">Source and stack</p>
+              <p className="mt-1 text-sm text-muted">Pick what you already have. Details appear beside it.</p>
+            </div>
           </div>
+          <SourceStackCardGrid disabled={saving} onSelect={chooseSource} selectedId={selectedSource} />
         </div>
-        <SourceStackCardGrid disabled={saving} onSelect={chooseSource} selectedId={selectedSource} />
+        {selectedSource ? <SelectedSourceFields form={form} healthStatusInvalid={healthStatusInvalid} nameMissing={nameMissing} onPatch={update} portInvalid={portInvalid} saving={saving} showErrors={Boolean(error)} sourceId={selectedSource} sourceMissing={sourceMissing} /> : null}
       </div>
-
-      {selectedSource ? <SelectedSourceFields form={form} healthStatusInvalid={healthStatusInvalid} nameMissing={nameMissing} onPatch={update} portInvalid={portInvalid} saving={saving} showErrors={Boolean(error)} sourceId={selectedSource} sourceMissing={sourceMissing} /> : null}
 
       <details className="mt-4 rounded-[18px] border border-white/10 bg-black/25 px-3 py-3" open={mode === "edit"}>
         <summary className="cursor-pointer text-xs font-bold uppercase tracking-[0.14em] text-muted marker:text-accent">Advanced registry details</summary>
@@ -3226,12 +3228,36 @@ function AppForm({
   );
 }
 
+function SourceStackIcon({ card, compact, selected }: { card: SourceStackCard; compact?: boolean; selected?: boolean }) {
+  const Icon = card.icon;
+  const logos = card.brandIcons || [];
+  return (
+    <span className={`grid ${compact ? "h-10 w-10" : "h-11 w-11"} shrink-0 place-items-center rounded-2xl border ${selected ? "border-accent/30 bg-accent text-black" : "border-white/10 bg-black/30 text-accent"}`} role="img" aria-label={`${card.title} logo`}>
+      {logos.length ? (
+        <span className="flex items-center justify-center -space-x-1">
+          {logos.slice(0, 3).map((icon) => <BrandLogo key={icon.slug} icon={icon} selected={selected} />)}
+        </span>
+      ) : (
+        <Icon className="h-5 w-5" aria-hidden="true" />
+      )}
+    </span>
+  );
+}
+
+function BrandLogo({ icon, selected }: { icon: SimpleIcon; selected?: boolean }) {
+  const fill = icon.title === "GitHub" || icon.title === "Next.js" ? (selected ? "#0A0D0B" : "#F7FFF9") : `#${icon.hex}`;
+  return (
+    <svg aria-hidden="true" className="h-5 w-5 drop-shadow-[0_1px_4px_rgba(0,0,0,0.35)]" viewBox="0 0 24 24">
+      <path d={icon.path} fill={fill} />
+    </svg>
+  );
+}
+
 function SourceStackCardGrid({ disabled, onSelect, selectedId }: { disabled?: boolean; onSelect: (sourceId: SourceStackId) => void; selectedId: SourceStackId | null }) {
   return (
-    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+    <div className="grid gap-2 sm:grid-cols-2">
       {SOURCE_STACK_CARDS.map((card) => {
         const selected = selectedId === card.id;
-        const Icon = card.icon;
         return (
           <button
             key={card.id}
@@ -3239,18 +3265,16 @@ function SourceStackCardGrid({ disabled, onSelect, selectedId }: { disabled?: bo
             aria-pressed={selected}
             disabled={disabled}
             onClick={() => onSelect(card.id)}
-            className={`group min-h-[132px] rounded-[18px] border p-3 text-left transition ${FOCUS_RING} ${selected ? "border-accent/70 bg-accent-soft shadow-[0_0_0_1px_rgba(39,216,111,0.18)_inset,0_16px_34px_rgba(0,0,0,0.28)]" : "border-[#2D352F]/80 bg-[#171C1A] hover:border-[#415246] hover:bg-[#1C241F]"}`}
+            className={`group min-h-[104px] rounded-[18px] border p-2.5 text-left transition ${FOCUS_RING} ${selected ? "border-accent/70 bg-accent-soft shadow-[0_0_0_1px_rgba(39,216,111,0.18)_inset,0_16px_34px_rgba(0,0,0,0.28)]" : "border-[#2D352F]/80 bg-[#171C1A] hover:border-[#415246] hover:bg-[#1C241F]"}`}
           >
             <span className="flex items-start gap-3">
-              <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl border ${selected ? "border-accent/30 bg-accent text-black" : "border-white/10 bg-black/30 text-accent"}`} role="img" aria-label={`${card.title} icon`}>
-                <Icon className="h-5 w-5" aria-hidden="true" />
-              </span>
+              <SourceStackIcon card={card} selected={selected} />
               <span className="min-w-0">
                 <span className="block text-sm font-black text-foreground">{card.title}</span>
-                <span className="mt-1 block text-xs leading-5 text-muted">{card.description}</span>
+                <span className="mt-1 block text-[11px] leading-4 text-muted">{card.description}</span>
               </span>
             </span>
-            <span className="mt-3 block truncate rounded-full bg-black/30 px-2.5 py-1 font-mono text-[10px] text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset]">{card.detail}</span>
+            <span className="mt-2 block truncate rounded-full bg-black/30 px-2.5 py-1 font-mono text-[10px] text-muted shadow-[0_0_0_1px_rgba(255,255,255,0.05)_inset]">{card.detail}</span>
           </button>
         );
       })}
@@ -3260,16 +3284,15 @@ function SourceStackCardGrid({ disabled, onSelect, selectedId }: { disabled?: bo
 
 function SelectedSourceFields({ form, healthStatusInvalid, nameMissing, onPatch, portInvalid, saving, showErrors, sourceId, sourceMissing }: { form: AppFormState; healthStatusInvalid: boolean; nameMissing: boolean; onPatch: (patch: Partial<AppFormState>) => void; portInvalid: boolean; saving: boolean; showErrors: boolean; sourceId: SourceStackId; sourceMissing: boolean }) {
   const selectedCard = SOURCE_STACK_CARDS.find((card) => card.id === sourceId) || SOURCE_STACK_CARDS[0];
-  const SelectedIcon = selectedCard.icon;
   const nameField = <Field label="App name" value={form.name} onChange={(value) => onPatch({ name: value })} required error={nameMissing && showErrors ? "Required" : undefined} disabled={saving} placeholder="my-app" />;
   const portField = <Field label="App port" value={form.port} onChange={(value) => onPatch({ port: value })} type="number" error={portInvalid ? "Positive integer" : undefined} disabled={saving} helper="Only enter a port the app actually listens on." placeholder="3000" />;
   const healthFields = <><Field label="Health path" value={form.healthcheckPath} onChange={(value) => onPatch({ healthcheckPath: value })} disabled={saving} placeholder="/" /><Field label="Expected status" value={form.healthcheckStatus} onChange={(value) => onPatch({ healthcheckStatus: value })} type="number" error={healthStatusInvalid ? "Positive integer" : undefined} disabled={saving} placeholder="200" /></>;
 
   return (
-    <section className="mt-4 rounded-[20px] border border-accent/15 bg-[#121814] p-3 shadow-[0_18px_42px_rgba(0,0,0,0.2)] sm:p-4">
+    <section className="mt-3 rounded-[20px] border border-accent/15 bg-[#121814] p-3 shadow-[0_18px_42px_rgba(0,0,0,0.2)] sm:p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
-          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-2xl bg-accent text-black" role="img" aria-label={`${selectedCard.title} icon`}><SelectedIcon className="h-5 w-5" aria-hidden="true" /></span>
+          <SourceStackIcon card={selectedCard} selected compact />
           <div className="min-w-0">
             <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-accent">Start here</p>
             <h3 className="truncate text-base font-black">{selectedCard.title}</h3>

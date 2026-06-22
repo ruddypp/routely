@@ -46,9 +46,10 @@ The Apps area must feel like a beginner-friendly deployment console, not a regis
 - Follow the Dokploy project mental model: `Project` → `Environment` → `Service`. Routely can start with a single `Default project` and one runtime-host environment, but the UI must still teach that apps, compose stacks, and databases are services inside a project.
 - Empty Apps state is an onboarding surface titled around `Create your first service`.
 - The primary action is `Create service`, not a vague registry-level `Add app`.
-- The first service choice should be Dokploy-like: `Application`, `Compose`, `Database`, and later `Template / import`.
+- `Create service` behaves like a compact Dokploy-style menu in the project header, not a permanently visible card grid.
+- The first service choices are `Application`, `Database`, `Compose`, and later `Template / import`.
 - Application setup then becomes source-first: choose what source/stack exists, then configure only what is needed.
-- Source/stack cards use recognizable icon tiles for GitHub repo, Local folder, Docker Compose, Dockerfile, Node/Next.js, Static site, and Custom.
+- Source/stack cards live inside Application setup only and use recognizable logo/image tiles for GitHub repo, Local folder, Docker Compose, Dockerfile, Node/Next.js, Static site, and Custom.
 - Local folder and Compose paths must be visible as paths on the runtime host, for example `/home/user/projects/app`.
 - GitHub apps must show `owner/repo`, branch, and optional subdirectory.
 - App cards must expose source, detected recipe/stack, readiness, URL/domain, and safe actions without hiding essentials in hover-only UI.

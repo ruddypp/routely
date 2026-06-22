@@ -287,9 +287,10 @@ What to fix:
 
 - Redesign the Apps/Services empty state into a `Create your first service` onboarding surface.
 - Redesign Apps/Services around the Dokploy-style mental model: `Default project` -> runtime-host environment -> services.
-- Add first-level `Create service` cards with icons: Application, Compose, Database, and deferred Template / import.
-- Add Application source/stack cards with icons: GitHub repo, Local folder, Docker Compose, Dockerfile, Node/Next.js, Static site, and Custom.
-- Keep API/auth/registry errors as compact inline warnings so the user can still understand the add-app path.
+- Add a first-level `Create service` header menu with Application, Database, Compose, and deferred Template / import.
+- Add Application source/stack logo tiles with GitHub repo, Local folder, Docker Compose, Dockerfile, Node/Next.js, Static site, and Custom.
+- Do not render service-type cards and Application source cards together in the empty state.
+- Keep API/auth/registry errors as compact inline warnings so the user can still understand the Create Service path.
 - Remove confusing empty inspector states such as a large `No app selected` panel when there are zero apps.
 - Show source path/repository, branch, detected stack/recipe, port, and URL/domain clearly on app cards and wizard context.
 - Rewrite technical lifecycle copy into beginner language, especially Start All behavior and readiness blocking.
