@@ -4,62 +4,114 @@ This file is the domain glossary for agents working on Routely. Keep it free of 
 
 ## Glossary
 
-**Routely** — The product: a dashboard-first control plane for solo developers that runs Compose-backed apps locally and on one VPS.
+**Routely** — A lightweight app server and control plane for solo developers that starts, stops, observes, deploys, and manages many apps from one dashboard. The same Routely runtime can be placed on a local machine or a VPS.
+_Avoid_: Dokploy clone, VPS-only PaaS.
 
-**Solo operator** — The intended Routely user: one developer who owns the instance and manages their own apps without shared administration workflows.
+**Placement-neutral control plane** — Routely's product position: the machine running Routely is the server, whether that machine is local or a VPS.
+_Avoid_: Treating local and VPS as different products.
 
-**App registry** — The shared list of apps and services Routely manages. It is the mental model that connects local development and one-VPS operation.
+**Runtime host** — The machine currently running Routely-managed apps. If Routely runs on the user's PC, the PC is the server; if Routely runs on a VPS, the VPS is the server.
+_Avoid_: Assuming “server” always means VPS.
 
-**Managed app** — An app or service entry Routely can run, stop, disable, observe, and deploy through dashboard-first workflows.
+**Routely server session** — The full server session started by running `routely` on any runtime host; it brings up the daemon/API, dashboard, proxy, app runner, logs, and monitoring surfaces together.
+_Avoid_: Requiring separate dashboard, daemon, proxy, and app-runner commands for normal use.
 
-**App enablement** — The user-controlled state that decides whether a managed app participates in bulk start operations while keeping the app registered for later use.
+**Solo operator** — The intended Routely user: one developer who owns the runtime host and manages their own apps without shared administration workflows.
 
-**Bulk start** — The operator action that starts every enabled managed app together while still allowing any app to be stopped or disabled individually afterward.
+**App registry** — The primary source of truth for apps and services Routely manages. It connects app source, recipe, services, domains, env, databases, readiness, enablement, and lifecycle state.
+_Avoid_: Treating `routely.yml` as the only source of truth.
 
-**Compose-backed app** — A managed app whose runtime is described as a Compose project so Routely can use one operational model locally and on one VPS.
+**Portable app configuration** — A shareable import/export representation of app registry state for moving configuration between hosts or repositories.
+_Avoid_: Manual YAML editing as the default setup path.
 
-**Stack preset** — A bounded supported path for bringing a common app stack into Routely without pretending every possible framework is automatic. A stack preset can guide command, Compose, Dockerfile, static, Node, or database-backed apps while unsupported stacks stay explicit and honest.
+**Managed app** — The top-level product unit Routely presents in the dashboard. A managed app can contain one or more managed services while still behaving like one app for common start, stop, deploy, status, and proxy workflows.
+_Avoid_: Treating every process as a separate app by default.
 
-**Local runner** — The local workflow started by `routely`, responsible for starting registered local apps/services, showing status, streaming logs, and stopping managed processes on exit.
+**Managed service** — A runtime unit inside a managed app, such as a frontend, API, worker, database, cron, or supporting container.
+_Avoid_: Hiding multi-service structure entirely, forcing every service into the top-level app list.
 
-**Workspace root** — The user's active app workspace where `routely.yml` and local `.routely/` state apply.
+**App enablement** — The user-controlled state that decides whether a ready managed app participates in auto-start while keeping the app registered for later use.
 
-**Routely repo root** — The installed/development copy of Routely's source code. Do not confuse this with the workspace root.
+**Auto-start on run** — The default Routely behavior where running `routely` starts every enabled ready app.
+_Avoid_: Making the operator manually start each app after launching Routely.
 
-**Daemon** — The private HTTP process that owns Routely runtime operations and state access. Browser code must not call it directly.
+**Session-scoped app runtime** — The current Routely lifecycle rule: apps started by a Routely server session are stopped when that session stops.
+_Avoid_: Background app persistence as the default MVP behavior.
 
-**Dashboard** — The Next.js web UI for local and production operations. Dashboard browser code calls same-origin `/api/*` route handlers.
+**Docker-required runtime** — Routely's MVP constraint that Docker and Docker Compose must be available on the runtime host before apps can be managed through the primary path.
+_Avoid_: Treating Docker as optional for the primary MVP path.
 
-**Dashboard-first management** — The product principle that app registration, lifecycle controls, deployment setup, and operational diagnosis should be doable from the dashboard without requiring manual config editing for normal use.
+**Compose-backed app** — A managed app whose runtime is represented as a Compose project so Routely can use one operational model on any runtime host.
 
-**Dokploy-inspired operation** — The Routely product shape for domain/proxy, env/secrets, databases/backups, logs, deploy history, and health checks, adapted for one solo-operated VPS.
+**Primary runtime model** — Routely's internal preference for representing managed apps and services as Compose-backed runtime definitions, even when setup begins from GitHub, a local folder, Dockerfile, Node project, or manual recipe.
+_Avoid_: Separate local and VPS runtime models.
 
-**9router-light experience** — The Routely interaction style: simple, fast, and low-ceremony even when exposing production operations.
+**App source** — Where Routely gets an app from, such as a local folder on the runtime host or a connected GitHub repository.
+_Avoid_: Treating GitHub as the only app source.
 
-**Dashboard API route** — A same-origin Next.js route handler that proxies or adapts daemon behavior for the dashboard.
+**Runtime recipe** — A supported setup path for turning an app source into managed services, such as Compose, Dockerfile, Node package project, or manual fallback.
+_Avoid_: Claiming universal stack support without an explicit recipe or fallback.
 
-**One-VPS operation** — Routely mode for one Linux VPS where private infrastructure actions require admin auth and the same registry model should remain recognizable from local use.
+**Executable recipe** — A runtime recipe that Routely can validate by preparing, starting, and health-checking the app on the runtime host.
+_Avoid_: Concept-only stack detection that marks an app as ready without proving it can run.
 
-**Deployment** — A production attempt to turn an app source into a running service. Deployment state includes phases, logs, health, and success/failure history.
+**Guided app setup** — The beginner-friendly app onboarding flow where Routely detects common project shapes, proposes safe defaults, and lets the operator click through setup with minimal manual configuration.
+_Avoid_: Blank advanced forms as the primary onboarding experience.
 
-**Proxy route** — The generated routing state that connects a verified domain to the latest successful deployment through the production proxy model.
+**Setup verification** — The onboarding checkpoint that proves a managed app can build or start, exposes the expected port or health endpoint, and can be controlled by Routely before it is treated as ready.
+_Avoid_: Saving broken apps as if they are production-ready.
 
-**Domain verification** — The check that a DNS record points at the expected server IP before Routely creates or activates production routing.
+**Readiness gate** — A hard status boundary that prevents an app from auto-starting or being presented as ready until its executable recipe and required checks pass on the runtime host.
+_Avoid_: Optimistic ready states.
+
+**Dashboard** — The Next.js web UI for Routely operations. Browser code calls same-origin `/api/*` route handlers, not the private daemon directly.
+
+**Operations dashboard** — The dashboard home surface for understanding the runtime host and managed apps at a glance, including app status, traffic, disk, CPU, memory, uptime, and recent incidents.
+_Avoid_: A static landing page that only lists apps without operational signals.
+
+**App operations workspace** — The per-app dashboard area for managing domains, databases, environment values, terminal access, logs, metrics, deployments, and service controls.
+_Avoid_: Forcing operators to leave Routely for routine app operations.
+
+**Per-app observability** — App-specific status, logs, metrics, health, deployment history, and resource signals shown inside the app operations workspace.
+_Avoid_: Only showing host-level monitoring.
+
+**Host observability** — Lightweight visibility into the runtime host, including disk, memory, CPU, uptime, Docker status, and service health signals.
+_Avoid_: Full APM platform, enterprise infrastructure monitoring.
+
+**Traffic signal** — A lightweight request or route measurement for a managed app or proxy route, used to show whether an app is receiving traffic and how that traffic is behaving.
+_Avoid_: Full analytics or APM as the MVP expectation.
+
+**Monitoring MVP** — Routely's first observability scope: runtime host disk, CPU, memory, uptime, app/service status, health, logs, and basic traffic signals per app or domain.
+_Avoid_: Full APM, tracing, alerting, or product analytics in the first usable app slice.
+
+**App domain** — A stable hostname or domain that routes to a managed app through Routely. Locally this may be a development hostname; on a public host this is a public domain.
+_Avoid_: Treating domains as production-only.
+
+**Production app domain** — A real public domain that points to a public runtime host and routes to a managed app through Routely's proxy model.
+_Avoid_: Presenting local-only hostnames as production domains.
+
+**Traefik-compatible proxy model** — Routely's proxy approach for routing domains to managed services through Compose-compatible labels or dynamic config, including HTTPS certificate automation on public hosts.
+_Avoid_: Requiring users to hand-write Nginx, Caddy, or Traefik config for normal app domains.
+
+**Database service** — A managed database service represented through Routely's Compose-backed runtime model. Database services are created from guided recipes, attached to apps through internal networking and environment values, and are not exposed publicly by default.
+
+**Database recipe** — A supported guided setup path for a database type such as Postgres, Redis, MySQL, MariaDB, or MongoDB, including image, volume, credentials, health checks, logs, and attachment behavior.
+_Avoid_: Treating every database image as production-ready without a recipe.
+
+**Deferred backup/restore** — Backup and restore are future operational capabilities and must not appear as enabled product features until Routely can implement them safely and honestly.
+_Avoid_: Half-built backup or restore controls in the MVP app experience.
 
 **Stored secret** — A sensitive app value saved for runtime use. After save, Routely should expose only metadata such as key/name/status, never the raw value.
 
-**Health sample** — A recorded observation of app health used by the dashboard, CLI, and production operators to understand current status.
+**Embedded terminal** — A Routely-provided terminal surface scoped to the runtime host or a managed app/service for operational troubleshooting.
+_Avoid_: Treating terminal access as a replacement for guided workflows.
 
-**Metrics sample** — A recorded operational measurement for app or server visibility. Retention should stay bounded.
+**Dashboard API route** — A same-origin Next.js route handler that proxies or adapts daemon behavior for the dashboard.
 
-**Database service** — A managed database record/service, usually Compose-backed. Production databases are internal-only by default.
+**Deployment run** — A setup, build, verification, or GitHub-triggered attempt to turn an app source into running managed services.
+_Avoid_: Calling a saved config a deployment when nothing was executed.
 
-**Backup job** — The configured schedule and retention policy for backing up a database service.
+**Dokploy reference model** — The product reference Routely uses for practical app operations: source providers, app/compose setup, runtime recipes, environment values, domains, deployments, logs, monitoring, databases, volumes, and terminal access.
+_Avoid_: Copying Dokploy's exact architecture or treating Dokploy compatibility as the goal.
 
-**Backup run** — One execution attempt of a backup job, including status, message, file metadata, and retention outcome.
-
-**Notification channel** — A configured outbound notification target such as generic webhook, Discord, or Telegram.
-
-**Delivery attempt** — One audited attempt to send a notification event to a notification channel.
-
-**Future scope** — A visible but intentionally inactive feature area that is deferred by the roadmap and must not be presented as implemented.
+**9router-light experience** — The interaction style Routely should preserve: one memorable command, lightweight dashboard, fast status loop, and low ceremony.

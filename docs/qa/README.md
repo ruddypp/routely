@@ -1,18 +1,18 @@
-# QA Reports
+# QA Guide
 
-Status: Empty after docs reset
-Owner: QA E2E
-Last updated: 2026-06-21
+QA reports from the previous alpha direction were removed because the product blueprint changed. New QA work should validate the placement-neutral MVP described in `docs/blueprint.md` and the acceptance checks in `docs/verification.md`.
 
-## Purpose
+QA should focus on real user flows:
 
-QA E2E should write fresh public alpha validation reports here. Historical checkpoint screenshots and audits were removed during the documentation reset so the new team starts from the canonical alpha demos.
+- First run with Docker present and missing.
+- Add app from local folder.
+- Add app from GitHub.
+- Setup verification pass/fail.
+- Auto-start enabled apps.
+- Per-app lifecycle controls.
+- Logs, health, host metrics, and basic traffic visibility.
+- Domain/DNS/proxy flow.
+- Database create/attach flow.
+- Terminal scope and warning.
 
-## Expected Reports
-
-- Local demo smoke report.
-- VPS demo smoke report.
-- GitHub auto-redeploy smoke report.
-- Responsive dashboard smoke report.
-
-Each report should include date, environment, exact commands or browser steps, expected behavior, actual behavior, evidence, severity for failures, and concrete Backend/Frontend instructions.
+QA reports should distinguish product bugs from environment blockers. QA agents should not commit reports unless acting as Routely Lead.

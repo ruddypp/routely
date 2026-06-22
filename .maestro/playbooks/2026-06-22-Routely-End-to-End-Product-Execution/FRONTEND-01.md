@@ -1,7 +1,0 @@
-# Routely End-to-End Frontend Plan
-
-- [ ] Frontend: implement the first-run and app-registry dashboard experience from the approved UI/UX spec. Read `AGENTS.md`, relevant Next.js docs under `node_modules/next/dist/docs/`, `apps/web/src/app/dashboard-client.tsx`, `apps/web/src/lib/daemon.ts`, `apps/web/src/lib/dashboard-operations.ts`, and the end-to-end execution manifest before editing. Build lightweight flows for empty state, add/edit app, stack selection, enable/disable, and clear route/log/health hints. Add route/UI tests, run `npm run test --workspace apps/web`, `npx tsc --noEmit --project apps/web/tsconfig.json`, and commit Frontend-owned changes.
-
-- [ ] Frontend: implement Start All and per-app lifecycle UX. Ensure `Start All`, per-app start/stop/restart/disable, skipped apps, failed apps, logs, and health states are understandable at 375px, tablet, and desktop widths. Keep controls reachable and copy simple. Add focused dashboard tests and smoke assertions for no horizontal overflow.
-
-- [ ] Frontend: implement local proxy/routes and production operations surfaces. Show route/proxy status, conflicts, env/secrets, deploy history/logs, domains/TLS, database/backups, notifications, GitHub redeploy, and server status without leaking secrets or host paths. Preserve same-origin `/api/*` browser boundary and route-handler auth rules. Add tests and commit Frontend-owned changes after checks pass.

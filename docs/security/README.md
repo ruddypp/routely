@@ -1,21 +1,19 @@
-# Security Reports
+# Security Guide
 
-Status: Empty after docs reset
-Owner: Security
-Last updated: 2026-06-21
+Security reports from the previous alpha direction were removed because the product blueprint changed. New security work should review the trust boundaries in `docs/architecture.md` and the checklist in `docs/verification.md`.
 
-## Purpose
+Primary review areas:
 
-Security should write fresh public alpha trust-boundary findings here.
+- Dashboard same-origin routes and daemon exposure.
+- Auth requirements on public/exposed runtime hosts.
+- Secret storage and masking.
+- Log redaction.
+- Terminal access and scope.
+- Local folder access.
+- Docker/Compose command generation.
+- Domain/proxy config generation.
+- GitHub webhook signature validation and dedupe order.
+- Database network exposure.
+- Destructive action confirmation.
 
-## Expected Review Areas
-
-- Local daemon/dashboard binding and same-origin boundary.
-- Production auth and admin token handling.
-- Env/secrets storage, API responses, logs, and screenshots.
-- GitHub webhook signature validation, branch filtering, and replay/dedupe behavior.
-- Docker/Compose/proxy exposure.
-- DNS/domain/HTTPS state truthfulness.
-- Backup file exposure.
-- Notification SSRF/outbound safety.
-- Untrusted dashboard text rendering.
+Security agents should report findings to Routely Lead and should not commit reports unless acting as Lead.

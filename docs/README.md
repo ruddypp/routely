@@ -1,50 +1,27 @@
-# Routely Documentation Index
+# Routely Documentation
 
-Version: 0.2
-Status: Canonical docs reset index
-Last updated: 2026-06-22
+This directory is the canonical product and engineering guide for the Routely MVP reset. The docs now describe the placement-neutral app server: the machine running `routely` is the server.
 
-## Read First
+## Read Order
 
-Routely is an open source, self-hosted, dashboard-first control plane for solo developers running Compose-backed apps locally and on one VPS.
+1. `blueprint.md` — product promise, MVP scope, user flows, and UX contract.
+2. `architecture.md` — target module seams, process model, data model, API shape, and refactor rules.
+3. `frontend.md` — dashboard information architecture, visual direction, page specs, component modules, and frontend execution rules.
+4. `backend.md` — server session, registry, Compose runtime, recipe engine, proxy, databases, observability, logs, terminal, and GitHub provider design.
+5. `implementation-slices.md` — small specialist-ready execution slices in dependency order.
+6. `verification.md` — acceptance gates, smoke checks, automated checks, and definition of done.
+7. `adr/` — architectural decisions that must be respected while building.
+8. `agents/` — team coordination and issue-tracker conventions.
+9. `qa/` and `security/` — current QA/security expectations, not stale alpha reports.
 
-Product promise:
+## Current MVP North Star
 
-```text
-One dashboard to register and operate apps.
-One Start action for every enabled app.
-One Compose-backed model from laptop to VPS.
-```
+`routely` starts a full Routely server session on the current runtime host. The dashboard shows server health, app status, logs, traffic, domains, databases, and guided setup. Enabled apps auto-start; each app can still be stopped, restarted, disabled, inspected, and fixed individually.
 
-New agents should start here:
+## Documentation Rules
 
-1. [Product Brief](./00-product-brief.md)
-2. [Public Alpha Plan](./01-alpha-plan.md)
-3. [Team Execution Plan](./02-team-execution-plan.md)
-4. [Demo Acceptance Plan](./03-demo-acceptance-plan.md)
-5. [Docs Map](./04-docs-map.md)
-
-## Implementation References
-
-- [Architecture Reference](./05-architecture.md)
-- [Interfaces Reference](./06-interfaces.md)
-- [Security And Risk Reference](./07-security-and-risks.md)
-- [Development Setup](./08-development-setup.md)
-- [Current Status](./09-current-status.md)
-- [Implementation Backlog](./10-implementation-backlog.md)
-- [Feature Scope](./11-feature-scope.md)
-- [Product Requirements Document](./12-prd.md)
-- [End-To-End Execution Plan](./13-end-to-end-execution-plan.md)
-
-## Evidence And Operations
-
-- [QA Reports](./qa/README.md) stores fresh public alpha QA reports.
-- [Security Reports](./security/README.md) stores fresh public alpha security findings.
-- `docs/agents/` stores agent workflow support docs that are referenced by `AGENTS.md`.
-
-## Architecture Decision Records
-
-- [ADR 001: Use Docker as Production Runtime](./adr/001-use-docker-as-production-runtime.md)
-- [ADR 002: Use Traefik-Compatible Proxy Model](./adr/002-use-traefik-compatible-proxy-model.md)
-- [ADR 003: Use GitHub App for Repository Access](./adr/003-use-github-app-for-repo-access.md)
-- [ADR 004: Use SQLite for Single-Node State](./adr/004-use-sqlite-for-single-node-state.md)
+- Keep `CONTEXT.md` as glossary only.
+- Keep implementation decisions in `docs/adr/`.
+- Keep product and engineering instructions in the blueprint docs.
+- Do not reintroduce stale demo-specific docs unless they map to the new blueprint.
+- Do not document features as available until they are executable and verified.

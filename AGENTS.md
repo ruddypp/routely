@@ -6,19 +6,37 @@ This version has breaking changes — APIs, conventions, and file structure may 
 
 ## Routely Agent Workflow
 
-When implementing a public alpha slice from `docs/01-alpha-plan.md`, finish owned implementation or planning work with a git commit after verification passes. QA E2E and Security are exceptions: they write reports and hand them to Routely Lead; Lead commits QA/Security reports when appropriate.
+Routely's current source of truth is the MVP blueprint reset:
+
+1. `docs/blueprint.md`
+2. `docs/architecture.md`
+3. `docs/frontend.md`
+4. `docs/backend.md`
+5. `docs/implementation-slices.md`
+6. `docs/verification.md`
+
+When implementing an MVP slice from `docs/implementation-slices.md`, finish owned implementation or planning work with verification, a git commit, and a push when remote access is available and the user has requested push-on-change. QA E2E and Security are exceptions: they write reports and hand them to Routely Lead; Lead commits QA/Security reports when appropriate.
 
 Auto-commit rules:
 
-- Commit only the files changed for the current feature/checkpoint. QA E2E and Security must not commit their own reports.
+- Commit only the files changed for the current feature/checkpoint.
 - Do not include unrelated user changes from the dirty worktree.
 - Run the relevant checks first. At minimum, prefer `npm run lint` and the narrow build/test command for touched workspaces. For broad changes, run `npm run build --workspaces --if-present` when practical.
 - If a relevant check cannot be run or fails for an unrelated reason, document that in the final response and do not hide it in the commit message.
-- Use concise commit messages, for example `feat: add local app logs` or `docs: add implementation checkpoint plan`.
-- If the user explicitly asks not to commit, follow the user's latest instruction.
+- Use concise commit messages, for example `docs: add mvp blueprint` or `feat: add app setup wizard shell`.
+- If the user explicitly asks not to commit or push, follow the user's latest instruction.
 - Never use destructive git commands to prepare a commit. Preserve existing user changes.
 
-## Agent skills
+## Product Rules
+
+- The machine running `routely` is the runtime host/server, whether local or VPS.
+- Docker and Docker Compose are required for the primary MVP runtime.
+- Compose is the primary internal runtime model.
+- Apps must pass setup verification before being marked ready.
+- Backup/restore is deferred until safe and production-grade.
+- Dashboard UI must be an operations dashboard, not a static app list.
+
+## Agent Skills
 
 ### Issue tracker
 
@@ -36,18 +54,8 @@ Routely uses a single-context domain-doc layout with `CONTEXT.md` at the repo ro
 
 Relevant local skills live under `.agents/skills/`: `setup-matt-pocock-skills`, `ask-matt`, `grill-with-docs`, `to-prd`, `to-issues`, `triage`, `domain-modeling`, `codebase-design`, `tdd`, `diagnosing-bugs`, `implement`, `frontend-design`, and `ckm-design-system`.
 
-PM uses the Matt Pocock planning flow for non-trivial product work: `ask-matt` when the route is unclear, `grill-with-docs` style self-interview, `to-prd`, then `to-issues`. See `docs/02-team-execution-plan.md` and `.maestro/prompts/pm.md`.
+PM uses the Matt Pocock planning flow for non-trivial new product work, but current MVP execution should start from `docs/implementation-slices.md`. See `docs/agents/team-workflow.md`.
 
-## Maestro team roles
+## Specialist Roles
 
-Use `docs/agents/team-workflow.md` as the team coordination contract.
-
-Role prompts for Maestro live under `.maestro/prompts/`:
-
-- `routely-lead.md`: user-facing lead, traffic controller, QA/Security report collector, and final bug router.
-- `pm.md`: senior PM planning, PRDs, docs, handoffs, acceptance criteria, and owner-specific dev instructions.
-- `backend.md`: senior backend development for CLI, daemon, packages, storage, API contracts, integrations, and tests.
-- `frontend.md`: senior frontend development for dashboard, Next.js route handlers, UI state integration, and frontend tests.
-- `uiux.md`: senior product design for operational dashboard flows, executable design specs, copy, responsive/accessibility criteria.
-- `qa.md`: end-to-end QA report writer; reports to Lead only and does not commit reports.
-- `security.md`: security QA/trust-boundary report writer; reports to Lead only and does not commit reports.
+Use `docs/agents/team-workflow.md` as the coordination contract when splitting work between PM, UI/UX, Backend, Frontend, QA, and Security specialists.

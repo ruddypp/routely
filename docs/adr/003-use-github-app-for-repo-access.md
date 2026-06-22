@@ -1,21 +1,3 @@
-# ADR 003: Use GitHub App For Repository Access
+# Use GitHub App Access for GitHub Sources
 
-Status: Accepted for MVP
-
-## Decision
-
-Routely will use a GitHub App for repository access and webhooks.
-
-## Rationale
-
-- Better permission model than personal access tokens.
-- Supports private repositories.
-- Supports installation-scoped repository access.
-- Webhooks integrate cleanly with auto deploy.
-
-## Consequences
-
-- Users must install the GitHub App before private repo deploy.
-- Self-hosted open source users need configuration for GitHub App credentials.
-- A simpler repo URL flow can exist for public repositories later.
-
+Routely uses GitHub App style access for connected GitHub repositories so operators can add repositories through guided setup and receive webhook redeploy events with scoped permissions. Local folder sources remain equally valid; GitHub is a source provider, not the only way to add apps.
